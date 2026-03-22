@@ -1,0 +1,24 @@
+[workspace]
+members = [
+    # Members will be added here as we implement the bricks (Brique 0, 2, 4, etc.)
+    # "r2d2-kernel",
+    # "r2d2-secure-mem",
+    # "r2d2-ternary"
+]
+resolver = "2"
+
+[workspace.package]
+version = "8.2.0"
+authors = ["The R2D2 Forge <forge@r2d2.network>"]
+edition = "2021"
+repository = "https://github.com/r2d2-forge/r2d2-core"
+license = "MIT OR Apache-2.0"
+description = "R2D2 Cognitive Operating System (Zero-Trust, Ternary Inference)"
+
+# Industrial-grade release profile
+[profile.release]
+opt-level = 3       # Optimize for maximum speed
+lto = "fat"         # Enable Link-Time Optimization (Fat for max perf)
+codegen-units = 1   # Reduce parallel code generation units to increase optimization
+panic = "abort"     # Abort on panic to reduce binary size and avoid stack unwinding leaks
+strip = true        # Strip symbols from binary to reduce size

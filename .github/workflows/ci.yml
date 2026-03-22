@@ -1,0 +1,55 @@
+name: R2D2 Industrial-Grade CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  style_and_lint:
+    name: "💅 Code Style & Lints (Clippy)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust Toolchain Setup
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Check Formatting
+        run: cargo fmt --all -- --check
+      - name: Clippy (Zero-Warning Policy)
+        # Deny all warnings for industrial grade code
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  test_suite:
+    name: "🧪 Test Suite (Zero-Trust Validation)"
+    runs-on: ubuntu-latest
+    needs: style_and_lint
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust Toolchain Setup
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Run Tests
+        run: cargo test --workspace --all-features
+
+  security_audit:
+    name: "🛡️ Security Audit (rustsec)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust Toolchain Setup
+        uses: dtolnay/rust-toolchain@stable
+      - name: Run Cargo Audit
+        # Uses the community action to check against the RustSec Advisory Database
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
