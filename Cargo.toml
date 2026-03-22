@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    # Members will be added here as we implement the bricks (Brique 0, 2, 4, etc.)
-    # "r2d2-kernel",
-    # "r2d2-secure-mem",
-    # "r2d2-ternary"
+    "r2d2-kernel",
+    "r2d2-secure-mem",
+    "r2d2-jsonai",
+    "r2d2-paradox",
 ]
 resolver = "2"
 

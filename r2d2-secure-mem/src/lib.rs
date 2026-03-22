@@ -9,7 +9,7 @@
 
 use secrecy::{ExposeSecret, SecretBox};
 use thiserror::Error;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
 /// Erreurs liées à la gestion de la mémoire sécurisée.
 #[derive(Debug, Error)]
