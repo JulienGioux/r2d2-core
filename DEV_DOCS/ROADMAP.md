@@ -13,12 +13,13 @@ Ces fondations sont nécessaires pour valider l'inférence locale souveraine et 
 ## Phase 2 : "Conscience et Vérité" (Bêta)
 - [x] **Brique 1 : JSONAI v3.1** - Le format typé strict (`r2d2-jsonai`).
 - [x] **Brique 3 : Paradox Engine** - Le solveur SAT pour le rejet des contradictions (`r2d2-paradox`).
-- [ ] **Brique 7 : Persistance Vectorielle** - Le stockage persistant local (Blackboard).
+- [x] **Brique 7 : Persistance Vectorielle** - Le stockage persistant local (Blackboard).
 
 ## Phase 3 : "Essaim et Expansion" (Release Candidate)
 - [ ] **Brique 5 : Inférence GPU** - Support L40s/RTX (VRAM Optimized KV-Cache).
 - [ ] **Brique 6 : Swarm Network** - Découverte P2P via libp2p.
-- [ ] **Briques 9-10 : MCP Gateway & Chaos Monkey** - Actions sur le système hôte et auto-injection d'entropie (Immunité).
+- [x] **Briques 9 : MCP Gateway** - Canal de communication stdio avec l'extérieur.
+- [ ] **Brique 10 : Chaos Monkey** - Actions sur le système hôte et auto-injection d'entropie (Immunité).
 
 ## Phase 4 : "Écosystème & Forge" (V1.0)
 - [ ] **Brique 13 : Économie Circulaire 1%** - Intégration du système de taxation "Protocol Tax" par Proof of Inference (PoI).

@@ -93,12 +93,17 @@ impl CpuEngine {
     }
 
     /// Pont d'inférence sécurisé
-    pub fn generate_thought(&self, _activations: &[f32; 16]) -> Result<Fragment<Signal>, KernelError> {
+    pub fn generate_thought(
+        &self,
+        _activations: &[f32; 16],
+    ) -> Result<Fragment<Signal>, KernelError> {
         info!("Lancement de la propagation avant (Forward Pass) R2D2 sur CPU...");
 
         // Simulation : Génération du tenseur d'activation (donnée brute) et du bloc de poids
-        let dummy_activations: [f32; 16] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0];
-        
+        let dummy_activations: [f32; 16] = [
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+        ];
+
         // Ex: Poids = [+1, 0, -1, +1, ...]
         // mask_pos = bit 0 et bit 3 (0b0000_1001) = 9
         // mask_neg = bit 2 (0b0000_0100) = 4
@@ -106,24 +111,32 @@ impl CpuEngine {
 
         let final_value = if is_x86_feature_detected!("avx512f") {
             info!("Moteur : Accélération matérielle AVX-512 MathMul-Free [ACTIVÉE]");
-            unsafe { self.forward_avx512(&dummy_activations, &dummy_weights).map_err(|e| KernelError::ValidationFailed(e.to_string()))? }
+            unsafe {
+                self.forward_avx512(&dummy_activations, &dummy_weights)
+                    .map_err(|e| KernelError::ValidationFailed(e.to_string()))?
+            }
         } else if self.allow_simd_fallback {
             warn!("Moteur : AVX-512 non détecté. Bascule sur Fallback AVX2.");
             simd_fallback::forward_avx2(&dummy_activations, &dummy_weights)
         } else {
-            return Err(KernelError::ValidationFailed("Aucun support matériel adequat (AVX-512 manquant et fallback désactivé).".to_string()));
+            return Err(KernelError::ValidationFailed(
+                "Aucun support matériel adequat (AVX-512 manquant et fallback désactivé)."
+                    .to_string(),
+            ));
         };
 
         info!("Pensée brute calculée (Typestate ZMM) : {}", final_value);
 
         // Le payload devient Validated JSONAI
         // L'inférence produit intrinsèquement un axiome !
-        let payload = format!(r#"
+        let payload = format!(
+            r#"
         {{
             "is_fact": false,
             "consensus_level": "DEBATED_SYNTHESIS",
             "content": "L'inférence ternaire CPU produit une valeur scalaire de {final_value}"
-        }}"#);
+        }}"#
+        );
 
         // L'inférence produit un Signal brut qu'il faudra faire valider par le Paradox Engine !
         Ok(Fragment::new(payload))
@@ -145,13 +158,12 @@ mod tests {
     #[test]
     fn test_accumulation_avx2_fallback() {
         let acts: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 
-            9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
         ];
         // Masque pos : Poids aux indices 0 et 3 -> +1
         // Masque neg : Poids à l'index 1 -> -1
         let weights = TernaryBlock16::new(0b0000_1001, 0b0000_0010);
-        
+
         let result = simd_fallback::forward_avx2(&acts, &weights);
         // (1.0 + 4.0) - (2.0) = 3.0
         assert_eq!(result, 3.0);
@@ -162,7 +174,7 @@ mod tests {
         let engine = CpuEngine::new(true); // Avec fallback autorisé
         let acts: [f32; 16] = [1.0; 16];
         let thought = engine.generate_thought(&acts);
-        
+
         // Validation que l'inférence génère bien un Signal sans erreur interne
         assert!(thought.is_ok());
     }
