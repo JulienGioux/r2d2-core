@@ -1,0 +1,33 @@
+   Compiling r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+error[E0509]: cannot move out of type `Signal`, which implements the `Drop` trait
+  --> r2d2-kernel/src/lib.rs:58:26
+   |
+58 |                 payload: self.state.raw_data,
+   |                          ^^^^^^^^^^^^^^^^^^^
+   |                          |
+   |                          cannot move out of here
+   |                          move occurs because `self.state.raw_data` has type `String`, which does not implement the `Copy` trait
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+58 |                 payload: self.state.raw_data.clone(),
+   |                                             ++++++++
+
+error[E0509]: cannot move out of type `Unverified`, which implements the `Drop` trait
+  --> r2d2-kernel/src/lib.rs:73:26
+   |
+73 |                 payload: self.state.payload,
+   |                          ^^^^^^^^^^^^^^^^^^
+   |                          |
+   |                          cannot move out of here
+   |                          move occurs because `self.state.payload` has type `String`, which does not implement the `Copy` trait
+   |
+help: consider cloning the value if the performance cost is acceptable
+   |
+73 |                 payload: self.state.payload.clone(),
+   |                                            ++++++++
+
+For more information about this error, try `rustc --explain E0509`.
+error: could not compile `r2d2-kernel` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `r2d2-kernel` (lib test) due to 2 previous errors

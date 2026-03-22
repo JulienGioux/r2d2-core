@@ -1,0 +1,13 @@
+[package]
+name = "r2d2-secure-mem"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+secrecy = "0.10.3"
+thiserror = "2.0.18"
+zeroize = { version = "1.8.2", features = ["derive"] }

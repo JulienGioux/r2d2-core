@@ -1,0 +1,5 @@
+    Checking zeroize v1.8.2
+    Checking secrecy v0.10.3
+    Checking r2d2-secure-mem v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-secure-mem)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.31s
+

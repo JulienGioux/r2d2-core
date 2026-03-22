@@ -1,0 +1,197 @@
+   Compiling r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+error[E0432]: unresolved import `zeroize`
+ --> r2d2-kernel/src/lib.rs:9:5
+  |
+9 | use zeroize::{Zeroize, ZeroizeOnDrop};
+  |     ^^^^^^^ use of unresolved module or unlinked crate `zeroize`
+  |
+  = help: if you wanted to use a crate named `zeroize`, use `cargo add zeroize` to add it to your `Cargo.toml`
+
+error[E0277]: the trait bound `Validated: zeroize::ZeroizeOnDrop` is not satisfied
+  --> r2d2-kernel/src/lib.rs:83:30
+   |
+83 |     pub fn finalize(self) -> SecureMemGuard<Validated> {
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `zeroize::ZeroizeOnDrop` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::ZeroizeOnDrop`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and 11 others
+note: required by a bound in `SecureMemGuard`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:31:18
+   |
+29 | pub struct SecureMemGuard<T>
+   |            -------------- required by a bound in this struct
+30 | where
+31 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |                  ^^^^^^^^^^^^^ required by this bound in `SecureMemGuard`
+
+error[E0277]: the trait bound `Validated: zeroize::DefaultIsZeroes` is not satisfied
+  --> r2d2-kernel/src/lib.rs:83:30
+   |
+83 |     pub fn finalize(self) -> SecureMemGuard<Validated> {
+   |                              ^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `zeroize::DefaultIsZeroes` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::DefaultIsZeroes`:
+             ()
+             PhantomPinned
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+           and 10 others
+   = note: required for `Validated` to implement `zeroize::Zeroize`
+note: required by a bound in `SecureMemGuard`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:31:8
+   |
+29 | pub struct SecureMemGuard<T>
+   |            -------------- required by a bound in this struct
+30 | where
+31 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |        ^^^^^^^ required by this bound in `SecureMemGuard`
+
+error[E0277]: the trait bound `Validated: zeroize::ZeroizeOnDrop` is not satisfied
+  --> r2d2-kernel/src/lib.rs:84:29
+   |
+84 |         SecureMemGuard::new(self.state)
+   |         ------------------- ^^^^^^^^^^ unsatisfied trait bound
+   |         |
+   |         required by a bound introduced by this call
+   |
+help: the trait `zeroize::ZeroizeOnDrop` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::ZeroizeOnDrop`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and 11 others
+note: required by a bound in `SecureMemGuard::<T>::new`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:39:18
+   |
+39 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |                  ^^^^^^^^^^^^^ required by this bound in `SecureMemGuard::<T>::new`
+...
+56 |     pub fn new(data: T) -> Self {
+   |            --- required by a bound in this associated function
+
+error[E0277]: the trait bound `Validated: zeroize::DefaultIsZeroes` is not satisfied
+  --> r2d2-kernel/src/lib.rs:84:9
+   |
+84 |         SecureMemGuard::new(self.state)
+   |         ^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `zeroize::DefaultIsZeroes` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::DefaultIsZeroes`:
+             ()
+             PhantomPinned
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+           and 10 others
+   = note: required for `Validated` to implement `zeroize::Zeroize`
+note: required by a bound in `SecureMemGuard`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:31:8
+   |
+29 | pub struct SecureMemGuard<T>
+   |            -------------- required by a bound in this struct
+30 | where
+31 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |        ^^^^^^^ required by this bound in `SecureMemGuard`
+
+error[E0277]: the trait bound `Validated: zeroize::ZeroizeOnDrop` is not satisfied
+  --> r2d2-kernel/src/lib.rs:84:9
+   |
+84 |         SecureMemGuard::new(self.state)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `zeroize::ZeroizeOnDrop` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::ZeroizeOnDrop`:
+             ()
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+           and 11 others
+note: required by a bound in `SecureMemGuard`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:31:18
+   |
+29 | pub struct SecureMemGuard<T>
+   |            -------------- required by a bound in this struct
+30 | where
+31 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |                  ^^^^^^^^^^^^^ required by this bound in `SecureMemGuard`
+
+error[E0277]: the trait bound `Validated: zeroize::DefaultIsZeroes` is not satisfied
+  --> r2d2-kernel/src/lib.rs:84:9
+   |
+84 |         SecureMemGuard::new(self.state)
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `zeroize::DefaultIsZeroes` is not implemented for `Validated`
+  --> r2d2-kernel/src/lib.rs:35:1
+   |
+35 | pub struct Validated {
+   | ^^^^^^^^^^^^^^^^^^^^
+   = help: the following other types implement trait `zeroize::DefaultIsZeroes`:
+             ()
+             PhantomPinned
+             bool
+             char
+             f32
+             f64
+             i128
+             i16
+           and 10 others
+   = note: required for `Validated` to implement `zeroize::Zeroize`
+note: required by a bound in `SecureMemGuard`
+  --> /mnt/d/XXXX/R2D2/r2d2-secure-mem/src/lib.rs:31:8
+   |
+29 | pub struct SecureMemGuard<T>
+   |            -------------- required by a bound in this struct
+30 | where
+31 |     T: Zeroize + ZeroizeOnDrop + Clone,
+   |        ^^^^^^^ required by this bound in `SecureMemGuard`
+
+Some errors have detailed explanations: E0277, E0432.
+For more information about an error, try `rustc --explain E0277`.
+error: could not compile `r2d2-kernel` (lib) due to 7 previous errors
