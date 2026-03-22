@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
             .to_string()
     });
 
-    let gateway = McpGateway::new(&db_url).await?;
+    let _gateway = McpGateway::new(&db_url).await?;
     info!("✅ Serveur MCP prêt et connecté au Blackboard PostgreSQL vectoriel.");
 
     // TODO: Initialiser `mcp_rust_sdk::Server` ici.
