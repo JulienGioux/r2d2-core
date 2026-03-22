@@ -61,7 +61,7 @@ impl CpuEngine {
         weights: &TernaryBlock16,
     ) -> Result<f32, InferenceError> {
         // Chargement simultané de 16 flottants dans un registre ZMM 512-bit
-        let vals_zmm = _mm512_loadu_ps(activations.as_ptr() as *const f32);
+        let vals_zmm = _mm512_loadu_ps(activations.as_ptr());
 
         // Accumulateur à 0
         let mut acc_zmm = _mm512_setzero_ps();

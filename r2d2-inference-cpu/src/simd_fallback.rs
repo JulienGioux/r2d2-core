@@ -6,16 +6,16 @@ use crate::TernaryBlock16;
 pub fn forward_avx2(activations: &[f32; 16], weights: &TernaryBlock16) -> f32 {
     let mut sum = 0.0;
 
-    // Accumulation conditionnelle (O(N) scalaire pour démo)
-    for i in 0..16 {
+    // Accumulation conditionnelle scalaire
+    for (i, &act) in activations.iter().enumerate().take(16) {
         // Extraction du i-ème bit du mask_pos
         if (weights.mask_pos & (1 << i)) != 0 {
-            sum += activations[i];
+            sum += act;
         }
 
         // Extraction du i-ème bit du mask_neg
         if (weights.mask_neg & (1 << i)) != 0 {
-            sum -= activations[i];
+            sum -= act;
         }
     }
 
