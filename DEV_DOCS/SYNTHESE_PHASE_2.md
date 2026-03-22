@@ -37,8 +37,8 @@ Bien que la "Moelle Épinière" soit opérationnelle d'un point de vue compilati
 ### Objectif Principal : `r2d2-blackboard` (Brique 7)
 Nous devons construire la Mémoire Long-Terme. Le **Blackboard Pattern** agira comme un bus de données persistant, qui n'accepte *que* des fragments de type `Fragment<Validated>`.
 
-1. **Sélection de la Database** : On va probablement inclure `sqlite` (sauvegarde relationnelle/graphe) ou un moteur vectoriel local embarqué (Qdrant ou LanceDB) dans Rust.
-2. **Conception du Port/Adapter Blackboard** : Implémenter la structure qui récupère la propriété (`Ownership`) du Fragment et l'ancre disque.
+1. **Sélection de la Database** : Selon la doctrine R2D2, nous intégrerons **PostgreSQL 16+ avec l'extension `pgvector`**. Ce choix permet l'utilisation du `JSONB` indexé en `GIN` et la recherche de similarité sémantique via graphe `HNSW` sur 1024 dimensions.
+2. **Conception du Port/Adapter Blackboard** : Implémenter la structure qui récupère la propriété (`Ownership`) du Fragment et délègue l'ancrage relationnel/vectoriel à PostgreSQL.
 
 ### Objectif Secondaire : `r2d2-mcp-gateway` (Briques 9-10)
 Exposer le Kernel à notre interface MCP locale pour que les Assistants externes (comme moi) puissent y écrire les requêtes utilisateur, que le Paradox Engine validera puis balancera au Blackboard.
