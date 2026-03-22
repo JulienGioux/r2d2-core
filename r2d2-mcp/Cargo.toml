@@ -12,6 +12,7 @@ r2d2-kernel = { version = "8.2.0", path = "../r2d2-kernel" }
 r2d2-jsonai = { version = "8.2.0", path = "../r2d2-jsonai" }
 r2d2-paradox = { version = "8.2.0", path = "../r2d2-paradox" }
 r2d2-blackboard = { version = "8.2.0", path = "../r2d2-blackboard" }
+r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
 
 # Dépendances MCP (Serveur)
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
@@ -19,4 +20,5 @@ mcp_rust_sdk = "0.1.1"
 serde_json = "1.0"
 thiserror = "2.0.18"
 tracing = "0.1.44"
+tracing-subscriber = "0.3.18"
 anyhow = "1.0.102"

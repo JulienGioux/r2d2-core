@@ -6,9 +6,8 @@
 
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
-use r2d2_kernel::{Fragment, KernelError, Signal, TruthValidator, Validated};
+use r2d2_kernel::{Fragment, KernelError, Signal};
 use r2d2_paradox::ParadoxSolver;
-use r2d2_secure_mem::SecureMemGuard;
 use tracing::{info, instrument};
 
 /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
@@ -45,7 +44,7 @@ impl McpGateway {
 
         // 3. Soumettre le fragment au Paradox Engine (Typestate 3)
         // La méthode .verify() consomme le fragment et recrache soit Validated soit une Erreur.
-        let validated_fragment = unverified.verify(&self.validator).await?;
+        let validated_fragment = unverified.verify(&self.validator)?;
 
         info!(
             "Pensée de {} vérifiée et certifiée par Parad0x !",
@@ -61,7 +60,7 @@ impl McpGateway {
             .blackboard
             .anchor_fragment(guard)
             .await
-            .map_err(|e| KernelError::ValidationError(e.to_string()))?;
+            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
 
         info!(
             "Ancrage réussi dans le Blackboard vectoriel sous l'ID : {}",

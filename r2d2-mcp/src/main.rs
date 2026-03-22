@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::env;
-use tracing::{error, info, Level};
+use tracing::{info, Level};
 
 // Important: Ce bloc est intentionnellement "Bouchonné" (Stub) sur l'implémentation MCP
 // pour s'assurer que la CI passe même si le SDK mcp_rust_sdk v0.1.1 évolue très vite.
