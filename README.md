@@ -42,7 +42,11 @@ git clone https://github.com/r2d2-forge/r2d2-core.git
 cd r2d2-core
 cargo test --workspace
 ```
-> **Note :** Le dépôt est structuré comme un *Virtual Workspace*. Chaque brique (Kernel, Paradox Engine, Gateway MCP) possèdera sa propre caisse (crate).
+> **Note :** Le dépôt est structuré comme un *Virtual Workspace*. Les Briques fondatrices (Phases 1 et 2) sont déjà intégrées :
+> - `r2d2-secure-mem` (Brique 0) : Zeroization de la RAM.
+> - `r2d2-jsonai` (Brique 1) : Standard de Représentation Sémantique v3.1.
+> - `r2d2-kernel` (Brique 2) : Formalisme par Typestate Strict.
+> - `r2d2-paradox` (Brique 3) : Moteur de Preuve d'Inférence et d'Anti-Hallucination.
 
 ---
 

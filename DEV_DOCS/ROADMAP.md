@@ -6,13 +6,13 @@ La roadmap suit l'implémentation incrémentale des Briques définies dans notre
 
 ## Phase 1 : "La Moelle Épinière" (MVP)
 Ces fondations sont nécessaires pour valider l'inférence locale souveraine et sécurisée.
-- [ ] **Brique 2 : Kernel Logique (Rust)** - L'hyperviseur minimal gérant le cycle de vie de la donnée.
-- [ ] **Brique 0 : SecureMemGuard** - L'isolation (Zeroization) au niveau de la VRAM/RAM.
+- [x] **Brique 2 : Kernel Logique (Rust)** - L'hyperviseur minimal gérant le cycle de vie de la donnée (`r2d2-kernel`).
+- [x] **Brique 0 : SecureMemGuard** - L'isolation (Zeroization) au niveau de la VRAM/RAM (`r2d2-secure-mem`).
 - [ ] **Brique 4 : Inférence CPU Ternaire** - L'implémentation AVX-512 pour l'inférence locale MathMul-Free.
 
 ## Phase 2 : "Conscience et Vérité" (Bêta)
-- [ ] **Brique 1 : JSONAI v3.1** - Le format typé strict.
-- [ ] **Brique 3 : Paradox Engine** - Le solveur SAT pour le rejet des contradictions.
+- [x] **Brique 1 : JSONAI v3.1** - Le format typé strict (`r2d2-jsonai`).
+- [x] **Brique 3 : Paradox Engine** - Le solveur SAT pour le rejet des contradictions (`r2d2-paradox`).
 - [ ] **Brique 7 : Persistance Vectorielle** - Le stockage persistant local (Blackboard).
 
 ## Phase 3 : "Essaim et Expansion" (Release Candidate)
