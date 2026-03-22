@@ -1,0 +1,153 @@
+    Checking zerocopy v0.8.47
+   Compiling serde_derive v1.0.228
+   Compiling ring v0.17.14
+    Checking icu_properties v2.1.2
+   Compiling tokio v1.50.0
+   Compiling futures-util v0.3.32
+   Compiling thiserror-impl v1.0.69
+   Compiling paste v1.0.15
+    Checking sqlformat v0.2.6
+   Compiling md-5 v0.10.6
+    Checking concurrent-queue v2.5.0
+   Compiling byteorder v1.5.0
+   Compiling bitflags v2.11.0
+   Compiling whoami v1.6.1
+    Checking event-listener v2.5.3
+    Checking parking v2.2.1
+   Compiling hex v0.4.3
+   Compiling dotenvy v0.15.7
+    Checking webpki-roots v0.26.11
+    Checking event-listener v5.4.1
+    Checking hashlink v0.10.0
+    Checking secrecy v0.10.3
+    Checking base64 v0.21.7
+    Checking base64 v0.22.1
+   Compiling heck v0.5.0
+    Checking uuid v1.22.0
+    Checking r2d2-secure-mem v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-secure-mem)
+   Compiling async-trait v0.1.89
+    Checking r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+    Checking thiserror v1.0.69
+    Checking serde v1.0.228
+    Checking smallvec v1.15.1
+    Checking either v1.15.0
+    Checking chrono v0.4.44
+    Checking parking_lot_core v0.9.12
+    Checking icu_normalizer v2.1.1
+    Checking ppv-lite86 v0.2.21
+    Checking ahash v0.8.12
+   Compiling parking_lot v0.12.5
+    Checking hashbrown v0.14.5
+    Checking rand_chacha v0.3.1
+   Compiling futures-intrusive v0.5.0
+    Checking idna_adapter v1.2.1
+   Compiling tokio-stream v0.1.18
+    Checking rand v0.8.5
+    Checking r2d2-jsonai v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-jsonai)
+   Compiling idna v1.1.0
+    Checking hashlink v0.8.4
+    Checking r2d2-paradox v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-paradox)
+   Compiling rustls v0.23.37
+    Checking url v2.5.8
+    Checking sqlx-core v0.7.4
+    Checking rustls-webpki v0.103.10
+    Checking sqlx-postgres v0.7.4
+    Checking sqlx-core v0.8.6
+    Checking sqlx v0.7.4
+    Checking pgvector v0.3.4
+    Checking sqlx-postgres v0.8.6
+   Compiling sqlx-macros-core v0.8.6
+   Compiling sqlx-macros v0.8.6
+    Checking sqlx v0.8.6
+    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+warning: unused import: `Fragment`
+  --> r2d2-blackboard/src/lib.rs:12:19
+   |
+12 | use r2d2_kernel::{Fragment, Validated};
+   |                   ^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+error[E0277]: the trait bound `Vector: sqlx::Encode<'_, Postgres>` is not satisfied
+   --> r2d2-blackboard/src/lib.rs:100:15
+    |
+100 |         .bind(default_embedding)
+    |          ---- ^^^^^^^^^^^^^^^^^ the trait `sqlx::Encode<'_, Postgres>` is not implemented for `Vector`
+    |          |
+    |          required by a bound introduced by this call
+    |
+note: there are multiple different versions of crate `sqlx_core` in the dependency graph
+   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/encode.rs:27:1
+    |
+ 27 | pub trait Encode<'q, DB: Database> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the required trait
+    |
+   ::: r2d2-blackboard/src/lib.rs:10:5
+    |
+ 10 | use pgvector::Vector;
+    |     -------- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+...
+ 14 | use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+    |     ---- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+    |
+   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pgvector-0.3.4/src/vector.rs:18:1
+    |
+ 18 | pub struct Vector(pub(crate) Vec<f32>);
+    | ----------------- this type doesn't implement the required trait
+    |
+   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.7.4/src/error.rs:183:1
+    |
+183 | pub trait DatabaseError: 'static + Send + Sync + StdError {
+    | --------------------------------------------------------- this is the found trait
+    = help: you can use `cargo tree` to explore your dependency tree
+note: required by a bound in `Query::<'q, DB, <DB as sqlx::Database>::Arguments<'q>>::bind`
+   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/query.rs:86:25
+    |
+ 86 |     pub fn bind<T: 'q + Encode<'q, DB> + Type<DB>>(mut self, value: T) -> Self {
+    |                         ^^^^^^^^^^^^^^ required by this bound in `Query::<'q, DB, <DB as Database>::Arguments<'q>>::bind`
+
+error[E0277]: the trait bound `Vector: Type<Postgres>` is not satisfied
+   --> r2d2-blackboard/src/lib.rs:100:15
+    |
+100 |         .bind(default_embedding)
+    |          ---- ^^^^^^^^^^^^^^^^^ the trait `Type<Postgres>` is not implemented for `Vector`
+    |          |
+    |          required by a bound introduced by this call
+    |
+note: there are multiple different versions of crate `sqlx_core` in the dependency graph
+   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/types/mod.rs:209:1
+    |
+209 | pub trait Type<DB: Database> {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the required trait
+    |
+   ::: r2d2-blackboard/src/lib.rs:10:5
+    |
+ 10 | use pgvector::Vector;
+    |     -------- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+...
+ 14 | use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+    |     ---- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+    |
+   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pgvector-0.3.4/src/vector.rs:18:1
+    |
+ 18 | pub struct Vector(pub(crate) Vec<f32>);
+    | ----------------- this type doesn't implement the required trait
+    |
+   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.7.4/src/error.rs:183:1
+    |
+183 | pub trait DatabaseError: 'static + Send + Sync + StdError {
+    | --------------------------------------------------------- this is the found trait
+    = help: you can use `cargo tree` to explore your dependency tree
+note: required by a bound in `Query::<'q, DB, <DB as sqlx::Database>::Arguments<'q>>::bind`
+   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/query.rs:86:42
+    |
+ 86 |     pub fn bind<T: 'q + Encode<'q, DB> + Type<DB>>(mut self, value: T) -> Self {
+    |                                          ^^^^^^^^ required by this bound in `Query::<'q, DB, <DB as Database>::Arguments<'q>>::bind`
+help: use a unary tuple instead
+    |
+100 |         .bind((default_embedding,))
+    |               +                 ++
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `r2d2-blackboard` (lib) generated 1 warning
+error: could not compile `r2d2-blackboard` (lib) due to 2 previous errors; 1 warning emitted

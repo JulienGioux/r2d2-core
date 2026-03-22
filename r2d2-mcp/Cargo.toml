@@ -1,0 +1,22 @@
+[package]
+name = "r2d2-mcp"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+r2d2-kernel = { version = "8.2.0", path = "../r2d2-kernel" }
+r2d2-jsonai = { version = "8.2.0", path = "../r2d2-jsonai" }
+r2d2-paradox = { version = "8.2.0", path = "../r2d2-paradox" }
+r2d2-blackboard = { version = "8.2.0", path = "../r2d2-blackboard" }
+
+# Dépendances MCP (Serveur)
+tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
+mcp_rust_sdk = "0.1.1"
+serde_json = "1.0"
+thiserror = "2.0.18"
+tracing = "0.1.44"
+anyhow = "1.0.102"
