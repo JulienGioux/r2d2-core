@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use pgvector::Vector;
 use r2d2_jsonai::JsonAiV3;
-use r2d2_kernel::{Fragment, Validated};
+use r2d2_kernel::Validated;
 use r2d2_secure_mem::SecureMemGuard;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use thiserror::Error;
