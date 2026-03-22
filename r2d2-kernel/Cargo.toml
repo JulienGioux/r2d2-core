@@ -1,0 +1,15 @@
+[package]
+name = "r2d2-kernel"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+anyhow = "1.0.102"
+r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
+thiserror = "2.0.18"
+tracing = "0.1.44"
+zeroize = { version = "1.8.2", features = ["derive"] }

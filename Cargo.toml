@@ -1,9 +1,11 @@
 [workspace]
 members = [
-    "r2d2-kernel",
     "r2d2-secure-mem",
+    "r2d2-kernel",
     "r2d2-jsonai",
     "r2d2-paradox",
+    "r2d2-blackboard",
+    "r2d2-mcp",
 ]
 resolver = "2"
 
