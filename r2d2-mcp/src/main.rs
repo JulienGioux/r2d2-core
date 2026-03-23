@@ -13,9 +13,7 @@ pub fn parse_mcp_request(line: &str) -> Option<(serde_json::Value, String, serde
     let req: serde_json::Value = serde_json::from_str(line).ok()?;
 
     // Si la requête MCP n'a pas de méthode (Ack d'une réponse passée ou malformée), on l'ignore.
-    if req.get("method").is_none() {
-        return None;
-    }
+    req.get("method")?;
 
     let id = req.get("id").cloned().unwrap_or(serde_json::json!(null));
     let method = req.get("method").and_then(|m| m.as_str())?.to_string();
