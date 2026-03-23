@@ -149,7 +149,6 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
             }
             let _ = stdout.flush().await;
         }
-    }
     Ok(())
 }
 
