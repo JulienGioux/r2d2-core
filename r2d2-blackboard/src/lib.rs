@@ -107,3 +107,43 @@ impl GlobalBlackboard for PostgresBlackboard {
         Ok(jsonai.id)
     }
 }
+
+impl PostgresBlackboard {
+    /// Effectue une recherche de similarité vectorielle stricte (HNSW) via pgvector.
+    #[instrument(skip(self, query_embedding))]
+    pub async fn recall_memory(
+        &self,
+        query_embedding: Vector,
+        limit: i64,
+    ) -> Result<Vec<String>, BlackboardError> {
+        info!(
+            "Recherche sémantique HNSW (Top-{}) demandée au Blackboard...",
+            limit
+        );
+
+        // Requête de distance L2 (<->) optimisée par l'index HNSW pgvector
+        // Compilation hors ligne (sans macro sqlx::query!)
+        let rows = sqlx::query(
+            r#"
+            SELECT payload::text as payload_text
+            FROM blackboard_fragments
+            ORDER BY embedding <-> $1
+            LIMIT $2
+            "#,
+        )
+        .bind(query_embedding)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            if let Ok(txt) = row.try_get::<String, _>("payload_text") {
+                results.push(txt);
+            }
+        }
+
+        Ok(results)
+    }
+}
