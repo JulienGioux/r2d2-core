@@ -5,7 +5,7 @@ members = [
     "r2d2-jsonai",
     "r2d2-paradox",
     "r2d2-blackboard",
-    "r2d2-mcp",
+    "r2d2-mcp", "r2d2-cortex",
 ]
 resolver = "2"
 

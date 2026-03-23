@@ -1,0 +1,7 @@
+   Compiling sqlx-postgres v0.8.6
+   Compiling sqlx-macros-core v0.8.6
+   Compiling sqlx-macros v0.8.6
+   Compiling sqlx v0.8.6
+   Compiling pgvector v0.4.1
+   Compiling r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+   Compiling r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)

@@ -1,179 +1,227 @@
 use anyhow::Result;
-use async_trait::async_trait;
-use mcp_rust_sdk::{
-    error::{Error as McpError, ErrorCode},
-    server::{Server, ServerHandler},
-    transport::stdio::StdioTransport,
-    types::{ClientCapabilities, Implementation, ServerCapabilities, Tool},
-};
 use r2d2_mcp::McpGateway;
 use serde_json::json;
 use std::env;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-use tracing::{info, Level};
+use tracing::{info, error, Level};
 
-struct R2d2Handler {
-    gateway: Arc<Mutex<McpGateway>>,
+/// Déstructure un payload stérile (String) en une requête JSON-RPC valide (id, method, args).
+/// Retourne None si la ligne n'est pas une commande exécutable (ex: Un simple ACK).
+pub fn parse_mcp_request(line: &str) -> Option<(serde_json::Value, String, serde_json::Value)> {
+    let req: serde_json::Value = serde_json::from_str(line).ok()?;
+    
+    // Si la requête MCP n'a pas de méthode (Ack d'une réponse passée ou malformée), on l'ignore.
+    if req.get("method").is_none() {
+        return None;
+    }
+
+    let id = req.get("id").cloned().unwrap_or(serde_json::json!(null));
+    let method = req.get("method").and_then(|m| m.as_str())?.to_string();
+
+    Some((id, method, req))
 }
 
-#[async_trait]
-impl ServerHandler for R2d2Handler {
-    async fn initialize(
-        &self,
-        _implementation: Implementation,
-        _capabilities: ClientCapabilities,
-    ) -> Result<ServerCapabilities, McpError> {
-        info!("Handshake MCP d'initialisation reçu !");
-        Ok(ServerCapabilities { custom: None })
-    }
+/// Boucle principale : Lit le Stdin ligne par ligne (Non-bloquant), analyse le JSON-RPC,
+/// requiert au Gateway de faire le travail, puis crache la réponse sérialisée sur Stdout.
+pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> {
+    let stdin = tokio::io::stdin();
+    let mut reader = tokio::io::BufReader::new(stdin).lines();
+    let mut stdout = tokio::io::stdout();
 
-    async fn shutdown(&self) -> Result<(), McpError> {
-        info!("Arrêt demandé par le client MCP.");
-        std::process::exit(0);
-    }
+    while let Ok(Some(line)) = reader.next_line().await {
+        let (id, method, req) = match parse_mcp_request(&line) {
+            Some(parsed) => parsed,
+            None => continue,
+        };
 
-    async fn handle_method(
-        &self,
-        method: &str,
-        params: Option<serde_json::Value>,
-    ) -> Result<serde_json::Value, McpError> {
-        match method {
-            "tools/list" => {
-                let tools = vec![
-                    Tool {
-                        name: "anchor_thought".to_string(),
-                        description: "Force le R2D2 Kernel à analyser une proposition via le ParadoxSolver et à l'ancrer dans sa matrice vectorielle permanente si elle est intrinsèquement ou contextuellement valide.".to_string(),
-                        schema: json!({
-                            "type": "object",
-                            "properties": {
-                                "content": {
-                                    "type": "string",
-                                    "description": "Le texte brut de la pensée ou de l'analyse à ingérer."
-                                },
-                                "agent_name": {
-                                    "type": "string",
-                                    "description": "Le nom de l'agent IA à l'origine de cette pensée."
+        let result = match method.as_str() {
+            "initialize" => {
+                    info!("Handshake MCP d'initialisation reçu !");
+                    json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "serverInfo": {
+                            "name": "R2D2-Gateway",
+                            "version": "8.2.0"
+                        }
+                    })
+                }
+                "tools/list" => {
+                    json!({
+                        "tools": [
+                            {
+                                "name": "anchor_thought",
+                                "description": "Force le R2D2 Kernel à analyser une proposition via le ParadoxSolver et à l'ancrer dans sa matrice.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "content": {
+                                            "type": "string",
+                                            "description": "Le texte brut de la pensée ou de l'analyse à ingérer."
+                                        },
+                                        "agent_name": {
+                                            "type": "string",
+                                            "description": "Le nom de l'agent IA à l'origine de cette pensée."
+                                        }
+                                    },
+                                    "required": ["content", "agent_name"]
                                 }
                             },
-                            "required": ["content", "agent_name"]
-                        }),
-                    },
-                    Tool {
-                        name: "recall_memory".to_string(),
-                        description: "Recherche sémantique vectorielle dans le Blackboard R2D2 pour exhumer les souvenirs, règles et axiomes passés.".to_string(),
-                        schema: json!({
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "La question ou les mots-clés sémantiques de recherche."
+                            {
+                                "name": "recall_memory",
+                                "description": "Recherche sémantique vectorielle dans le Blackboard R2D2 pour exhumer les souvenirs.",
+                                "inputSchema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {
+                                            "type": "string",
+                                            "description": "La question ou les mots-clés sémantiques de recherche."
+                                        }
+                                    },
+                                    "required": ["query"]
                                 }
-                            },
-                            "required": ["query"]
-                        }),
-                    }
-                ];
+                            }
+                        ]
+                    })
+                }
+                "tools/call" => {
+                    let default_params = json!({});
+                    let params = req.get("params").unwrap_or(&default_params);
+                    let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let args = params.get("arguments").cloned().unwrap_or_default();
 
-                Ok(json!({ "tools": tools }))
-            }
-            "tools/call" => {
-                let params = params.unwrap_or_default();
-                let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let args = params.get("arguments").cloned().unwrap_or_default();
+                    match name {
+                        "anchor_thought" => {
+                            let content = args.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                            let agent_name = args.get("agent_name").and_then(|a| a.as_str()).unwrap_or("Unknown");
+                            let gw = gateway.lock().await;
 
-                match name {
-                    "anchor_thought" => {
-                        let content = args.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let agent_name = args
-                            .get("agent_name")
-                            .and_then(|a| a.as_str())
-                            .unwrap_or("Unknown");
+                            match gw.ingest_thought("McpTool", agent_name, content.to_string()).await {
+                                Ok(frag_id) => json!({
+                                    "content": [{ "type": "text", "text": format!("Pensée ingérée avec succès : {}", frag_id) }]
+                                }),
+                                Err(e) => json!({
+                                    "content": [{ "type": "text", "text": format!("Échec du typestate : {}", e) }],
+                                    "isError": true
+                                }),
+                            }
+                        }
+                        "recall_memory" => {
+                            let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+                            let gw = gateway.lock().await;
 
-                        let gateway = self.gateway.lock().await;
-
-                        match gateway
-                            .ingest_thought(agent_name, content, "".to_string())
-                            .await
-                        {
-                            Ok(id) => Ok(json!({
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": format!("Pensée ingérée avec succès par le Kernel sous le fragment ID : {}", id)
-                                    }
-                                ]
-                            })),
-                            Err(e) => Ok(json!({
-                                "content": [
-                                    {
-                                        "type": "text",
-                                        "text": format!("Échec du typestate (Contradiction Logique ParadoxSolver) : {}", e)
-                                    }
-                                ],
+                            match gw.search_memory(query).await {
+                                Ok(mem_result) => json!({
+                                    "content": [{ "type": "text", "text": mem_result }]
+                                }),
+                                Err(e) => json!({
+                                    "content": [{ "type": "text", "text": format!("Erreur système Blackboard : {}", e) }],
+                                    "isError": true
+                                }),
+                            }
+                        }
+                        _ => {
+                            json!({
+                                "content": [{ "type": "text", "text": "Tool inconnu" }],
                                 "isError": true
-                            })),
+                            })
                         }
                     }
-                    "recall_memory" => {
-                        let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
-
-                        // Fake vector search for Brique 9 until Brique 7 embeddings logic is fully bridged in Gateway
-                        let result = format!("(Simulation) Souvenirs exhumés pour : {}", query);
-
-                        Ok(json!({
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": result
-                                }
-                            ]
-                        }))
-                    }
-                    _ => Err(McpError::protocol(
-                        ErrorCode::MethodNotFound,
-                        "Tool inconnu",
-                    )),
                 }
+                "ping" => json!({}),
+                _ => continue, // Ignore other methods natively (notifications, cancel)
+            };
+
+            // Émission stricte vers STDOUT pour le protocole JSON-RPC
+            let response = json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "result": result
+            });
+
+            let mut out = serde_json::to_string(&response).unwrap();
+            out.push('\n');
+            if let Err(e) = stdout.write_all(out.as_bytes()).await {
+                error!("Erreur STDOUT critique: {}", e);
+                break;
             }
-            _ => Err(McpError::protocol(
-                ErrorCode::MethodNotFound,
-                "Méthode JSON-RPC non supportée par R2D2",
-            )),
+            let _ = stdout.flush().await;
         }
     }
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stderr) // Crucial: STDERR pour ne pas polluer STDOUT
+        .with_ansi(false)
+        .with_max_level(Level::INFO)
+        .init();
 
-    info!("Démarrage R2D2 MCP Gateway (Brique 9 - Unstubbed)...");
+    info!("Démarrage R2D2 MCP Gateway (Brique 9 - Native Stdio Mode)...");
 
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard"
-            .to_string()
+        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard".to_string()
     });
 
     let gateway = McpGateway::new(&db_url).await?;
     let gateway_arc = Arc::new(Mutex::new(gateway));
 
-    info!("✅ Passerelle Connectée au Blackboard Vectoriel.");
-
-    let (transport, _sender) = StdioTransport::new();
-    let handler = R2d2Handler {
-        gateway: gateway_arc,
-    };
-
-    let server = Server::new(Arc::new(transport), Arc::new(handler));
-
-    info!("✅ Serveur Stdio MCP 0.1.1 opérationnel, transmission via stdin/stdout ouverte.");
-
-    // Le serveur bloque et gère le flux JSON-RPC jusqu'à exit
-    server
-        .start()
-        .await
-        .map_err(|e| anyhow::anyhow!("Erreur serveur MCP: {}", e))?;
+    info!("✅ Serveur Natif MCP (JSON-RPC) opérationnel. Écoute sur Stdin.");
+    
+    if let Err(e) = run_native_mcp_loop(gateway_arc).await {
+        error!("Crash sévère de la boucle MCP : {}", e);
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_valid_mcp_initialize() {
+        let payload = r#"{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "Claude Desktop", "version": "0.1"}}}"#;
+        
+        let parsed = parse_mcp_request(payload);
+        assert!(parsed.is_some());
+        
+        let (id, method, req) = parsed.unwrap();
+        assert_eq!(id, json!(1));
+        assert_eq!(method, "initialize");
+        assert!(req.get("params").is_some());
+    }
+
+    #[test]
+    fn test_parse_valid_mcp_tool_call() {
+        let payload = r#"{"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {"name": "anchor_thought", "arguments": {"content": "Hello World", "agent_name": "Test"}}}"#;
+        
+        let parsed = parse_mcp_request(payload);
+        assert!(parsed.is_some());
+        
+        let (id, method, req) = parsed.unwrap();
+        assert_eq!(id, json!(42));
+        assert_eq!(method, "tools/call");
+        assert_eq!(req.get("params").unwrap().get("name").unwrap().as_str().unwrap(), "anchor_thought");
+    }
+
+    #[test]
+    fn test_ignore_ack_notification() {
+        // Les envois de ACK sans méthode doivent être ignorés.
+        let payload = r#"{"jsonrpc": "2.0", "id": 1, "result": {}}"#;
+        let parsed = parse_mcp_request(payload);
+        assert!(parsed.is_none());
+    }
+
+    #[test]
+    fn test_ignore_malformed_json() {
+        let payload = r#"{"jsonrpc": "2.0", "id: 1}"#;
+        let parsed = parse_mcp_request(payload);
+        assert!(parsed.is_none());
+    }
 }

@@ -1,0 +1,71 @@
+   Compiling smallvec v1.15.1
+   Compiling http v1.4.0
+   Compiling parking_lot_core v0.9.12
+   Compiling icu_normalizer v2.1.1
+   Compiling atomic-waker v1.1.2
+   Compiling pin-utils v0.1.0
+   Compiling parking_lot v0.12.5
+   Compiling sync_wrapper v1.0.2
+   Compiling tower-layer v0.3.3
+   Compiling iri-string v0.7.11
+   Compiling dirs-sys v0.5.0
+   Compiling socks v0.3.4
+   Compiling tokio v1.50.0
+   Compiling futures-intrusive v0.5.0
+   Compiling unicode-normalization-alignments v0.1.12
+   Compiling idna_adapter v1.2.1
+   Compiling tracing-subscriber v0.3.23
+   Compiling http-body v1.0.1
+   Compiling idna v1.1.0
+   Compiling http-body-util v0.1.3
+   Compiling dirs v6.0.0
+   Compiling tokenizers v0.19.1
+   Compiling url v2.5.8
+   Compiling tungstenite v0.20.1
+   Compiling ureq v2.12.1
+   Compiling sqlx-core v0.8.6
+   Compiling tokio-util v0.7.18
+   Compiling tokio-native-tls v0.3.1
+   Compiling tokio-stream v0.1.18
+   Compiling tower v0.5.3
+   Compiling sqlx-postgres v0.8.6
+   Compiling tokio-tungstenite v0.20.1
+   Compiling h2 v0.4.13
+   Compiling tower-http v0.6.8
+   Compiling mcp_rust_sdk v0.1.1
+   Compiling hyper v1.8.1
+   Compiling sqlx-macros-core v0.8.6
+   Compiling hyper-util v0.1.20
+   Compiling sqlx-macros v0.8.6
+   Compiling hyper-tls v0.6.0
+   Compiling reqwest v0.12.28
+   Compiling hf-hub v0.4.3
+   Compiling r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
+   Compiling sqlx v0.8.6
+warning: unused import: `api::tokio::Api`
+  --> r2d2-cortex/src/models/minilm_embedder.rs:10:14
+   |
+10 | use hf_hub::{api::tokio::Api, Repo, RepoType};
+   |              ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling pgvector v0.4.1
+   Compiling r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+   Compiling r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)
+warning: `r2d2-cortex` (lib) generated 1 warning (run `cargo fix --lib -p r2d2-cortex` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 58.04s
+     Running `target/debug/r2d2-mcp`
+2026-03-23T21:09:39.499928Z  INFO r2d2_mcp: Démarrage R2D2 MCP Gateway (Brique 9 - Unstubbed)...
+2026-03-23T21:09:39.589724Z  INFO r2d2_mcp: Initialisation du Registre Cortex (Plug & Play)...
+2026-03-23T21:09:39.593505Z  INFO r2d2_cortex::registry: Agent 'Multilingual-E5-Small' inséré dans le Registre Cortex (Dormant).
+2026-03-23T21:09:39.594014Z  INFO activate{target_name="Multilingual-E5-Small"}: r2d2_cortex::registry: CortexRegistry : Phase de Purge Mémoire...
+2026-03-23T21:09:39.594201Z  INFO activate{target_name="Multilingual-E5-Small"}: r2d2_cortex::registry: Chargement lourd des tenseurs de 'Multilingual-E5-Small'...
+2026-03-23T21:09:39.595572Z  INFO activate{target_name="Multilingual-E5-Small"}:load: r2d2_cortex::models::minilm_embedder: 🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent 'Multilingual-E5-Small'
+2026-03-23T21:09:39.656630Z  INFO activate{target_name="Multilingual-E5-Small"}:load: r2d2_cortex::models::minilm_embedder:    [CORTEX] Résolution des poids Safetensors...
+2026-03-23T21:09:39.660153Z  INFO activate{target_name="Multilingual-E5-Small"}:load: r2d2_cortex::models::minilm_embedder:    [CORTEX] Résolution du dictionnaire Tokenizer...
+2026-03-23T21:09:40.090171Z  INFO activate{target_name="Multilingual-E5-Small"}:load: r2d2_cortex::models::minilm_embedder:    [CORTEX] Montage de la structure Tensorielle en RAM...
+2026-03-23T21:09:43.183218Z  INFO activate{target_name="Multilingual-E5-Small"}:load: r2d2_cortex::models::minilm_embedder: 🛡️ [CORTEX] Agent 'Multilingual-E5-Small' Chargé & Opérationnel.
+2026-03-23T21:09:43.183707Z  INFO activate{target_name="Multilingual-E5-Small"}: r2d2_cortex::registry: Agent 'Multilingual-E5-Small' 100% On-Line en RAM.
+2026-03-23T21:09:43.183930Z  INFO r2d2_mcp: ✅ Passerelle Connectée au Blackboard Vectoriel.
+2026-03-23T21:09:43.185339Z  INFO r2d2_mcp: ✅ Serveur Stdio MCP 0.1.1 opérationnel, transmission via stdin/stdout ouverte.
