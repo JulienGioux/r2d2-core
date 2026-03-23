@@ -69,4 +69,31 @@ impl McpGateway {
 
         Ok(saved_id)
     }
+
+    /// Outil de recherche HNSW sur la mémoire vectorielle.
+    #[instrument(skip(self))]
+    pub async fn search_memory(&self, _query: &str) -> Result<String, KernelError> {
+        info!("MCP a demandé une exhumation mémorielle : {}", _query);
+
+        // TODO (Brique 5) : Encoder la "_query" via un vrai modèle d'embedding local.
+        // Simulons un vecteur vide pour tester la plomberie SQL HNSW pgvector.
+        let dummy_embedding = pgvector::Vector::from(vec![0.0; 1024]);
+
+        let results = self
+            .blackboard
+            .recall_memory(dummy_embedding, 5)
+            .await
+            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
+
+        if results.is_empty() {
+            return Ok("Aucun souvenir pertinent trouvé dans le Blackboard.".to_string());
+        }
+
+        let mut output = String::new();
+        for (i, res) in results.iter().enumerate() {
+            output.push_str(&format!("[Souvenir {}]: {}\n", i + 1, res));
+        }
+
+        Ok(output)
+    }
 }

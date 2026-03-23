@@ -118,17 +118,27 @@ impl ServerHandler for R2d2Handler {
                     "recall_memory" => {
                         let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
 
-                        // Fake vector search for Brique 9 until Brique 7 embeddings logic is fully bridged in Gateway
-                        let result = format!("(Simulation) Souvenirs exhumés pour : {}", query);
+                        let gateway = self.gateway.lock().await;
 
-                        Ok(json!({
-                            "content": [
-                                {
-                                    "type": "text",
-                                    "text": result
-                                }
-                            ]
-                        }))
+                        match gateway.search_memory(query).await {
+                            Ok(result) => Ok(json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": result
+                                    }
+                                ]
+                            })),
+                            Err(e) => Ok(json!({
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": format!("Erreur système Blackboard : {}", e)
+                                    }
+                                ],
+                                "isError": true
+                            })),
+                        }
                     }
                     _ => Err(McpError::protocol(
                         ErrorCode::MethodNotFound,

@@ -1,0 +1,17 @@
+    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+error: set `DATABASE_URL` to use query macros online, or run `cargo sqlx prepare` to update the query cache
+   --> r2d2-blackboard/src/lib.rs:123:20
+    |
+123 |           let rows = sqlx::query!(
+    |  ____________________^
+124 | |             r#"
+125 | |             SELECT payload::text as payload_text
+126 | |             FROM blackboard_fragments
+...   |
+131 | |             limit
+132 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: could not compile `r2d2-blackboard` (lib) due to 1 previous error
