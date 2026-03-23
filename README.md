@@ -42,11 +42,14 @@ git clone https://github.com/r2d2-forge/r2d2-core.git
 cd r2d2-core
 cargo test --workspace
 ```
-> **Note :** Le dépôt est structuré comme un *Virtual Workspace*. Les Briques fondatrices (Phases 1 et 2) sont déjà intégrées :
+> **Note :** Le dépôt est structuré en *Virtual Workspace*. Les Briques fondatrices sont déjà opérationnelles :
 > - `r2d2-secure-mem` (Brique 0) : Zeroization de la RAM.
 > - `r2d2-jsonai` (Brique 1) : Standard de Représentation Sémantique v3.1.
 > - `r2d2-kernel` (Brique 2) : Formalisme par Typestate Strict.
-> - `r2d2-paradox` (Brique 3) : Moteur de Preuve d'Inférence et d'Anti-Hallucination.
+> - `r2d2-paradox` (Brique 3) : Moteur de Preuve d'Inférence Anti-Hallucination.
+> - `r2d2-cortex` (Brique 4) : Moteur Tensoriel Local (Candle) chargeant `Multilingual-E5-Small` avec Zero-Padding 1024D.
+> - `r2d2-blackboard` (Brique 7) : Indexation PostgreSQL vectorielle HNSW.
+> - `r2d2-mcp` (Brique 9) : Gateway Native JSON-RPC sur Stdio (Zéro Dépendance réseau).
 
 ---
 
@@ -62,16 +65,45 @@ Notre code est critique (Défense, Finance, Systèmes Souverains). Lisez attenti
 
 ## 🗺️ Architecture de Haut Niveau
 
-L'essaim est un agencement de 14 Briques (0 à 13). Pour la vue complète, consultez l'[Audit Technique de Cohérence (ATC)](./DEV_DOCS/ATC_R2D2.md).
+L'essaim R2D2 est un agencement modulaire strict de 14 Briques. L'intégration récente du Cortex (Tensor/Local) et de la Gateway MCP rend le système autonome et sécure.
 
 ```mermaid
 graph TD;
-    Signal[Brute Signal] -->|Ingestion| Brique1(JSONAI v3.1);
+    LLM[Agent Externe / Claude / Gemini] -->|Stdio JSON-RPC| Brique9(Gateway MCP);
+    Brique9 -->|Ingestion| Brique1(JSONAI v3.1);
     Brique1 -->|Unverified| Brique3(Paradox Engine);
+    Brique3 <-->|Embeddings E5 1024D| Brique4(Cortex Local);
     Brique3 -->|Consensus| Brique2(Kernel & Blackboard);
-    Brique2 -->|Validated| Brique7(Vector DB Persistance);
-    Brique2 -->|Action| Brique9(Gateway MCP);
+    Brique2 -->|Validated| Brique7(Vector DB PostgreSQL HNSW);
 ```
+
+---
+
+## 🔌 Intégration LLM / Éditeur (Guide MCP)
+
+Vous pouvez lier **n'importe quel agent d'IA** (Claude Desktop, Cursor, Gemini) à R2D2 via le protocole ouvert MCP (Model Context Protocol). L'Essaim tournant sous WSL, le pont Windows/Fedora est natif, étanche, et sans latence HTTP !
+
+Pour donner la mémoire absolue à votre IA, ajoutez ceci à votre fichier `mcp_config.json` (Ex: `%APPDATA%/Claude/claude_desktop_config.json` ou `~/.gemini/mcp_config.json`) :
+
+```json
+{
+  "mcpServers": {
+    "r2d2-blackboard": {
+      "command": "wsl.exe",
+      "args": [
+        "--",
+        "bash",
+        "-c",
+        "cd /mnt/d/VOTRE_CHEMIN/R2D2 && source ~/.cargo/env && RUST_LOG=info cargo run -q -p r2d2-mcp"
+      ]
+    }
+  }
+}
+```
+
+Redémarrez votre éditeur, et voici les pouvoirs débloqués :
+- `anchor_thought` : Fait glisser la réflexion de l'IA vers le moteur tensoriel E5 puis dans PostgreSQL.
+- `recall_memory` : Effectue un *Similarity Cosine Search* dans le Blackboard à vitesse maximale pour exhumer toute architecture passée.
 
 ---
 
