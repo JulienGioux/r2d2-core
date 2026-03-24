@@ -31,7 +31,7 @@ impl BitLinear {
         flat_weights: &[i8],
         bias: Option<Tensor>,
     ) -> candle_core::Result<Self> {
-        if in_features % 16 != 0 {
+        if !in_features.is_multiple_of(16) {
             candle_core::bail!("Architectural Constraint: in_features ({}) doit être un multiple de 16 pour l'alignement intrinsèque.", in_features);
         }
 
@@ -107,12 +107,12 @@ impl Module for BitLinear {
                     // ⚡ EXÉCUTION ZERO-BRANCH STRICTE
                     // Conformément aux documents d'ingénierie (Brique 5), on évite tout saut
                     // conditionnel qui détruirait le pipeline du Warp GPU / du pipeline CPU Zen.
-                    for bit in 0..16 {
+                    for (bit, &x_val) in x_chunk.iter().enumerate().take(16) {
                         let is_pos = ((pos_mask >> bit) & 1) as f32;
                         let is_neg = ((neg_mask >> bit) & 1) as f32;
 
                         // FMA Logic-Only : +1, -1, ou Silence 0 pour économiser les Watts.
-                        acc += (is_pos - is_neg) * x_chunk[bit];
+                        acc += (is_pos - is_neg) * x_val;
                     }
                 }
                 out_vec.push(acc);
@@ -159,12 +159,8 @@ mod tests {
         // Activations: Un batch de 1 x 16
         // [1.0, 1.0, 1.0, 1.0, ...]
         let mut xs_data = vec![0.0f32; 16];
-        for i in 0..4 {
-            xs_data[i] = 1.0;
-        } // S'aligne sur les 1
-        for i in 8..12 {
-            xs_data[i] = 2.0;
-        } // S'aligne sur les -1
+        xs_data[0..4].fill(1.0); // S'aligne sur les 1
+        xs_data[8..12].fill(2.0); // S'aligne sur les -1
 
         let xs = Tensor::from_vec(xs_data, &[1, 16], &Device::Cpu)?;
         let ys = layer.forward(&xs)?;
