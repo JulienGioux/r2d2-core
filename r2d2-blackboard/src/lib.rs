@@ -8,7 +8,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use pgvector::Vector;
-use r2d2_jsonai::JsonAiV3;
+use r2d2_jsonai::{ConsensusLevel, JsonAiV3};
 use r2d2_kernel::Validated;
 use r2d2_secure_mem::SecureMemGuard;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
@@ -144,5 +144,67 @@ impl PostgresBlackboard {
         }
 
         Ok(results)
+    }
+
+    /// Exhume les mémoires n'ayant pas encore atteint le consensus final.
+    /// Idéal pour le Cycle Circadien (Moteur MCTS).
+    #[instrument(skip(self))]
+    pub async fn fetch_unconsolidated_memories(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<JsonAiV3>, BlackboardError> {
+        info!("Exhumation nocturne demandée (Limite: {})", limit);
+
+        let rows = sqlx::query(
+            r#"
+            SELECT payload::text as payload_text
+            FROM blackboard_fragments
+            WHERE consensus_level != 'ConsensusReached'
+            ORDER BY timestamp ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            if let Ok(txt) = row.try_get::<String, _>("payload_text") {
+                if let Ok(jsonai) = serde_json::from_str(&txt) {
+                    results.push(jsonai);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Met à jour le niveau de consensus d'un fragment existant (Cristallisation).
+    #[instrument(skip(self))]
+    pub async fn update_consensus_level(
+        &self,
+        id: &str,
+        new_level: ConsensusLevel,
+    ) -> Result<(), BlackboardError> {
+        info!(
+            "Mise à jour du consensus pour le fragment {} -> {:?}",
+            id, new_level
+        );
+
+        sqlx::query(
+            r#"
+            UPDATE blackboard_fragments
+            SET consensus_level = $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(format!("{:?}", new_level))
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }

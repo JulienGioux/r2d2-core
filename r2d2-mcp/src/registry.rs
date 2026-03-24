@@ -62,6 +62,22 @@ impl ToolRegistry {
             requires_hitl: false,
         });
 
+        // Brique 8: Cycle Circadien
+        self.register(McpToolDef {
+            name: "read_dreams".to_string(),
+            description:
+                "Lire les déductions logiques forgées par le Moteur Circadien pendant la nuit."
+                    .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "number", "description": "Nombre de rêves à remonter" }
+                },
+                "required": ["limit"]
+            }),
+            requires_hitl: false,
+        });
+
         // Nouvel outil testant le HITL
         self.register(McpToolDef {
             name: "delete_memory_cluster".to_string(),
