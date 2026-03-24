@@ -1,8 +1,7 @@
-
---STDERR--
     Checking r2d2-bitnet v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-bitnet)
+    Checking r2d2-inference-cpu v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-inference-cpu)
     Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
-    Checking r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)
+    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
 error[E0433]: failed to resolve: use of undeclared type `BitSelfAttention`
   --> r2d2-bitnet/src/model.rs:68:29
    |
@@ -28,5 +27,3 @@ help: consider importing this struct through its public re-export
 For more information about this error, try `rustc --explain E0433`.
 error: could not compile `r2d2-bitnet` (lib) due to 2 previous errors
 warning: build failed, waiting for other jobs to finish...
-
-Exit code: 101
