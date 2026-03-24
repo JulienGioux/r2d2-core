@@ -1,6 +1,6 @@
+use r2d2_mcp::client::McpUniversalClient;
 use r2d2_mcp::proxy::SemanticProxy;
 use r2d2_mcp::registry::ToolRegistry;
-use r2d2_mcp::client::McpUniversalClient;
 use serde_json::json;
 
 #[tokio::test]
@@ -11,7 +11,11 @@ async fn test_tool_registry() {
     assert!(registry.exists("delete_memory_cluster"));
 
     let mcp_format = registry.export_mcp_format();
-    let tools_array = mcp_format.get("tools").expect("tools key missing").as_array().unwrap();
+    let tools_array = mcp_format
+        .get("tools")
+        .expect("tools key missing")
+        .as_array()
+        .unwrap();
     assert_eq!(tools_array.len(), 3);
 }
 
@@ -19,11 +23,13 @@ async fn test_tool_registry() {
 async fn test_semantic_proxy_block_destructive() {
     let proxy = SemanticProxy::new();
 
-    // R2D2_DISABLE_HITL est utilisé dans hitl.rs pour by-passer lors des tests CI, 
+    // R2D2_DISABLE_HITL est utilisé dans hitl.rs pour by-passer lors des tests CI,
     // mais par défaut il risque de bloquer ou accepter selon la var d'environnement
     // On va juste s'assurer que ça ne panique pas et retourne un Résultat
-    let result = proxy.audit_tool_call("delete_database", "EvilAgent", &json!({})).await;
-    
+    let result = proxy
+        .audit_tool_call("delete_database", "EvilAgent", &json!({}))
+        .await;
+
     match result {
         Ok(allowed) => {
             // Si le HITL auto-accept est à 1, ça peut être true. Sinon false.
@@ -39,7 +45,10 @@ async fn test_semantic_proxy_block_destructive() {
 #[tokio::test]
 async fn test_semantic_proxy_allow_safe() {
     let proxy = SemanticProxy::new();
-    let result = proxy.audit_tool_call("harmless_search", "GoodAgent", &json!({})).await.unwrap();
+    let result = proxy
+        .audit_tool_call("harmless_search", "GoodAgent", &json!({}))
+        .await
+        .unwrap();
     assert!(result, "Le proxy doit autoriser les commandes inoffensives");
 }
 

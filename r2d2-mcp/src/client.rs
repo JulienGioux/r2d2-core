@@ -69,9 +69,9 @@ impl McpUniversalClient {
         // Attente de la réponse
         let mut line = String::new();
         self.stdout.read_line(&mut line).await?;
-        
+
         if line.is_empty() {
-             anyhow::bail!("Connexion MCP perdue (EOF)");
+            anyhow::bail!("Connexion MCP perdue (EOF)");
         }
 
         let res: Value = serde_json::from_str(&line)
