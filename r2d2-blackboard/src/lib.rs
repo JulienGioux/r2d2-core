@@ -46,8 +46,7 @@ impl PostgresBlackboard {
     pub async fn new(database_url: &str) -> Result<Self, BlackboardError> {
         let pool = PgPoolOptions::new()
             .max_connections(20) // Idéal pour le Swarm R2D2 en local.
-            .connect(database_url)
-            .await
+            .connect_lazy(database_url)
             .map_err(|e| BlackboardError::ConnectionError(e.to_string()))?;
 
         Ok(Self { pool })
