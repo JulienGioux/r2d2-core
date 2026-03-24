@@ -1,0 +1,17 @@
+    Checking reqwest v0.12.28
+    Checking candle-transformers v0.8.4
+    Checking hf-hub v0.4.3
+    Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
+    Checking r2d2-sensory v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-sensory)
+warning: field `cortex` is never read
+  --> r2d2-sensory/src/gateway.rs:14:5
+   |
+13 | pub struct SensoryGateway {
+   |            -------------- field in this struct
+14 |     cortex: Arc<CortexRegistry>,
+   |     ^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `r2d2-sensory` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.64s
