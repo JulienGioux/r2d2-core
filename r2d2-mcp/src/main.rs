@@ -167,14 +167,15 @@ async fn main() -> Result<()> {
     info!("Démarrage R2D2 MCP Gateway (Brique 9 - Native Stdio Mode)...");
 
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard".to_string()
+        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard"
+            .to_string()
     });
 
     let gateway = McpGateway::new(&db_url).await?;
     let gateway_arc = Arc::new(Mutex::new(gateway));
 
     info!("✅ Serveur Natif MCP (JSON-RPC) opérationnel. Écoute sur Stdin.");
-    
+
     if let Err(e) = run_native_mcp_loop(gateway_arc).await {
         error!("Crash sévère de la boucle MCP : {}", e);
     }
@@ -190,10 +191,10 @@ mod tests {
     #[test]
     fn test_parse_valid_mcp_initialize() {
         let payload = r#"{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "Claude Desktop", "version": "0.1"}}}"#;
-        
+
         let parsed = parse_mcp_request(payload);
         assert!(parsed.is_some());
-        
+
         let (id, method, req) = parsed.unwrap();
         assert_eq!(id, json!(1));
         assert_eq!(method, "initialize");
@@ -203,10 +204,10 @@ mod tests {
     #[test]
     fn test_parse_valid_mcp_tool_call() {
         let payload = r#"{"jsonrpc": "2.0", "id": 42, "method": "tools/call", "params": {"name": "anchor_thought", "arguments": {"content": "Hello World", "agent_name": "Test"}}}"#;
-        
+
         let parsed = parse_mcp_request(payload);
         assert!(parsed.is_some());
-        
+
         let (id, method, req) = parsed.unwrap();
         assert_eq!(id, json!(42));
         assert_eq!(method, "tools/call");

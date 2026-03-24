@@ -24,12 +24,16 @@ impl TernaryBlock16 {
     }
 
     /// Construit un bloc Dual-Mask à partir d'un fragment de 16 valeurs `i8`.
-    /// 
+    ///
     /// # Panics
     /// Panique en mode debug si le slice ne contient pas exactement 16 éléments,
     /// ou si une valeur est en dehors de l'espace dimensionnel `{-1, 0, 1}`.
     pub fn from_i8_slice(weights: &[i8]) -> Self {
-        debug_assert_eq!(weights.len(), 16, "Un TernaryBlock nécessite exactement 16 poids");
+        debug_assert_eq!(
+            weights.len(),
+            16,
+            "Un TernaryBlock nécessite exactement 16 poids"
+        );
 
         let mut m_pos = 0u16;
         let mut m_neg = 0u16;
@@ -76,10 +80,7 @@ mod tests {
 
     #[test]
     fn test_valid_ternary_block() {
-        let weights: [i8; 16] = [
-            1, 0, -1, 1, 0, 0, -1, 1,
-            -1, 0, 1, 0, -1, 1, 0, -1
-        ];
+        let weights: [i8; 16] = [1, 0, -1, 1, 0, 0, -1, 1, -1, 0, 1, 0, -1, 1, 0, -1];
 
         let block = TernaryBlock16::from_i8_slice(&weights);
         assert!(block.is_valid());

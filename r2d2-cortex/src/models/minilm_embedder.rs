@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use tracing::{info, instrument};
 
 // Importations Candle et Tokenizer
-use candle_core::{Device, Tensor, IndexOp};
+use candle_core::{Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{Repo, RepoType};
@@ -24,8 +24,8 @@ impl MiniLmEmbedderAgent {
     pub fn new() -> Self {
         // En forçant le mode CPU, l'Architecte garantit que l'agent consommera la RAM classique
         // et n'entamera pas la VRAM, tout en restant extrêmement rapide de par sa taille native.
-        let device = Device::Cpu; 
-        
+        let device = Device::Cpu;
+
         Self {
             name: "Multilingual-E5-Small".to_string(),
             device,
@@ -43,10 +43,13 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
-        info!("🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'", self.name);
+        info!(
+            "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
+            self.name
+        );
 
-        let api = hf_hub::api::tokio::Api::new()
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api =
+            hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             "intfloat/multilingual-e5-small".to_string(),
             RepoType::Model,
@@ -82,12 +85,12 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
             .map_err(|e| AgentError::LoadError(e.to_string()))?;
         let config: Config = serde_json::from_str(&config_str)
             .map_err(|e| AgentError::LoadError(format!("JSON Error: {}", e)))?;
-            
+
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], DTYPE, &self.device) }
             .map_err(|e| AgentError::LoadError(e.to_string()))?;
-            
-        let model = BertModel::load(vb, &config)
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+
+        let model =
+            BertModel::load(vb, &config).map_err(|e| AgentError::LoadError(e.to_string()))?;
 
         // Ancrage dans la structure (Agent Actif)
         self.tokenizer = Some(tokenizer);
@@ -98,7 +101,10 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.", self.name);
+        info!(
+            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            self.name
+        );
         self.model = None;
         self.tokenizer = None;
         Ok(())
@@ -121,13 +127,13 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
         let tokens = tokenizer
             .encode(e5_prompt, true)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
-        
+
         let token_ids = tokens.get_ids().to_vec();
         let token_tensor = Tensor::new(token_ids.as_slice(), &self.device)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?
             .unsqueeze(0)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
-            
+
         let token_type_ids = token_tensor.zeros_like().unwrap();
 
         // 2. Propagation Avant (Forward Pass)
@@ -136,7 +142,8 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
         // Extract L2 vector
-        let cls_embedding = embeddings.i((0, 0, ..))
+        let cls_embedding = embeddings
+            .i((0, 0, ..))
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
         let mut vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
@@ -150,7 +157,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
             vec_f32.resize(1024, 0.0);
         }
 
-        // Format R2D2: On exporte sous format JSON array un simple string 
+        // Format R2D2: On exporte sous format JSON array un simple string
         // pour qu'il s'interface avec la fonction SQL de Blackboard
         let str_export = serde_json::to_string(&vec_f32).unwrap();
 

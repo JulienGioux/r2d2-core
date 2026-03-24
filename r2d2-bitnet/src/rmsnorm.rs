@@ -22,12 +22,12 @@ impl Module for RmsNorm {
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         let x_dtype = xs.dtype();
         let internal_dtype = candle_core::DType::F32;
-        
+
         let xs_f32 = xs.to_dtype(internal_dtype)?;
         // Normalisation stricte de la variance (mean des carrés)
         let variance = xs_f32.sqr()?.mean_keepdim(candle_core::D::Minus1)?;
         let norm_x = xs_f32.broadcast_div(&(variance + self.eps)?.sqrt()?)?;
-        
+
         // Retour au type d'origine et application des poids de scaling
         let out = norm_x.to_dtype(x_dtype)?;
         out.broadcast_mul(&self.weight)

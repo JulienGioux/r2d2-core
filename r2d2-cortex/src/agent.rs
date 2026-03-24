@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use thiserror::Error;
 use std::path::PathBuf;
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AgentError {
@@ -16,7 +16,7 @@ pub enum AgentError {
 }
 
 /// Contrat strict imposé à chaque Agent Local (Plug & Play)
-/// 
+///
 /// Tout agent (Qwen, Llama, MiniLM) doit se plier à cette interface.
 /// L'Architecte exige une soumission absolue de l'IA aux cycles de vie OS.
 #[async_trait]

@@ -1,7 +1,7 @@
-use candle_core::{Module, Result, Tensor};
-use crate::rmsnorm::RmsNorm;
 use crate::attention::BitSelfAttention;
 use crate::ffn::BitFFN;
+use crate::rmsnorm::RmsNorm;
+use candle_core::{Module, Result, Tensor};
 use tracing::instrument;
 
 /// 🏛️ `BitTransformerBlock`
