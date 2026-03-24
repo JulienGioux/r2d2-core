@@ -1,0 +1,2 @@
+    Checking r2d2-circadian v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-circadian)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.03s
