@@ -1,0 +1,20 @@
+[package]
+name = "r2d2-inference-cpu"
+version = "8.2.0"
+edition = "2021"
+description = "Brique 4 : Moteur d'inférence MathMul-Free BitNet b1.58 optimisé AVX-512"
+authors = ["Architect Rusty <rusty@r2d2.network>"]
+
+[dependencies]
+r2d2-kernel = { version = "8.2.0", path = "../r2d2-kernel" }
+r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
+
+# Erreurs et Sécurité Mémoire
+thiserror = "2.0.18"
+zeroize = { version = "1.8", features = ["derive"] }
+
+# Log et Observabilité (Tracing)
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread"] }

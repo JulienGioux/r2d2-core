@@ -5,17 +5,15 @@ use std::env;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-use tracing::{info, error, Level};
+use tracing::{error, info, Level};
 
 /// Déstructure un payload stérile (String) en une requête JSON-RPC valide (id, method, args).
 /// Retourne None si la ligne n'est pas une commande exécutable (ex: Un simple ACK).
 pub fn parse_mcp_request(line: &str) -> Option<(serde_json::Value, String, serde_json::Value)> {
     let req: serde_json::Value = serde_json::from_str(line).ok()?;
-    
+
     // Si la requête MCP n'a pas de méthode (Ack d'une réponse passée ou malformée), on l'ignore.
-    if req.get("method").is_none() {
-        return None;
-    }
+    req.get("method")?;
 
     let id = req.get("id").cloned().unwrap_or(serde_json::json!(null));
     let method = req.get("method").and_then(|m| m.as_str())?.to_string();
@@ -38,117 +36,122 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
 
         let result = match method.as_str() {
             "initialize" => {
-                    info!("Handshake MCP d'initialisation reçu !");
-                    json!({
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "serverInfo": {
-                            "name": "R2D2-Gateway",
-                            "version": "8.2.0"
-                        }
-                    })
-                }
-                "tools/list" => {
-                    json!({
-                        "tools": [
-                            {
-                                "name": "anchor_thought",
-                                "description": "Force le R2D2 Kernel à analyser une proposition via le ParadoxSolver et à l'ancrer dans sa matrice.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "content": {
-                                            "type": "string",
-                                            "description": "Le texte brut de la pensée ou de l'analyse à ingérer."
-                                        },
-                                        "agent_name": {
-                                            "type": "string",
-                                            "description": "Le nom de l'agent IA à l'origine de cette pensée."
-                                        }
+                info!("Handshake MCP d'initialisation reçu !");
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "serverInfo": {
+                        "name": "R2D2-Gateway",
+                        "version": "8.2.0"
+                    }
+                })
+            }
+            "tools/list" => {
+                json!({
+                    "tools": [
+                        {
+                            "name": "anchor_thought",
+                            "description": "Force le R2D2 Kernel à analyser une proposition via le ParadoxSolver et à l'ancrer dans sa matrice.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "content": {
+                                        "type": "string",
+                                        "description": "Le texte brut de la pensée ou de l'analyse à ingérer."
                                     },
-                                    "required": ["content", "agent_name"]
-                                }
-                            },
-                            {
-                                "name": "recall_memory",
-                                "description": "Recherche sémantique vectorielle dans le Blackboard R2D2 pour exhumer les souvenirs.",
-                                "inputSchema": {
-                                    "type": "object",
-                                    "properties": {
-                                        "query": {
-                                            "type": "string",
-                                            "description": "La question ou les mots-clés sémantiques de recherche."
-                                        }
-                                    },
-                                    "required": ["query"]
-                                }
+                                    "agent_name": {
+                                        "type": "string",
+                                        "description": "Le nom de l'agent IA à l'origine de cette pensée."
+                                    }
+                                },
+                                "required": ["content", "agent_name"]
                             }
-                        ]
-                    })
-                }
-                "tools/call" => {
-                    let default_params = json!({});
-                    let params = req.get("params").unwrap_or(&default_params);
-                    let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                    let args = params.get("arguments").cloned().unwrap_or_default();
-
-                    match name {
-                        "anchor_thought" => {
-                            let content = args.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                            let agent_name = args.get("agent_name").and_then(|a| a.as_str()).unwrap_or("Unknown");
-                            let gw = gateway.lock().await;
-
-                            match gw.ingest_thought("McpTool", agent_name, content.to_string()).await {
-                                Ok(frag_id) => json!({
-                                    "content": [{ "type": "text", "text": format!("Pensée ingérée avec succès : {}", frag_id) }]
-                                }),
-                                Err(e) => json!({
-                                    "content": [{ "type": "text", "text": format!("Échec du typestate : {}", e) }],
-                                    "isError": true
-                                }),
+                        },
+                        {
+                            "name": "recall_memory",
+                            "description": "Recherche sémantique vectorielle dans le Blackboard R2D2 pour exhumer les souvenirs.",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {
+                                        "type": "string",
+                                        "description": "La question ou les mots-clés sémantiques de recherche."
+                                    }
+                                },
+                                "required": ["query"]
                             }
                         }
-                        "recall_memory" => {
-                            let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
-                            let gw = gateway.lock().await;
+                    ]
+                })
+            }
+            "tools/call" => {
+                let default_params = json!({});
+                let params = req.get("params").unwrap_or(&default_params);
+                let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                let args = params.get("arguments").cloned().unwrap_or_default();
 
-                            match gw.search_memory(query).await {
-                                Ok(mem_result) => json!({
-                                    "content": [{ "type": "text", "text": mem_result }]
-                                }),
-                                Err(e) => json!({
-                                    "content": [{ "type": "text", "text": format!("Erreur système Blackboard : {}", e) }],
-                                    "isError": true
-                                }),
-                            }
-                        }
-                        _ => {
-                            json!({
-                                "content": [{ "type": "text", "text": "Tool inconnu" }],
+                match name {
+                    "anchor_thought" => {
+                        let content = args.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                        let agent_name = args
+                            .get("agent_name")
+                            .and_then(|a| a.as_str())
+                            .unwrap_or("Unknown");
+                        let gw = gateway.lock().await;
+
+                        match gw
+                            .ingest_thought("McpTool", agent_name, content.to_string())
+                            .await
+                        {
+                            Ok(frag_id) => json!({
+                                "content": [{ "type": "text", "text": format!("Pensée ingérée avec succès : {}", frag_id) }]
+                            }),
+                            Err(e) => json!({
+                                "content": [{ "type": "text", "text": format!("Échec du typestate : {}", e) }],
                                 "isError": true
-                            })
+                            }),
                         }
                     }
+                    "recall_memory" => {
+                        let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+                        let gw = gateway.lock().await;
+
+                        match gw.search_memory(query).await {
+                            Ok(mem_result) => json!({
+                                "content": [{ "type": "text", "text": mem_result }]
+                            }),
+                            Err(e) => json!({
+                                "content": [{ "type": "text", "text": format!("Erreur système Blackboard : {}", e) }],
+                                "isError": true
+                            }),
+                        }
+                    }
+                    _ => {
+                        json!({
+                            "content": [{ "type": "text", "text": "Tool inconnu" }],
+                            "isError": true
+                        })
+                    }
                 }
-                "ping" => json!({}),
-                _ => continue, // Ignore other methods natively (notifications, cancel)
-            };
-
-            // Émission stricte vers STDOUT pour le protocole JSON-RPC
-            let response = json!({
-                "jsonrpc": "2.0",
-                "id": id,
-                "result": result
-            });
-
-            let mut out = serde_json::to_string(&response).unwrap();
-            out.push('\n');
-            if let Err(e) = stdout.write_all(out.as_bytes()).await {
-                error!("Erreur STDOUT critique: {}", e);
-                break;
             }
-            let _ = stdout.flush().await;
+            "ping" => json!({}),
+            _ => continue, // Ignore other methods natively (notifications, cancel)
+        };
+
+        // Émission stricte vers STDOUT pour le protocole JSON-RPC
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": result
+        });
+
+        let mut out = serde_json::to_string(&response).unwrap();
+        out.push('\n');
+        if let Err(e) = stdout.write_all(out.as_bytes()).await {
+            error!("Erreur STDOUT critique: {}", e);
+            break;
         }
+        let _ = stdout.flush().await;
     }
     Ok(())
 }
@@ -207,7 +210,15 @@ mod tests {
         let (id, method, req) = parsed.unwrap();
         assert_eq!(id, json!(42));
         assert_eq!(method, "tools/call");
-        assert_eq!(req.get("params").unwrap().get("name").unwrap().as_str().unwrap(), "anchor_thought");
+        assert_eq!(
+            req.get("params")
+                .unwrap()
+                .get("name")
+                .unwrap()
+                .as_str()
+                .unwrap(),
+            "anchor_thought"
+        );
     }
 
     #[test]
