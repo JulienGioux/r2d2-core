@@ -35,6 +35,12 @@ impl MiniLmEmbedderAgent {
     }
 }
 
+impl Default for MiniLmEmbedderAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl CognitiveAgent for MiniLmEmbedderAgent {
     fn name(&self) -> &str {

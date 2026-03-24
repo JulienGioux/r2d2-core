@@ -21,7 +21,15 @@ impl CortexRegistry {
             agents: RwLock::new(HashMap::new()),
         }
     }
+}
 
+impl Default for CortexRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CortexRegistry {
     /// Ajoute dynamiquement un nouvel agent (Plugin) à la bibliothèque.
     /// L'agent est stocké à l'état dormant (non chargé en RAM).
     pub async fn register_agent(&self, agent: Box<dyn CognitiveAgent>) {
