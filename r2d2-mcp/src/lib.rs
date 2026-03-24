@@ -6,22 +6,42 @@
 
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
+use r2d2_cortex::{
+    agent::AgentError, models::minilm_embedder::MiniLmEmbedderAgent, CortexRegistry,
+};
 use r2d2_kernel::{Fragment, KernelError, Signal};
 use r2d2_paradox::ParadoxSolver;
+use std::sync::Arc;
 use tracing::{info, instrument};
 
 /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
 pub struct McpGateway {
     validator: ParadoxSolver,
     blackboard: PostgresBlackboard,
+    cortex: Arc<CortexRegistry>,
 }
 
 impl McpGateway {
     pub async fn new(db_url: &str) -> Result<Self> {
         let blackboard = PostgresBlackboard::new(db_url).await?;
+
+        info!("Initialisation du Registre Cortex (Plug & Play)...");
+        let cortex = Arc::new(CortexRegistry::new());
+
+        // Configuration de l'Agent d'Embedding par défaut
+        let embedder = Box::new(MiniLmEmbedderAgent::new());
+        cortex.register_agent(embedder).await;
+
+        // Activation immédiate pour charger les poids en RAM (Hot-Load)
+        cortex
+            .activate("Multilingual-E5-Small")
+            .await
+            .map_err(|e: AgentError| anyhow::anyhow!(e))?;
+
         Ok(Self {
             validator: ParadoxSolver,
             blackboard,
+            cortex,
         })
     }
 
@@ -75,13 +95,23 @@ impl McpGateway {
     pub async fn search_memory(&self, _query: &str) -> Result<String, KernelError> {
         info!("MCP a demandé une exhumation mémorielle : {}", _query);
 
-        // TODO (Brique 5) : Encoder la "_query" via un vrai modèle d'embedding local.
-        // Simulons un vecteur vide pour tester la plomberie SQL HNSW pgvector.
-        let dummy_embedding = pgvector::Vector::from(vec![0.0; 1024]);
+        // Appel souverain au Cortex pour générer le vecteur d'Embedding localement !
+        let vec_json = self
+            .cortex
+            .interact_with("Multilingual-E5-Small", _query)
+            .await
+            .map_err(|e| KernelError::ValidationFailed(format!("Cortex Error: {}", e)))?;
+
+        // Le JSON est un array standard désérialisé en Rust
+        let embed_vec: Vec<f32> = serde_json::from_str(&vec_json)
+            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
+
+        // Transformation en tenseur SQL pgvector (Dimension 384)
+        let vector = pgvector::Vector::from(embed_vec);
 
         let results = self
             .blackboard
-            .recall_memory(dummy_embedding, 5)
+            .recall_memory(vector, 5)
             .await
             .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
 

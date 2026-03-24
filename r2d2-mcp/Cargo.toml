@@ -13,6 +13,7 @@ r2d2-jsonai = { version = "8.2.0", path = "../r2d2-jsonai" }
 r2d2-paradox = { version = "8.2.0", path = "../r2d2-paradox" }
 r2d2-blackboard = { version = "8.2.0", path = "../r2d2-blackboard" }
 r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
+r2d2-cortex = { version = "8.2.0", path = "../r2d2-cortex" }
 
 # Dépendances MCP (Serveur)
 tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }

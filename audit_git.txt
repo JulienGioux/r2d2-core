@@ -1,0 +1,426 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 0047e0c..0e1e9ae 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -5,7 +5,7 @@ members = [
+     "r2d2-jsonai",
+     "r2d2-paradox",
+     "r2d2-blackboard",
+-    "r2d2-mcp",
++    "r2d2-mcp", "r2d2-cortex",
+ ]
+ resolver = "2"
+ 
+@@ -23,4 +23,4 @@ opt-level = 3       # Optimize for maximum speed
+ lto = "fat"         # Enable Link-Time Optimization (Fat for max perf)
+ codegen-units = 1   # Reduce parallel code generation units to increase optimization
+ panic = "abort"     # Abort on panic to reduce binary size and avoid stack unwinding leaks
+-strip = true        # Strip symbols from binary to reduce size
+\ No newline at end of file
++strip = true        # Strip symbols from binary to reduce size
+diff --git a/build.sh b/build.sh
+deleted file mode 100644
+index 8ccbc5d..0000000
+--- a/build.sh
++++ /dev/null
+@@ -1 +0,0 @@
+-cargo build --workspace --color never > error.log 2>&1
+diff --git a/cargo_out.txt b/cargo_out.txt
+deleted file mode 100644
+index 9861a13..0000000
+--- a/cargo_out.txt
++++ /dev/null
+@@ -1,153 +0,0 @@
+-    Checking zerocopy v0.8.47
+-   Compiling serde_derive v1.0.228
+-   Compiling ring v0.17.14
+-    Checking icu_properties v2.1.2
+-   Compiling tokio v1.50.0
+-   Compiling futures-util v0.3.32
+-   Compiling thiserror-impl v1.0.69
+-   Compiling paste v1.0.15
+-    Checking sqlformat v0.2.6
+-   Compiling md-5 v0.10.6
+-    Checking concurrent-queue v2.5.0
+-   Compiling byteorder v1.5.0
+-   Compiling bitflags v2.11.0
+-   Compiling whoami v1.6.1
+-    Checking event-listener v2.5.3
+-    Checking parking v2.2.1
+-   Compiling hex v0.4.3
+-   Compiling dotenvy v0.15.7
+-    Checking webpki-roots v0.26.11
+-    Checking event-listener v5.4.1
+-    Checking hashlink v0.10.0
+-    Checking secrecy v0.10.3
+-    Checking base64 v0.21.7
+-    Checking base64 v0.22.1
+-   Compiling heck v0.5.0
+-    Checking uuid v1.22.0
+-    Checking r2d2-secure-mem v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-secure-mem)
+-   Compiling async-trait v0.1.89
+-    Checking r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+-    Checking thiserror v1.0.69
+-    Checking serde v1.0.228
+-    Checking smallvec v1.15.1
+-    Checking either v1.15.0
+-    Checking chrono v0.4.44
+-    Checking parking_lot_core v0.9.12
+-    Checking icu_normalizer v2.1.1
+-    Checking ppv-lite86 v0.2.21
+-    Checking ahash v0.8.12
+-   Compiling parking_lot v0.12.5
+-    Checking hashbrown v0.14.5
+-    Checking rand_chacha v0.3.1
+-   Compiling futures-intrusive v0.5.0
+-    Checking idna_adapter v1.2.1
+-   Compiling tokio-stream v0.1.18
+-    Checking rand v0.8.5
+-    Checking r2d2-jsonai v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-jsonai)
+-   Compiling idna v1.1.0
+-    Checking hashlink v0.8.4
+-    Checking r2d2-paradox v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-paradox)
+-   Compiling rustls v0.23.37
+-    Checking url v2.5.8
+-    Checking sqlx-core v0.7.4
+-    Checking rustls-webpki v0.103.10
+-    Checking sqlx-postgres v0.7.4
+-    Checking sqlx-core v0.8.6
+-    Checking sqlx v0.7.4
+-    Checking pgvector v0.3.4
+-    Checking sqlx-postgres v0.8.6
+-   Compiling sqlx-macros-core v0.8.6
+-   Compiling sqlx-macros v0.8.6
+-    Checking sqlx v0.8.6
+-    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+-warning: unused import: `Fragment`
+-  --> r2d2-blackboard/src/lib.rs:12:19
+-   |
+-12 | use r2d2_kernel::{Fragment, Validated};
+-   |                   ^^^^^^^^
+-   |
+-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+-
+-error[E0277]: the trait bound `Vector: sqlx::Encode<'_, Postgres>` is not satisfied
+-   --> r2d2-blackboard/src/lib.rs:100:15
+-    |
+-100 |         .bind(default_embedding)
+-    |          ---- ^^^^^^^^^^^^^^^^^ the trait `sqlx::Encode<'_, Postgres>` is not implemented for `Vector`
+-    |          |
+-    |          required by a bound introduced by this call
+-    |
+-note: there are multiple different versions of crate `sqlx_core` in the dependency graph
+-   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/encode.rs:27:1
+-    |
+- 27 | pub trait Encode<'q, DB: Database> {
+-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the required trait
+-    |
+-   ::: r2d2-blackboard/src/lib.rs:10:5
+-    |
+- 10 | use pgvector::Vector;
+-    |     -------- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+-...
+- 14 | use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+-    |     ---- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+-    |
+-   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pgvector-0.3.4/src/vector.rs:18:1
+-    |
+- 18 | pub struct Vector(pub(crate) Vec<f32>);
+-    | ----------------- this type doesn't implement the required trait
+-    |
+-   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.7.4/src/error.rs:183:1
+-    |
+-183 | pub trait DatabaseError: 'static + Send + Sync + StdError {
+-    | --------------------------------------------------------- this is the found trait
+-    = help: you can use `cargo tree` to explore your dependency tree
+-note: required by a bound in `Query::<'q, DB, <DB as sqlx::Database>::Arguments<'q>>::bind`
+-   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/query.rs:86:25
+-    |
+- 86 |     pub fn bind<T: 'q + Encode<'q, DB> + Type<DB>>(mut self, value: T) -> Self {
+-    |                         ^^^^^^^^^^^^^^ required by this bound in `Query::<'q, DB, <DB as Database>::Arguments<'q>>::bind`
+-
+-error[E0277]: the trait bound `Vector: Type<Postgres>` is not satisfied
+-   --> r2d2-blackboard/src/lib.rs:100:15
+-    |
+-100 |         .bind(default_embedding)
+-    |          ---- ^^^^^^^^^^^^^^^^^ the trait `Type<Postgres>` is not implemented for `Vector`
+-    |          |
+-    |          required by a bound introduced by this call
+-    |
+-note: there are multiple different versions of crate `sqlx_core` in the dependency graph
+-   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/types/mod.rs:209:1
+-    |
+-209 | pub trait Type<DB: Database> {
+-    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ this is the required trait
+-    |
+-   ::: r2d2-blackboard/src/lib.rs:10:5
+-    |
+- 10 | use pgvector::Vector;
+-    |     -------- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+-...
+- 14 | use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+-    |     ---- one version of crate `sqlx_core` used here, as a dependency of crate `sqlx`
+-    |
+-   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/pgvector-0.3.4/src/vector.rs:18:1
+-    |
+- 18 | pub struct Vector(pub(crate) Vec<f32>);
+-    | ----------------- this type doesn't implement the required trait
+-    |
+-   ::: /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.7.4/src/error.rs:183:1
+-    |
+-183 | pub trait DatabaseError: 'static + Send + Sync + StdError {
+-    | --------------------------------------------------------- this is the found trait
+-    = help: you can use `cargo tree` to explore your dependency tree
+-note: required by a bound in `Query::<'q, DB, <DB as sqlx::Database>::Arguments<'q>>::bind`
+-   --> /home/jGx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-core-0.8.6/src/query.rs:86:42
+-    |
+- 86 |     pub fn bind<T: 'q + Encode<'q, DB> + Type<DB>>(mut self, value: T) -> Self {
+-    |                                          ^^^^^^^^ required by this bound in `Query::<'q, DB, <DB as Database>::Arguments<'q>>::bind`
+-help: use a unary tuple instead
+-    |
+-100 |         .bind((default_embedding,))
+-    |               +                 ++
+-
+-For more information about this error, try `rustc --explain E0277`.
+-warning: `r2d2-blackboard` (lib) generated 1 warning
+-error: could not compile `r2d2-blackboard` (lib) due to 2 previous errors; 1 warning emitted
+diff --git a/debug_ci.sh b/debug_ci.sh
+deleted file mode 100644
+index dbb6785..0000000
+--- a/debug_ci.sh
++++ /dev/null
+@@ -1,2 +0,0 @@
+-cargo clippy --workspace --all-targets --all-features -- -D warnings > clippy_out.txt 2>&1
+-cargo test --workspace > test_out.txt 2>&1
+diff --git a/r2d2-mcp/Cargo.toml b/r2d2-mcp/Cargo.toml
+index 73d1f29..1b60a43 100644
+--- a/r2d2-mcp/Cargo.toml
++++ b/r2d2-mcp/Cargo.toml
+@@ -13,6 +13,7 @@ r2d2-jsonai = { version = "8.2.0", path = "../r2d2-jsonai" }
+ r2d2-paradox = { version = "8.2.0", path = "../r2d2-paradox" }
+ r2d2-blackboard = { version = "8.2.0", path = "../r2d2-blackboard" }
+ r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
++r2d2-cortex = { version = "8.2.0", path = "../r2d2-cortex" }
+ 
+ # Dépendances MCP (Serveur)
+ tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
+diff --git a/r2d2-mcp/src/lib.rs b/r2d2-mcp/src/lib.rs
+index 9d08cf1..07539e1 100644
+--- a/r2d2-mcp/src/lib.rs
++++ b/r2d2-mcp/src/lib.rs
+@@ -6,22 +6,37 @@
+ 
+ use anyhow::Result;
+ use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
++use r2d2_cortex::{CortexRegistry, models::minilm_embedder::MiniLmEmbedderAgent, agent::AgentError};
+ use r2d2_kernel::{Fragment, KernelError, Signal};
+ use r2d2_paradox::ParadoxSolver;
++use std::sync::Arc;
+ use tracing::{info, instrument};
+ 
+ /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
+ pub struct McpGateway {
+     validator: ParadoxSolver,
+     blackboard: PostgresBlackboard,
++    cortex: Arc<CortexRegistry>,
+ }
+ 
+ impl McpGateway {
+     pub async fn new(db_url: &str) -> Result<Self> {
+         let blackboard = PostgresBlackboard::new(db_url).await?;
++        
++        info!("Initialisation du Registre Cortex (Plug & Play)...");
++        let cortex = Arc::new(CortexRegistry::new());
++        
++        // Configuration de l'Agent d'Embedding par défaut
++        let embedder = Box::new(MiniLmEmbedderAgent::new());
++        cortex.register_agent(embedder).await;
++
++        // Activation immédiate pour charger les poids en RAM (Hot-Load)
++        cortex.activate("Multilingual-E5-Small").await.map_err(|e: AgentError| anyhow::anyhow!(e))?;
++
+         Ok(Self {
+             validator: ParadoxSolver,
+             blackboard,
++            cortex,
+         })
+     }
+ 
+@@ -75,13 +90,20 @@ impl McpGateway {
+     pub async fn search_memory(&self, _query: &str) -> Result<String, KernelError> {
+         info!("MCP a demandé une exhumation mémorielle : {}", _query);
+ 
+-        // TODO (Brique 5) : Encoder la "_query" via un vrai modèle d'embedding local.
+-        // Simulons un vecteur vide pour tester la plomberie SQL HNSW pgvector.
+-        let dummy_embedding = pgvector::Vector::from(vec![0.0; 1024]);
++        // Appel souverain au Cortex pour générer le vecteur d'Embedding localement !
++        let vec_json = self.cortex.interact_with("Multilingual-E5-Small", _query).await
++            .map_err(|e| KernelError::ValidationFailed(format!("Cortex Error: {}", e)))?;
++
++        // Le JSON est un array standard désérialisé en Rust
++        let embed_vec: Vec<f32> = serde_json::from_str(&vec_json)
++            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
++
++        // Transformation en tenseur SQL pgvector (Dimension 384)
++        let vector = pgvector::Vector::from(embed_vec);
+ 
+         let results = self
+             .blackboard
+-            .recall_memory(dummy_embedding, 5)
++            .recall_memory(vector, 5)
+             .await
+             .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
+ 
+diff --git a/r2d2-mcp/src/main.rs b/r2d2-mcp/src/main.rs
+index 929ab7d..f621d12 100644
+--- a/r2d2-mcp/src/main.rs
++++ b/r2d2-mcp/src/main.rs
+@@ -156,7 +156,11 @@ impl ServerHandler for R2d2Handler {
+ 
+ #[tokio::main]
+ async fn main() -> Result<()> {
+-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
++    tracing_subscriber::fmt()
++        .with_writer(std::io::stderr)
++        .with_ansi(false)
++        .with_max_level(Level::INFO)
++        .init();
+ 
+     info!("Démarrage R2D2 MCP Gateway (Brique 9 - Unstubbed)...");
+ 
+diff --git a/r2d2-blackboard/src/lib.rs b/r2d2-blackboard/src/lib.rs
+index 0c05065..08eb38c 100644
+--- a/r2d2-blackboard/src/lib.rs
++++ b/r2d2-blackboard/src/lib.rs
+@@ -107,3 +107,43 @@ impl GlobalBlackboard for PostgresBlackboard {
+         Ok(jsonai.id)
+     }
+ }
++
++impl PostgresBlackboard {
++    /// Effectue une recherche de similarité vectorielle stricte (HNSW) via pgvector.
++    #[instrument(skip(self, query_embedding))]
++    pub async fn recall_memory(
++        &self,
++        query_embedding: Vector,
++        limit: i64,
++    ) -> Result<Vec<String>, BlackboardError> {
++        info!(
++            "Recherche sémantique HNSW (Top-{}) demandée au Blackboard...",
++            limit
++        );
++
++        // Requête de distance L2 (<->) optimisée par l'index HNSW pgvector
++        // Compilation hors ligne (sans macro sqlx::query!)
++        let rows = sqlx::query(
++            r#"
++            SELECT payload::text as payload_text
++            FROM blackboard_fragments
++            ORDER BY embedding <-> $1
++            LIMIT $2
++            "#,
++        )
++        .bind(query_embedding)
++        .bind(limit)
++        .fetch_all(&self.pool)
++        .await?;
++
++        let mut results = Vec::new();
++        for row in rows {
++            use sqlx::Row;
++            if let Ok(txt) = row.try_get::<String, _>("payload_text") {
++                results.push(txt);
++            }
++        }
++
++        Ok(results)
++    }
++}
+diff --git a/r2d2-mcp/Cargo.toml b/r2d2-mcp/Cargo.toml
+index d11d59d..73d1f29 100644
+--- a/r2d2-mcp/Cargo.toml
++++ b/r2d2-mcp/Cargo.toml
+@@ -23,3 +23,4 @@ tracing = "0.1.44"
+ tracing-subscriber = "0.3.18"
+ anyhow = "1.0.102"
+ async-trait = "0.1.89"
++pgvector = "0.4.1"
+diff --git a/r2d2-mcp/src/lib.rs b/r2d2-mcp/src/lib.rs
+index e79d9f9..9d08cf1 100644
+--- a/r2d2-mcp/src/lib.rs
++++ b/r2d2-mcp/src/lib.rs
+@@ -69,4 +69,31 @@ impl McpGateway {
+ 
+         Ok(saved_id)
+     }
++
++    /// Outil de recherche HNSW sur la mémoire vectorielle.
++    #[instrument(skip(self))]
++    pub async fn search_memory(&self, _query: &str) -> Result<String, KernelError> {
++        info!("MCP a demandé une exhumation mémorielle : {}", _query);
++
++        // TODO (Brique 5) : Encoder la "_query" via un vrai modèle d'embedding local.
++        // Simulons un vecteur vide pour tester la plomberie SQL HNSW pgvector.
++        let dummy_embedding = pgvector::Vector::from(vec![0.0; 1024]);
++
++        let results = self
++            .blackboard
++            .recall_memory(dummy_embedding, 5)
++            .await
++            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
++
++        if results.is_empty() {
++            return Ok("Aucun souvenir pertinent trouvé dans le Blackboard.".to_string());
++        }
++
++        let mut output = String::new();
++        for (i, res) in results.iter().enumerate() {
++            output.push_str(&format!("[Souvenir {}]: {}\n", i + 1, res));
++        }
++
++        Ok(output)
++    }
+ }
+diff --git a/r2d2-mcp/src/main.rs b/r2d2-mcp/src/main.rs
+index 799699e..929ab7d 100644
+--- a/r2d2-mcp/src/main.rs
++++ b/r2d2-mcp/src/main.rs
+@@ -118,17 +118,27 @@ impl ServerHandler for R2d2Handler {
+                     "recall_memory" => {
+                         let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+ 
+-                        // Fake vector search for Brique 9 until Brique 7 embeddings logic is fully bridged in Gateway
+-                        let result = format!("(Simulation) Souvenirs exhumés pour : {}", query);
+-
+-                        Ok(json!({
+-                            "content": [
+-                                {
+-                                    "type": "text",
+-                                    "text": result
+-                                }
+-                            ]
+-                        }))
++                        let gateway = self.gateway.lock().await;
++
++                        match gateway.search_memory(query).await {
++                            Ok(result) => Ok(json!({
++                                "content": [
++                                    {
++                                        "type": "text",
++                                        "text": result
++                                    }
++                                ]
++                            })),
++                            Err(e) => Ok(json!({
++                                "content": [
++                                    {
++                                        "type": "text",
++                                        "text": format!("Erreur système Blackboard : {}", e)
++                                    }
++                                ],
++                                "isError": true
++                            })),
++                        }
+                     }
+                     _ => Err(McpError::protocol(
+                         ErrorCode::MethodNotFound,

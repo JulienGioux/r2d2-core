@@ -1,0 +1,5 @@
+
+--STDERR--
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.32s
+
+Exit code: 0

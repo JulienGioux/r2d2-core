@@ -2,7 +2,7 @@ use crate::agent::{AgentError, CognitiveAgent};
 use anyhow::Result;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
-use tracing::{info, warn, instrument};
+use tracing::{info, instrument, warn};
 
 /// Gestionnaire souverain de l'allocation des Agents IA en RAM.
 ///
@@ -21,7 +21,15 @@ impl CortexRegistry {
             agents: RwLock::new(HashMap::new()),
         }
     }
+}
 
+impl Default for CortexRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CortexRegistry {
     /// Ajoute dynamiquement un nouvel agent (Plugin) à la bibliothèque.
     /// L'agent est stocké à l'état dormant (non chargé en RAM).
     pub async fn register_agent(&self, agent: Box<dyn CognitiveAgent>) {
@@ -38,14 +46,20 @@ impl CortexRegistry {
 
         if !registry.contains_key(target_name) {
             warn!("Agent {} introuvable dans la bibliothèque.", target_name);
-            return Err(AgentError::LoadError(format!("Agent inconnu: {}", target_name)));
+            return Err(AgentError::LoadError(format!(
+                "Agent inconnu: {}",
+                target_name
+            )));
         }
 
         // 1. Purge sécurisée de tous les autres agents actifs
         info!("CortexRegistry : Phase de Purge Mémoire...");
         for (name, agent) in registry.iter_mut() {
             if name != target_name && agent.is_active() {
-                info!("Déchargement forcé de l'agent '{}' pour libérer la VRAM/RAM.", name);
+                info!(
+                    "Déchargement forcé de l'agent '{}' pour libérer la VRAM/RAM.",
+                    name
+                );
                 agent.unload().await?;
             }
         }
@@ -65,9 +79,13 @@ impl CortexRegistry {
     }
 
     /// Exécute une instruction via l'agent actuellement actif.
-    pub async fn interact_with(&self, target_name: &str, prompt: &str) -> Result<String, AgentError> {
+    pub async fn interact_with(
+        &self,
+        target_name: &str,
+        prompt: &str,
+    ) -> Result<String, AgentError> {
         let mut registry = self.agents.write().await;
-        
+
         if let Some(agent) = registry.get_mut(target_name) {
             if !agent.is_active() {
                 return Err(AgentError::NotActive);
@@ -132,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn test_uniqueness_of_inference() {
         let registry = CortexRegistry::new();
-        
+
         let agent_a = Box::new(MockAgent::new("Agent-A"));
         let agent_b = Box::new(MockAgent::new("Agent-B"));
 
@@ -141,7 +159,7 @@ mod tests {
 
         // Activation de A
         assert!(registry.activate("Agent-A").await.is_ok());
-        
+
         {
             let agents = registry.agents.read().await;
             assert!(agents.get("Agent-A").unwrap().is_active());
@@ -165,11 +183,17 @@ mod tests {
         registry.register_agent(agent).await;
 
         // Échec si inactif
-        assert!(registry.interact_with("MockingBird", "Hello").await.is_err());
+        assert!(registry
+            .interact_with("MockingBird", "Hello")
+            .await
+            .is_err());
 
         // Succès si actif
         registry.activate("MockingBird").await.unwrap();
-        let thought = registry.interact_with("MockingBird", "Alpha").await.unwrap();
+        let thought = registry
+            .interact_with("MockingBird", "Alpha")
+            .await
+            .unwrap();
         assert_eq!(thought, "Mocked Thought: Alpha");
     }
 }

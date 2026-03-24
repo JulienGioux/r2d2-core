@@ -1,0 +1,57 @@
+   Compiling smallvec v1.15.1
+   Compiling tokio v1.50.0
+   Compiling gemm-f32 v0.18.2
+   Compiling gemm-c32 v0.18.2
+   Compiling gemm-c64 v0.18.2
+   Compiling gemm-f64 v0.18.2
+   Compiling gemm-f16 v0.17.1
+   Compiling gemm-c64 v0.17.1
+   Compiling gemm-c32 v0.17.1
+   Compiling gemm-f64 v0.17.1
+   Compiling icu_normalizer v2.1.1
+   Compiling rustls v0.23.37
+   Compiling unicode-normalization-alignments v0.1.12
+   Compiling gemm-f16 v0.18.2
+   Compiling idna_adapter v1.2.1
+   Compiling gemm v0.17.1
+   Compiling gemm v0.18.2
+   Compiling idna v1.1.0
+   Compiling tokenizers v0.19.1
+   Compiling ug v0.1.0
+   Compiling url v2.5.8
+   Compiling candle-core v0.8.4
+   Compiling ureq v2.12.1
+   Compiling tokio-util v0.7.18
+   Compiling tokio-native-tls v0.3.1
+   Compiling tower v0.5.3
+   Compiling h2 v0.4.13
+   Compiling tower-http v0.6.8
+   Compiling hyper v1.8.1
+   Compiling hyper-util v0.1.20
+   Compiling candle-nn v0.8.4
+   Compiling hyper-tls v0.6.0
+   Compiling candle-transformers v0.8.4
+   Compiling reqwest v0.12.28
+   Compiling hf-hub v0.4.3
+   Compiling r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.56s
+     Running unittests src/lib.rs (target/debug/deps/r2d2_cortex-b56b1eda2c4787c8)
+
+running 2 tests
+test registry::tests::test_interaction_routing ... ok
+test registry::tests::test_uniqueness_of_inference ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running unittests src/bin/test_hf.rs (target/debug/deps/test_hf-e809ed7e1b402265)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests r2d2_cortex
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+

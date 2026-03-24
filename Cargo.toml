@@ -6,6 +6,8 @@ members = [
     "r2d2-paradox",
     "r2d2-blackboard",
     "r2d2-mcp",
+    "r2d2-cortex",
+    "r2d2-bitnet",
     "r2d2-inference-cpu",
 ]
 resolver = "2"
