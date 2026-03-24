@@ -188,14 +188,17 @@ impl PostgresBlackboard {
         id: &str,
         new_level: ConsensusLevel,
     ) -> Result<(), BlackboardError> {
-        info!("Mise à jour du consensus pour le fragment {} -> {:?}", id, new_level);
+        info!(
+            "Mise à jour du consensus pour le fragment {} -> {:?}",
+            id, new_level
+        );
 
         sqlx::query(
             r#"
             UPDATE blackboard_fragments
             SET consensus_level = $1
             WHERE id = $2
-            "#
+            "#,
         )
         .bind(format!("{:?}", new_level))
         .bind(id)

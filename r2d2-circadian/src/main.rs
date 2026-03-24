@@ -26,7 +26,8 @@ async fn main() -> Result<()> {
 
     // 2. Variables d'environnement
     let db_url = env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard".to_string()
+        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard"
+            .to_string()
     });
 
     // 3. Initialisation des composants cœurs
@@ -39,7 +40,9 @@ async fn main() -> Result<()> {
     info!("Chargement du Registre Cortex (Plugins IA)...");
     let cortex = Arc::new(CortexRegistry::new());
 
-    cortex.register_agent(Box::new(MiniLmEmbedderAgent::new())).await;
+    cortex
+        .register_agent(Box::new(MiniLmEmbedderAgent::new()))
+        .await;
     cortex.register_agent(Box::new(BitNetAgent::new())).await;
 
     // Activation à chaud de l'agent 1.58-bit pour la réflexion locale

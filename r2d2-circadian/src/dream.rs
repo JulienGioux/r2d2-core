@@ -1,10 +1,10 @@
-use tracing::{info, instrument, warn};
-use std::sync::Arc;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
 use r2d2_cortex::CortexRegistry;
-use r2d2_paradox::ParadoxSolver;
 use r2d2_jsonai::ConsensusLevel;
 use r2d2_kernel::{Fragment, Signal};
+use r2d2_paradox::ParadoxSolver;
+use std::sync::Arc;
+use tracing::{info, instrument, warn};
 
 /// ============================================================================
 /// 🌌 MOTEUR DE RÊVE (MCTS) & INFERENCE STOCHASTIQUE
@@ -42,7 +42,10 @@ impl DreamSimulator {
             return Ok(());
         }
 
-        info!("⏳ Simulation de scénarios 'Et si ?' sur {} fragments...", fragments.len());
+        info!(
+            "⏳ Simulation de scénarios 'Et si ?' sur {} fragments...",
+            fragments.len()
+        );
 
         // 2. Préparation du Prompt de Cross-Pollinisation
         let mut prompt = String::from("Synthetize these isolated facts into a single absolute logical deduction. Return ONLY a pure JSONAI v3.0 object:\n");
@@ -51,7 +54,11 @@ impl DreamSimulator {
         }
 
         // 3. Appel de l'Agent BitNet (Inférence Locale)
-        let response = match self.cortex.interact_with("BitNet-1.58b-Cognitive", &prompt).await {
+        let response = match self
+            .cortex
+            .interact_with("BitNet-1.58b-Cognitive", &prompt)
+            .await
+        {
             Ok(json_str) => json_str,
             Err(e) => {
                 warn!("Hallucination ou Timeout de BitNet : {}", e);
@@ -78,11 +85,17 @@ impl DreamSimulator {
 
                 // 5. Marquer les anciens fragments comme consolidés
                 for f in fragments {
-                    let _ = self.blackboard.update_consensus_level(&f.id, ConsensusLevel::ConsensusReached).await;
+                    let _ = self
+                        .blackboard
+                        .update_consensus_level(&f.id, ConsensusLevel::ConsensusReached)
+                        .await;
                 }
             }
             Err(e) => {
-                warn!("Le paradoxe est insoluble (Rejet par Firewall Axiomatique) : {}", e);
+                warn!(
+                    "Le paradoxe est insoluble (Rejet par Firewall Axiomatique) : {}",
+                    e
+                );
             }
         }
 

@@ -65,7 +65,9 @@ impl ToolRegistry {
         // Brique 8: Cycle Circadien
         self.register(McpToolDef {
             name: "read_dreams".to_string(),
-            description: "Lire les déductions logiques forgées par le Moteur Circadien pendant la nuit.".to_string(),
+            description:
+                "Lire les déductions logiques forgées par le Moteur Circadien pendant la nuit."
+                    .to_string(),
             input_schema: json!({
                 "type": "object",
                 "properties": {

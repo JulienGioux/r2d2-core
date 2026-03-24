@@ -6,14 +6,14 @@ pub mod sensory;
 use dream::DreamSimulator;
 use firewall::AxiomaticFirewall;
 use folding::FoldingEngine;
-use sensory::SensorySynthesisEngine;
-use std::time::Duration;
-use tokio::time::sleep;
-use tracing::{info, warn};
-use std::sync::Arc;
 use r2d2_blackboard::PostgresBlackboard;
 use r2d2_cortex::CortexRegistry;
 use r2d2_paradox::ParadoxSolver;
+use sensory::SensorySynthesisEngine;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::time::sleep;
+use tracing::{info, warn};
 
 /// ============================================================================
 /// ⚙️ MOTEUR CIRCADIEN (R2D2 BIOLOGICAL CYCLE)
@@ -72,7 +72,11 @@ impl CircadianDaemon {
         info!("Blocage réseau externe. L'Hyperviseur prend la main.");
 
         let folding = FoldingEngine::new();
-        let dream = DreamSimulator::new(self.blackboard.clone(), self.cortex.clone(), self.solver.clone());
+        let dream = DreamSimulator::new(
+            self.blackboard.clone(),
+            self.cortex.clone(),
+            self.solver.clone(),
+        );
         let firewall = AxiomaticFirewall::new();
 
         // 1. Dédoublonnement Sémantique
