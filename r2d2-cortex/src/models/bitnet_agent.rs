@@ -4,7 +4,7 @@ use r2d2_bitnet::model::{BitNetConfig, BitNetModel};
 use candle_core::{Device, DType};
 use candle_nn::VarBuilder;
 use tracing::{info, instrument};
-use std::collections::HashMap;
+
 
 /// Agent IA Natif : R2D2-BitNet (1.58-bit)
 ///
@@ -49,10 +49,30 @@ impl CognitiveAgent for BitNetAgent {
         
         let config = BitNetConfig::default();
         
-        // Pour l'intégration Brique 5, nous générons des tenseurs synthétiques Zéros
-        // via VarBuilder pour valider la plomberie de bout en bout avant la phase de Train/Import.
-        let tensor_map = HashMap::new();
-        let vb = VarBuilder::from_tensors(tensor_map, DType::F32, &self.device);
+        info!("   [BitNet] Résolution des poids via HuggingFace Hub...");
+        let api_result = hf_hub::api::tokio::Api::new();
+        
+        let vb = match api_result {
+            Ok(api) => {
+                // Modèle exemple (à ajuster selon la repo cible finale)
+                let repo = api.model("1bitLLM/bitnet_b1_58-3B".to_string());
+                match repo.get("model.safetensors").await {
+                    Ok(weights_filename) => {
+                        info!("✅ Poids BitNet localisés : {:?}", weights_filename);
+                        unsafe { VarBuilder::from_mmaped_safetensors(&[weights_filename], DType::F32, &self.device) }
+                            .map_err(|e| AgentError::LoadError(format!("Erreur Mmap Safetensors: {}", e)))?
+                    },
+                    Err(_) => {
+                        tracing::warn!("⚠️ Impossible de télécharger les poids. Fallback -> Tenseurs Structuraux Zéros.");
+                        VarBuilder::zeros(DType::F32, &self.device)
+                    }
+                }
+            },
+            Err(_) => {
+                tracing::warn!("⚠️ API HF inaccessible. Fallback -> Tenseurs Structuraux Zéros.");
+                VarBuilder::zeros(DType::F32, &self.device)
+            }
+        };
 
         let model = BitNetModel::new(vb, &config)
             .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage BitNet: {}", e)))?;

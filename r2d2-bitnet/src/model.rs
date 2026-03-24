@@ -3,7 +3,7 @@ use crate::bitlinear::BitLinear;
 use crate::ffn::BitFFN;
 use crate::rmsnorm::RmsNorm;
 use crate::transformer::BitTransformerBlock;
-use candle_core::{DType, Device, IndexOp, Module, Result, Tensor};
+use candle_core::{Device, IndexOp, Module, Result, Tensor};
 use candle_nn::{embedding, Embedding, VarBuilder};
 use tracing::{info, instrument};
 
@@ -51,30 +51,29 @@ impl BitNetModel {
         // Empilement des Blocs Transformer Ternaires
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for layer_idx in 0..config.num_hidden_layers {
-            let _layer_vb = vb.pp(&format!("layers.{}", layer_idx));
+            let layer_vb = vb.pp(&format!("model.layers.{}", layer_idx));
             
-            // Initialisation architecturale structurelle pure (Weights factices "Stubs" de taille correcte)
-            // L'Architecte le connectera correctement au Loader Safetensors ensuite.
-            let norm_weight = Tensor::ones(config.hidden_size, DType::F32, vb.device())?;
-            let attention_norm = RmsNorm::new(norm_weight.clone(), config.rms_norm_eps);
-            let ffn_norm = RmsNorm::new(norm_weight, config.rms_norm_eps);
+            // RMS Norm (attention & FFN)
+            let att_norm_w = layer_vb.pp("input_layernorm").get(config.hidden_size, "weight")?;
+            let attention_norm = RmsNorm::new(att_norm_w, config.rms_norm_eps);
+            
+            let ffn_norm_w = layer_vb.pp("post_attention_layernorm").get(config.hidden_size, "weight")?;
+            let ffn_norm = RmsNorm::new(ffn_norm_w, config.rms_norm_eps);
 
             let head_dim = config.hidden_size / config.num_attention_heads;
             
-            let dummy_qkv = vec![0i8; config.hidden_size * config.hidden_size];
-            let q_proj = BitLinear::new(config.hidden_size, config.hidden_size, &dummy_qkv, None)?;
-            let k_proj = BitLinear::new(config.hidden_size, config.hidden_size, &dummy_qkv, None)?;
-            let v_proj = BitLinear::new(config.hidden_size, config.hidden_size, &dummy_qkv, None)?;
-            let o_proj = BitLinear::new(config.hidden_size, config.hidden_size, &dummy_qkv, None)?;
+            let attn_vb = layer_vb.pp("self_attn");
+            let q_proj = BitLinear::load(config.hidden_size, config.hidden_size, attn_vb.pp("q_proj"))?;
+            let k_proj = BitLinear::load(config.hidden_size, config.hidden_size, attn_vb.pp("k_proj"))?;
+            let v_proj = BitLinear::load(config.hidden_size, config.hidden_size, attn_vb.pp("v_proj"))?;
+            let o_proj = BitLinear::load(config.hidden_size, config.hidden_size, attn_vb.pp("o_proj"))?;
 
             let attention = BitSelfAttention::new(config.num_attention_heads, head_dim, q_proj, k_proj, v_proj, o_proj);
 
-            let dummy_gate_up = vec![0i8; config.hidden_size * config.intermediate_size];
-            let dummy_down = vec![0i8; config.intermediate_size * config.hidden_size];
-
-            let gate_proj = BitLinear::new(config.hidden_size, config.intermediate_size, &dummy_gate_up, None)?;
-            let up_proj = BitLinear::new(config.hidden_size, config.intermediate_size, &dummy_gate_up, None)?;
-            let down_proj = BitLinear::new(config.intermediate_size, config.hidden_size, &dummy_down, None)?;
+            let mlp_vb = layer_vb.pp("mlp");
+            let gate_proj = BitLinear::load(config.hidden_size, config.intermediate_size, mlp_vb.pp("gate_proj"))?;
+            let up_proj = BitLinear::load(config.hidden_size, config.intermediate_size, mlp_vb.pp("up_proj"))?;
+            let down_proj = BitLinear::load(config.intermediate_size, config.hidden_size, mlp_vb.pp("down_proj"))?;
 
             let ffn = BitFFN::new(gate_proj, up_proj, down_proj);
 
@@ -87,15 +86,12 @@ impl BitNetModel {
         }
 
         // Couche de Normalisation Finale
-        let norm_weight = Tensor::ones(config.hidden_size, DType::F32, vb.device())?;
+        let norm_weight = vb.pp("model.norm").get(config.hidden_size, "weight")?;
         let norm = RmsNorm::new(norm_weight, config.rms_norm_eps);
 
         // Couche de Sortie (LM Head) 1.58-bit : 
         // L'addition pure génère les logits de vocabulaire (Zéro TFLOPS de Matrix Multiplication !)
-        // Par précaution architecturale, on simule un bloc mathématique plein de zéros 
-        // qui devrait s'extraire de GGUF ou de SAFETENSORS.
-        let lm_head_weights = vec![0i8; config.hidden_size * config.vocab_size];
-        let lm_head = BitLinear::new(config.hidden_size, config.vocab_size, &lm_head_weights, None)?;
+        let lm_head = BitLinear::load(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?;
 
         Ok(Self {
             config: config.clone(),
