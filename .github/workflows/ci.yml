@@ -44,6 +44,11 @@ jobs:
   security_audit:
     name: "🛡️ Security Audit (rustsec)"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - name: Rust Toolchain Setup
