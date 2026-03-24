@@ -27,29 +27,108 @@ Si vous cherchez un "wrapper API" vite fait, vous êtes au mauvais endroit. Si v
 
 ---
 
-## 🛠️ Onboarding Express (Zero-Config)
+## 🛠️ Déploiement Multi-Plateforme (Industrial-Grade)
 
-Nous avons conçu l'expérience développeur (DX) pour être aussi fluide qu'exigeante. 
+Le système R2D2 est agnostique au système d'exploitation, mais exige un environnement Rust sécurisé et l'accès aux cycles CPU/VRAM. L'empreinte mémoire du moteur 1.58-bit (BitNet) permet un déploiement sur des machines Edge classiques en "Zero-Config".
 
-### Pré-requis
-- [Rust](https://rustup.rs/) (Édition 2021)
-- Git
+### Prérequis Globaux
+- **Rust Toolchain** (Édition 2021) avec `cargo`
+- **Git** & **CMake** (pour la compilation des stubs C++ Whisper si Audio activé)
 
-### Compiler en 3 lignes
+---
+
+### 🐧 Linux : Déploiement Natif (Debian / Ubuntu)
+
+Sur un environnement bare-metal Debian/Ubuntu, la compilation nécessite les librairies SSL et les headers de base.
 
 ```bash
+# 1. Installer les dépendances de compilation critiques
+sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev cmake
+
+# 2. Cloner la ruche R2D2 Sovereign
 git clone https://github.com/r2d2-forge/r2d2-core.git
 cd r2d2-core
-cargo test --workspace
+
+# 3. Validation de l'intégrité algébrique et compilation stricte
+cargo test --workspace --release
+cargo run -p r2d2-mcp --release
 ```
-> **Note :** Le dépôt est structuré en *Virtual Workspace*. Les Briques fondatrices sont déjà opérationnelles :
-> - `r2d2-secure-mem` (Brique 0) : Zeroization de la RAM.
-> - `r2d2-jsonai` (Brique 1) : Standard de Représentation Sémantique v3.1.
-> - `r2d2-kernel` (Brique 2) : Formalisme par Typestate Strict.
-> - `r2d2-paradox` (Brique 3) : Moteur de Preuve d'Inférence Anti-Hallucination.
-> - `r2d2-cortex` (Brique 4) : Moteur Tensoriel Local (Candle) chargeant `Multilingual-E5-Small` avec Zero-Padding 1024D.
-> - `r2d2-blackboard` (Brique 7) : Indexation PostgreSQL vectorielle HNSW.
-> - `r2d2-mcp` (Brique 9) : Gateway Native JSON-RPC sur Stdio (Zéro Dépendance réseau).
+
+---
+
+### 📦 Linux : Déploiement Isolé Fedora / Podman (Red Hat)
+
+Pour garantir l'immuabilité "Zero-Trust" de l'hôte, le déploiement via **Podman** (Rootless) est le standard militaro-industriel recommandé sous Fedora/RHEL.
+
+```bash
+# 1. Création de l'image isolée basée sur UBI/Fedora
+cat <<EOF > Containerfile
+FROM fedora:39
+RUN dnf install -y gcc gcc-c++ cmake openssl-devel cargo
+WORKDIR /usr/src/r2d2
+COPY . .
+RUN cargo build --release --workspace
+CMD ["cargo", "run", "--release", "-p", "r2d2-mcp"]
+EOF
+
+# 2. Build et lancement Sans-Privilège (Rootless)
+podman build -t r2d2-core-secure .
+podman run -d --name r2d2-swarm --network host r2d2-core-secure
+```
+*Note : Assurez-vous d'avoir instancié les drivers `/dev/dri` si l'accélération matérielle est visée hors BitNet.*
+
+---
+
+### 🏁 Windows : WSL2 & Natif (DirectX 12)
+
+Le système R2D2 s'exécute de façon translucide sur Windows grâce à **WSL2** ou nativement via *MSVC*.
+
+**Méthode WSL2 (Recommandée pour la Gateway MCP) :**
+```bash
+# Depuis un shell Ubuntu/Fedora Remix (WSL2)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source $HOME/.cargo/env
+git clone https://github.com/r2d2-forge/r2d2-core.git
+cd r2d2-core
+cargo check --workspace
+```
+*L'interconnexion au client UI Windows s'opère par Stdio via le Model Context Protocol (MCP).*
+
+**Méthode Windows Native (PowerShell/MSVC) :**
+```powershell
+# Prérequis : Visual Studio C++ Build Tools
+git clone https://github.com/r2d2-forge/r2d2-core.git
+cd r2d2-core
+cargo run --release -p r2d2-mcp
+```
+
+---
+
+### 🍏 macOS : Apple Silicon (M1/M2/M3)
+
+Le moteur de R2D2 utilise Candle et supporte nativement l'API `Metal` de macOS, transformant les puces Apple Silicon en redoutables forges d'inférence.
+
+```bash
+# 1. Installation de la Toolchain via Homebrew
+brew install rust cmake
+
+# 2. Clonage et exécution (avec l'accélération backend Metal)
+git clone https://github.com/r2d2-forge/r2d2-core.git
+cd r2d2-core
+cargo run --release -p r2d2-mcp --features metal
+```
+
+---
+
+## 🦾 R2D2-BitNet : Moteur Cognitif 1.58-bit
+
+Ce dépôt inclut désormais la brique fondatrice `r2d2-bitnet`, notre implémentation locale du modèle de langage ternaire (AbsMean Quantization Poids/Activations). 
+
+Pour lancer un prompt sur le Moteur CPU Souverain (0 MatMul, 100% Additions Logic-Only) :
+```bash
+cargo test -p r2d2-bitnet
+```
+*Le backend télécharge de façon atomique les SafeTensors "1bitLLM/bitnet_b1_58-3B", les convertit en masques d'états `{-1, 0, 1}` via hard-thresholding strict, et exécute la boucle autorégressive sans toucher aux FPU !*
 
 ---
 

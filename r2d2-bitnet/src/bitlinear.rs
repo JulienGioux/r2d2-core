@@ -59,6 +59,53 @@ impl BitLinear {
             bias,
         })
     }
+
+    /// Charge et Quantise (1.58-bit) une couche linéaire directement depuis un `VarBuilder`.
+    ///
+    /// L'Architecte intercepte ici les poids flottants (F16/F32) du modèle source (ex: GGUF)
+    /// et les projette brutalement dans l'espace ternaire {-1, 0, 1} avant de les packager.
+    #[instrument(skip_all, name = "BitLinear::load")]
+    pub fn load(
+        in_features: usize,
+        out_features: usize,
+        vb: candle_nn::VarBuilder,
+    ) -> candle_core::Result<Self> {
+        // Extraction du tenseur de poids "Mère"
+        let weight = vb.get((out_features, in_features), "weight")?;
+
+        // Ramener en F32 pour une quantification déterministe
+        let flat_f32 = weight
+            .to_dtype(candle_core::DType::F32)?
+            .flatten_all()?
+            .to_vec1::<f32>()?;
+
+        let mut flat_i8 = Vec::with_capacity(flat_f32.len());
+
+        // ⚡ Quantification Absolute-Mean-Scale (AbsMean) Officielle (BitNet 1.58b)
+        // γ (gamma) = Mean(Abs(W)). On normalise W par γ.
+        let gamma: f32 = flat_f32.iter().map(|v| v.abs()).sum::<f32>() / (flat_f32.len() as f32);
+        let scale = 1.0 / (gamma + 1e-5); // Évite la division par zéro
+
+        for &val in &flat_f32 {
+            // W_q = Round(W / (γ + ε))
+            let scaled = (val * scale).round();
+
+            // Constrain / Clip to {-1, 0, 1}
+            let ternary_val = if scaled > 0.0 {
+                1
+            } else if scaled < 0.0 {
+                -1
+            } else {
+                0
+            };
+            flat_i8.push(ternary_val);
+        }
+
+        // Chargement optionnel du Biais
+        let bias = vb.get(out_features, "bias").ok();
+
+        Self::new(in_features, out_features, &flat_i8, bias)
+    }
 }
 
 impl Module for BitLinear {
@@ -171,6 +218,56 @@ mod tests {
 
         assert_eq!(ys_vec[0], -4.0);
         assert_eq!(ys_vec[1], 4.0);
+        Ok(())
+    }
+
+    #[test]
+    fn test_absmean_quantization() -> Result<()> {
+        use candle_core::DType;
+        use candle_nn::VarBuilder;
+        use std::collections::HashMap;
+
+        // On crée un tenseur 2x16 (Out: 2, In: 16)
+        // Ligne 1 : Poids avec forte variance [-10.0, 10.0, ...] -> AbsMean sera grand, les faibles valeurs ~0 deviendront 0.
+        // Ligne 2 : Poids avec faible variance [-0.1, 0.1, ...]
+
+        let mut w_data = vec![0.0f32; 32];
+        // Neuron 1: Extreme values
+        w_data[0] = 100.0;
+        w_data[1] = -100.0;
+        w_data[2] = 1.0; // Should be mapped to 0 because AbsMean simplifies scale.
+        w_data[3] = -1.0; // -> 0
+
+        // Modifions pour avoir un gamma de 10.0 par exemple: 100+100 + 4*0 / 32 = 200/32 = 6.25
+        // W_q = Round(W / 6.25).
+        // 100 / 6.25 = 16 -> Clip -> 1.
+        // -100 / 6.25 = -16 -> Clip -> -1.
+        // 1 / 6.25 = 0.16 -> Round -> 0.
+
+        let w_tensor = Tensor::from_vec(w_data, &[2, 16], &Device::Cpu)?;
+
+        let mut tensors = HashMap::new();
+        tensors.insert("weight".to_string(), w_tensor);
+        let vb = VarBuilder::from_tensors(tensors, DType::F32, &Device::Cpu);
+
+        let layer = BitLinear::load(16, 2, vb)?;
+
+        // Block 0 correspond au Neuron 0
+        let pos_mask_n0 = layer.weights[0].m_pos;
+        let neg_mask_n0 = layer.weights[0].m_neg;
+
+        // bit 0 -> 100.0 -> +1 (pos_mask = 1, neg_mask = 0)
+        assert_eq!(pos_mask_n0 & 1, 1);
+        assert_eq!(neg_mask_n0 & 1, 0);
+
+        // bit 1 -> -100.0 -> -1 (pos_mask = 0, neg_mask = 1)
+        assert_eq!((pos_mask_n0 >> 1) & 1, 0);
+        assert_eq!((neg_mask_n0 >> 1) & 1, 1);
+
+        // bit 2 -> 1.0 -> 0 (pos_mask = 0, neg_mask = 0)
+        assert_eq!((pos_mask_n0 >> 2) & 1, 0);
+        assert_eq!((neg_mask_n0 >> 2) & 1, 0);
+
         Ok(())
     }
 }

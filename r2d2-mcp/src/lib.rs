@@ -7,7 +7,9 @@
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
 use r2d2_cortex::{
-    agent::AgentError, models::minilm_embedder::MiniLmEmbedderAgent, CortexRegistry,
+    agent::AgentError,
+    models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent},
+    CortexRegistry,
 };
 use r2d2_kernel::{Fragment, KernelError, Signal};
 use r2d2_paradox::ParadoxSolver;
@@ -31,6 +33,10 @@ impl McpGateway {
         // Configuration de l'Agent d'Embedding par défaut
         let embedder = Box::new(MiniLmEmbedderAgent::new());
         cortex.register_agent(embedder).await;
+
+        // Configuration du Cœur Cognitif Natif (R2D2-BitNet)
+        let bitnet_core = Box::new(BitNetAgent::new());
+        cortex.register_agent(bitnet_core).await;
 
         // Activation immédiate pour charger les poids en RAM (Hot-Load)
         cortex

@@ -1,6 +1,7 @@
 pub mod attention;
 pub mod bitlinear;
 pub mod ffn;
+pub mod model;
 pub mod quantization;
 pub mod rmsnorm;
 pub mod ternary;
@@ -9,6 +10,7 @@ pub mod transformer;
 pub use attention::BitSelfAttention;
 pub use bitlinear::BitLinear;
 pub use ffn::BitFFN;
+pub use model::{BitNetConfig, BitNetModel};
 pub use quantization::{absmax_quantize_activations, absmean_quantize_weights};
 pub use rmsnorm::RmsNorm;
 pub use ternary::TernaryBlock16;
