@@ -54,7 +54,7 @@ impl BitNetModel {
         // Empilement des Blocs Transformer Ternaires
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
         for layer_idx in 0..config.num_hidden_layers {
-            let layer_vb = vb.pp(&format!("model.layers.{}", layer_idx));
+            let layer_vb = vb.pp(format!("model.layers.{}", layer_idx));
 
             // RMS Norm (attention & FFN)
             let att_norm_w = layer_vb

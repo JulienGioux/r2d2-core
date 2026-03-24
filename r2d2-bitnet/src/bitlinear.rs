@@ -257,8 +257,8 @@ mod tests {
         let neg_mask_n0 = layer.weights[0].m_neg;
 
         // bit 0 -> 100.0 -> +1 (pos_mask = 1, neg_mask = 0)
-        assert_eq!((pos_mask_n0 >> 0) & 1, 1);
-        assert_eq!((neg_mask_n0 >> 0) & 1, 0);
+        assert_eq!(pos_mask_n0 & 1, 1);
+        assert_eq!(neg_mask_n0 & 1, 0);
 
         // bit 1 -> -100.0 -> -1 (pos_mask = 0, neg_mask = 1)
         assert_eq!((pos_mask_n0 >> 1) & 1, 0);
