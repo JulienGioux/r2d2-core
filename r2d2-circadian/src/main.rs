@@ -3,7 +3,7 @@ use r2d2_blackboard::PostgresBlackboard;
 use r2d2_circadian::CircadianDaemon;
 use r2d2_cortex::{
     agent::AgentError,
-    models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent},
+    models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent, audio_agent::AudioAgent},
     CortexRegistry,
 };
 use r2d2_paradox::ParadoxSolver;
@@ -44,6 +44,7 @@ async fn main() -> Result<()> {
         .register_agent(Box::new(MiniLmEmbedderAgent::new()))
         .await;
     cortex.register_agent(Box::new(BitNetAgent::new())).await;
+    cortex.register_agent(Box::new(AudioAgent::new())).await;
 
     // Activation à chaud de l'agent 1.58-bit pour la réflexion locale
     cortex
