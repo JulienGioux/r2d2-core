@@ -1,3 +1,31 @@
+    Checking r2d2-paradox v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-paradox)
+    Checking r2d2-bitnet v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-bitnet)
+    Checking r2d2-inference-cpu v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-inference-cpu)
     Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
+    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+    Checking r2d2-jsonai v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-jsonai)
+    Checking r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+    Checking r2d2-circadian v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-circadian)
     Checking r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 13.14s
+error[E0432]: unresolved import `serde`
+ --> r2d2-mcp/src/hitl.rs:1:5
+  |
+1 | use serde::{Deserialize, Serialize};
+  |     ^^^^^ use of unresolved module or unlinked crate `serde`
+  |
+  = help: if you wanted to use a crate named `serde`, use `cargo add serde` to add it to your `Cargo.toml`
+
+warning: unused import: `Validated`
+ --> r2d2-mcp/src/proxy.rs:1:32
+  |
+1 | use r2d2_kernel::{KernelError, Validated};
+  |                                ^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0432`.
+warning: `r2d2-mcp` (lib) generated 1 warning (1 duplicate)
+error: could not compile `r2d2-mcp` (lib) due to 1 previous error; 1 warning emitted
+warning: build failed, waiting for other jobs to finish...
+warning: `r2d2-mcp` (lib test) generated 1 warning
+error: could not compile `r2d2-mcp` (lib test) due to 1 previous error; 1 warning emitted

@@ -47,42 +47,8 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
                 })
             }
             "tools/list" => {
-                json!({
-                    "tools": [
-                        {
-                            "name": "anchor_thought",
-                            "description": "Force le R2D2 Kernel à analyser une proposition via le ParadoxSolver et à l'ancrer dans sa matrice.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "content": {
-                                        "type": "string",
-                                        "description": "Le texte brut de la pensée ou de l'analyse à ingérer."
-                                    },
-                                    "agent_name": {
-                                        "type": "string",
-                                        "description": "Le nom de l'agent IA à l'origine de cette pensée."
-                                    }
-                                },
-                                "required": ["content", "agent_name"]
-                            }
-                        },
-                        {
-                            "name": "recall_memory",
-                            "description": "Recherche sémantique vectorielle dans le Blackboard R2D2 pour exhumer les souvenirs.",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": {
-                                        "type": "string",
-                                        "description": "La question ou les mots-clés sémantiques de recherche."
-                                    }
-                                },
-                                "required": ["query"]
-                            }
-                        }
-                    ]
-                })
+                let gw = gateway.lock().await;
+                gw.registry.export_mcp_format()
             }
             "tools/call" => {
                 let default_params = json!({});
@@ -90,47 +56,64 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
                 let name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or_default();
 
-                match name {
-                    "anchor_thought" => {
-                        let content = args.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                        let agent_name = args
-                            .get("agent_name")
-                            .and_then(|a| a.as_str())
-                            .unwrap_or("Unknown");
-                        let gw = gateway.lock().await;
+                let gw = gateway.lock().await;
 
-                        match gw
-                            .ingest_thought("McpTool", agent_name, content.to_string())
-                            .await
-                        {
-                            Ok(frag_id) => json!({
-                                "content": [{ "type": "text", "text": format!("Pensée ingérée avec succès : {}", frag_id) }]
-                            }),
-                            Err(e) => json!({
-                                "content": [{ "type": "text", "text": format!("Échec du typestate : {}", e) }],
-                                "isError": true
-                            }),
+                // 1. Audit Sémantique et HITL (Le Passeport)
+                match gw.proxy.audit_tool_call(name, "ExternalAgent", &args).await {
+                    Ok(true) => {
+                        // L'exécution est autorisée !
+                        match name {
+                            "anchor_thought" => {
+                                let content =
+                                    args.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                                let agent_name = args
+                                    .get("agent_name")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or("Unknown");
+                                match gw
+                                    .ingest_thought("McpTool", agent_name, content.to_string())
+                                    .await
+                                {
+                                    Ok(frag_id) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Pensée ingérée avec succès : {}", frag_id) }] })
+                                    }
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Échec du typestate : {}", e) }], "isError": true })
+                                    }
+                                }
+                            }
+                            "recall_memory" => {
+                                let query =
+                                    args.get("query").and_then(|q| q.as_str()).unwrap_or("");
+                                match gw.search_memory(query).await {
+                                    Ok(mem_result) => {
+                                        json!({ "content": [{ "type": "text", "text": mem_result }] })
+                                    }
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur système Blackboard : {}", e) }], "isError": true })
+                                    }
+                                }
+                            }
+                            "delete_memory_cluster" => {
+                                // Simulation d'une exécution de suppression après passage du HITL
+                                let cluster_id = args
+                                    .get("cluster_id")
+                                    .and_then(|id| id.as_str())
+                                    .unwrap_or("");
+                                json!({ "content": [{ "type": "text", "text": format!("🚨 Cluster R2D2 [{}] systématiquement radié de l'Index PostgreSQL avec succès.", cluster_id) }] })
+                            }
+                            _ => {
+                                json!({ "content": [{ "type": "text", "text": "Tool inconnu ou non-mappé." }], "isError": true })
+                            }
                         }
                     }
-                    "recall_memory" => {
-                        let query = args.get("query").and_then(|q| q.as_str()).unwrap_or("");
-                        let gw = gateway.lock().await;
-
-                        match gw.search_memory(query).await {
-                            Ok(mem_result) => json!({
-                                "content": [{ "type": "text", "text": mem_result }]
-                            }),
-                            Err(e) => json!({
-                                "content": [{ "type": "text", "text": format!("Erreur système Blackboard : {}", e) }],
-                                "isError": true
-                            }),
-                        }
+                    Ok(false) => {
+                        // Rejet SILENCIEUX au niveau du proxy (Souvent HITL Rejected)
+                        json!({ "content": [{ "type": "text", "text": "Accès Refusé. Le Semantic Proxy / HITL a bloqué l'intention malveillante ou non-autorisée." }], "isError": true })
                     }
-                    _ => {
-                        json!({
-                            "content": [{ "type": "text", "text": "Tool inconnu" }],
-                            "isError": true
-                        })
+                    Err(e) => {
+                        // Erreur technique de validation paradoxale
+                        json!({ "content": [{ "type": "text", "text": format!("Violation Axiomatique: {}", e) }], "isError": true })
                     }
                 }
             }

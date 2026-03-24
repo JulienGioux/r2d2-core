@@ -1,47 +1,54 @@
+    Checking r2d2-secure-mem v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-secure-mem)
+    Checking r2d2-jsonai v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-jsonai)
+    Checking r2d2-bitnet v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-bitnet)
+    Checking candle-transformers v0.8.4
+    Checking r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
+    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
+    Checking r2d2-paradox v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-paradox)
     Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
-error: you should consider adding a `Default` implementation for `MiniLmEmbedderAgent`
-  --> r2d2-cortex/src/models/minilm_embedder.rs:24:5
+    Checking r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)
+error: empty line after doc comment
+  --> r2d2-mcp/src/proxy.rs:9:1
    |
-24 | /     pub fn new() -> Self {
-25 | |         // En forçant le mode CPU, l'Architecte garantit que l'agent consommera la RAM classique
-26 | |         // et n'entamera pas la VRAM, tout en restant extrêmement rapide de par sa taille native.
-27 | |         let device = Device::Cpu;
-...  |
-35 | |     }
-   | |_____^
+ 9 | / /// ============================================================================
+10 | |
+   | |_^
+11 |   pub struct SemanticProxy {
+   |   ------------------------ the comment documents this struct
    |
-   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.91.0/index.html#new_without_default
-   = note: `-D clippy::new-without-default` implied by `-D warnings`
-   = help: to override `-D warnings` add `#[allow(clippy::new_without_default)]`
-help: try adding this
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.91.0/index.html#empty_line_after_doc_comments
+   = note: `-D clippy::empty-line-after-doc-comments` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(clippy::empty_line_after_doc_comments)]`
+   = help: if the empty line is unintentional, remove it
+
+error: empty line after doc comment
+  --> r2d2-mcp/src/registry.rs:6:1
    |
-23 + impl Default for MiniLmEmbedderAgent {
-24 +     fn default() -> Self {
-25 +         Self::new()
-26 +     }
-27 + }
+ 6 | / /// ============================================================================
+ 7 | |
+   | |_^
+...
+10 |   pub struct McpToolDef {
+   |   --------------------- the comment documents this struct
+   |
+   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.91.0/index.html#empty_line_after_doc_comments
+   = help: if the empty line is unintentional, remove it
+help: if the documentation should include the empty line include it in the comment
+   |
+ 7 | ///
    |
 
-error: you should consider adding a `Default` implementation for `CortexRegistry`
-  --> r2d2-cortex/src/registry.rs:19:5
+error: field `paradox_engine` is never read
+  --> r2d2-mcp/src/proxy.rs:12:5
    |
-19 | /     pub fn new() -> Self {
-20 | |         Self {
-21 | |             agents: RwLock::new(HashMap::new()),
-22 | |         }
-23 | |     }
-   | |_____^
+11 | pub struct SemanticProxy {
+   |            ------------- field in this struct
+12 |     paradox_engine: ParadoxSolver,
+   |     ^^^^^^^^^^^^^^
    |
-   = help: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.91.0/index.html#new_without_default
-help: try adding this
-   |
-17 + impl Default for CortexRegistry {
-18 +     fn default() -> Self {
-19 +         Self::new()
-20 +     }
-21 + }
-   |
+   = note: `-D dead-code` implied by `-D warnings`
+   = help: to override `-D warnings` add `#[allow(dead_code)]`
 
-error: could not compile `r2d2-cortex` (lib) due to 2 previous errors
+error: could not compile `r2d2-mcp` (lib test) due to 3 previous errors
 warning: build failed, waiting for other jobs to finish...
-error: could not compile `r2d2-cortex` (lib test) due to 2 previous errors
+error: could not compile `r2d2-mcp` (lib) due to 3 previous errors

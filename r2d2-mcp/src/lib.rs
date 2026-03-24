@@ -4,6 +4,11 @@
 //! Accepte des signaux bruts, les propulse dans le Kernel (Validation), puis
 //! les sauvegarde dans le Blackboard PostgreSQL si acceptés.
 
+pub mod client;
+pub mod hitl;
+pub mod proxy;
+pub mod registry;
+
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
 use r2d2_cortex::{
@@ -16,11 +21,16 @@ use r2d2_paradox::ParadoxSolver;
 use std::sync::Arc;
 use tracing::{info, instrument};
 
+use proxy::SemanticProxy;
+use registry::ToolRegistry;
+
 /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
 pub struct McpGateway {
     validator: ParadoxSolver,
     blackboard: PostgresBlackboard,
     cortex: Arc<CortexRegistry>,
+    pub proxy: SemanticProxy,
+    pub registry: ToolRegistry,
 }
 
 impl McpGateway {
@@ -48,6 +58,8 @@ impl McpGateway {
             validator: ParadoxSolver,
             blackboard,
             cortex,
+            proxy: SemanticProxy::new(),
+            registry: ToolRegistry::new(),
         })
     }
 
