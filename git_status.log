@@ -1,0 +1,29 @@
+On branch feat/sensory-synthesis
+Your branch and 'origin/feat/sensory-synthesis' have diverged,
+and have 2 and 4 different commits each, respectively.
+  (use "git pull" if you want to integrate the remote branch with yours)
+
+You have unmerged paths.
+  (fix conflicts and run "git commit")
+  (use "git merge --abort" to abort the merge)
+
+Unmerged paths:
+  (use "git add <file>..." to mark resolution)
+	both modified:   "DEV_DOCS/R2D2-DOCS-MD/Sp\303\251cification Technique _ Brique 8 - Cycle Circadien & Synth\303\250se Sensorielle.md"
+	both added:      r2d2-cortex/src/models/audio_agent.rs
+	both modified:   r2d2-sensory/src/gateway.rs
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   r2d2-circadian/src/main.rs
+	modified:   r2d2-cortex/src/models/mod.rs
+	modified:   r2d2-mcp/src/registry.rs
+	modified:   r2d2-mcp/tests/mcp_integration.rs
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	git.log
+	git_status.log
+
+no changes added to commit (use "git add" and/or "git commit -a")
