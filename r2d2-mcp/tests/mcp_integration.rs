@@ -9,6 +9,7 @@ async fn test_tool_registry() {
     assert!(registry.exists("anchor_thought"));
     assert!(registry.exists("recall_memory"));
     assert!(registry.exists("delete_memory_cluster"));
+    assert!(registry.exists("read_dreams"));
 
     let mcp_format = registry.export_mcp_format();
     let tools_array = mcp_format
@@ -16,7 +17,7 @@ async fn test_tool_registry() {
         .expect("tools key missing")
         .as_array()
         .unwrap();
-    assert_eq!(tools_array.len(), 3);
+    assert_eq!(tools_array.len(), 4);
 }
 
 #[tokio::test]
