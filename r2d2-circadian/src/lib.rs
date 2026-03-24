@@ -14,7 +14,6 @@ use tracing::{info, warn};
 /// ============================================================================
 /// ⚙️ MOTEUR CIRCADIEN (R2D2 BIOLOGICAL CYCLE)
 /// ============================================================================
-
 /// Le Démon principal qui observe le VibeVector et décide de la phase du système.
 pub struct CircadianDaemon {
     sensory_engine: SensorySynthesisEngine,

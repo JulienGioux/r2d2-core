@@ -5,15 +5,21 @@ use tracing::{info, instrument};
 /// ============================================================================
 /// 🌌 MOTEUR DE RÊVE (MCTS) & INFERENCE STOCHASTIQUE
 /// ============================================================================
-
 pub struct DreamSimulator {}
 
 impl DreamSimulator {
     pub fn new() -> Self {
         Self {}
     }
+}
 
-    /// Ré-exécute les fragments "DEBATED" de la journée dans un environnement Sandbox (Brique 4).
+impl Default for DreamSimulator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DreamSimulator {
     /// Génère des millions de variations pour trouver le consensus absolu.
     #[instrument(skip_all, name = "DreamSimulator::play_stochastic_variations")]
     pub async fn play_stochastic_variations(&self) -> anyhow::Result<()> {

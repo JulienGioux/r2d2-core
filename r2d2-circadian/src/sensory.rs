@@ -4,7 +4,6 @@ use tracing::{info, warn};
 /// ============================================================================
 /// 🌙 SENSORIALITÉ INTERNE (LE VIBEVECTOR)
 /// ============================================================================
-
 /// Représentation mathématique de l'état de "pression sémantique" et "charge système".
 /// Agit comme le système nerveux de l'essaim R2D2.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,12 +126,13 @@ mod tests {
 
     #[test]
     fn test_critical_entropy() {
-        let mut vibe = VibeVector::default();
-        vibe.dissonance = 1.0;
-        vibe.tension = 1.0;
-        vibe.harmonie = 0.0;
-        vibe.clarte = 0.0;
-        vibe.signal = 0.0;
+        let vibe = VibeVector {
+            dissonance: 1.0,
+            tension: 1.0,
+            harmonie: 0.0,
+            clarte: 0.0,
+            signal: 0.0,
+        };
 
         let entropy = vibe.compute_entropy();
         // (1.0 + 1.0)/2 = 1.0
