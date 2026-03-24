@@ -19,11 +19,11 @@ impl FoldingEngine {
     #[instrument(skip_all, name = "FoldingEngine::compress_memory")]
     pub async fn compress_memory(&self) -> anyhow::Result<usize> {
         info!("🔍 Déclenchement du Folding Engine : Scan sémantique PostgreSQL...");
-        
+
         // Simulation d'une requête de regroupement HNSW pour les clusters de similarité > 0.95
         // "SELECT id FROM blackboard_fragments WHERE consensus_level = 'DEBATED_SYNTHESIS'"
-        let duplicates_found = 14; 
-        
+        let duplicates_found = 14;
+
         if duplicates_found > 0 {
             info!(
                 "📦 {} fragments redondants détectés. Fusion Sémantique en cours...",

@@ -41,7 +41,7 @@ impl VibeVector {
         // et quand l'Harmonie, la Clarté et le Signal sont bas (Manque de certitude).
         let negative_forces = (self.dissonance + self.tension) / 2.0;
         let positive_deficits = 1.0 - ((self.harmonie + self.clarte + self.signal) / 3.0);
-        
+
         // Entropie normalisée entre 0.0 (Parfait) et 1.0 (Chaos total)
         (negative_forces + positive_deficits) / 2.0
     }
@@ -83,8 +83,8 @@ impl SensorySynthesisEngine {
         // TODO: Extraire les KPIs depuis r2d2-kernel et r2d2-blackboard.
         // Pour l'instant, posons une perception simulée (mock) du système nerveux.
         self.current_vibe.dissonance += 0.01; // S'accumule naturellement
-        self.current_vibe.tension += 0.05;    // Fragmentation mémoire
-        self.current_vibe.harmonie -= 0.02;   // Dégradation lente des preuves
+        self.current_vibe.tension += 0.05; // Fragmentation mémoire
+        self.current_vibe.harmonie -= 0.02; // Dégradation lente des preuves
 
         // Clamp values
         self.current_vibe.dissonance = self.current_vibe.dissonance.clamp(0.0, 1.0);
@@ -100,7 +100,8 @@ impl SensorySynthesisEngine {
 
     /// Indique au démon Circadien si le sommeil s'impose.
     pub fn is_sleep_required(&self) -> bool {
-        self.current_vibe.requires_deep_sleep(self.entropy_threshold)
+        self.current_vibe
+            .requires_deep_sleep(self.entropy_threshold)
     }
 
     /// Réinitialise l'homéostasie après un sommeil réussi.

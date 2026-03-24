@@ -1,4 +1,4 @@
-use tracing::{info, warn, instrument};
+use tracing::{info, instrument, warn};
 
 /// ============================================================================
 /// 🛡️ PARE-FEU AXIOMATIQUE (IMMUTABLE CORE)
@@ -19,14 +19,16 @@ impl AxiomaticFirewall {
     #[instrument(skip_all, name = "AxiomaticFirewall::verify_core_integrity")]
     pub async fn verify_core_integrity(&self) -> anyhow::Result<()> {
         info!("🛡️ Scanning des Poids Axiomatiques et Lois Fondamentales...");
-        
+
         let corruption_detected = false;
 
         if corruption_detected {
             warn!("🚨 [ALERTE ROUGE] Violation d'un Axiome détectée lors du processus d'Homéostasie !");
             warn!("🛑 Purge Somatique immédiate. Quarantaine de la dernière inférence.");
             // panic!("Axiomatic Failure"); // Panic is forbidden by standard, return Error instead.
-            return Err(anyhow::anyhow!("Violation d'Axiome Fondamental (Axiomatic Failure)"));
+            return Err(anyhow::anyhow!(
+                "Violation d'Axiome Fondamental (Axiomatic Failure)"
+            ));
         } else {
             info!("✅ Intégrité de la Ruche Absolue. Le Pare-Feu est inviolé.");
         }
