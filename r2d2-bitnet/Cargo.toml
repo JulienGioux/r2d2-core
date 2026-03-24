@@ -1,0 +1,14 @@
+[package]
+name = "r2d2-bitnet"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description.workspace = true
+
+[dependencies]
+candle-core = "0.8.2"
+candle-nn = "0.8.2"
+thiserror = "1.0"
+tracing = "0.1"
