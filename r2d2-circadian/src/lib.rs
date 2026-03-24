@@ -10,6 +10,10 @@ use sensory::SensorySynthesisEngine;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{info, warn};
+use std::sync::Arc;
+use r2d2_blackboard::PostgresBlackboard;
+use r2d2_cortex::CortexRegistry;
+use r2d2_paradox::ParadoxSolver;
 
 /// ============================================================================
 /// ⚙️ MOTEUR CIRCADIEN (R2D2 BIOLOGICAL CYCLE)
@@ -19,14 +23,26 @@ pub struct CircadianDaemon {
     sensory_engine: SensorySynthesisEngine,
     // Intervalle entre les scans métaboliques (polling)
     polling_interval: Duration,
+    blackboard: Arc<PostgresBlackboard>,
+    cortex: Arc<CortexRegistry>,
+    solver: Arc<ParadoxSolver>,
 }
 
 impl CircadianDaemon {
     /// Initialise le moteur Circadien avec une tolérance d'entropie critique.
-    pub fn new(critical_entropy_threshold: f32, interval_sec: u64) -> Self {
+    pub fn new(
+        critical_entropy_threshold: f32,
+        interval_sec: u64,
+        blackboard: Arc<PostgresBlackboard>,
+        cortex: Arc<CortexRegistry>,
+        solver: Arc<ParadoxSolver>,
+    ) -> Self {
         Self {
             sensory_engine: SensorySynthesisEngine::new(critical_entropy_threshold),
             polling_interval: Duration::from_secs(interval_sec),
+            blackboard,
+            cortex,
+            solver,
         }
     }
 
@@ -56,7 +72,7 @@ impl CircadianDaemon {
         info!("Blocage réseau externe. L'Hyperviseur prend la main.");
 
         let folding = FoldingEngine::new();
-        let dream = DreamSimulator::new();
+        let dream = DreamSimulator::new(self.blackboard.clone(), self.cortex.clone(), self.solver.clone());
         let firewall = AxiomaticFirewall::new();
 
         // 1. Dédoublonnement Sémantique
