@@ -7,8 +7,8 @@
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
 use r2d2_cortex::{
-    agent::AgentError, 
-    models::{minilm_embedder::MiniLmEmbedderAgent, bitnet_agent::BitNetAgent}, 
+    agent::AgentError,
+    models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent},
     CortexRegistry,
 };
 use r2d2_kernel::{Fragment, KernelError, Signal};
