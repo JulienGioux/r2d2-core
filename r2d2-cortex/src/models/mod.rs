@@ -3,3 +3,4 @@
 pub mod bitnet_agent;
 pub mod minilm_embedder;
 pub mod audio_agent;
+pub mod vision_agent;
