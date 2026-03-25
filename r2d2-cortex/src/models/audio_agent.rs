@@ -291,9 +291,7 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
 
         info!("   [CORTEX] Résolution de la Configuration LLM...");
-        let config_file = repo
-            .get(desc.config_file.unwrap())
-            .await
+        let config_file = repo.get(desc.config_file.unwrap()).await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
         info!("   [CORTEX] Résolution du Dictionnaire Tokenizer...");
@@ -303,12 +301,11 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
         info!("   [CORTEX] Téléchargement des Filtres Spatiaux (melfilters.bytes)...");
-        let mel_bytes_file = repo
-            .get("melfilters.bytes")
-            .await
-            .map_err(|e| AgentError::LoadError(format!("Échec téléchargement melfilters: {}", e)))?;
-        let mel_bytes = std::fs::read(mel_bytes_file)
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let mel_bytes_file = repo.get("melfilters.bytes").await.map_err(|e| {
+            AgentError::LoadError(format!("Échec téléchargement melfilters: {}", e))
+        })?;
+        let mel_bytes =
+            std::fs::read(mel_bytes_file).map_err(|e| AgentError::LoadError(e.to_string()))?;
         let mut mel_raw = vec![0f32; mel_bytes.len() / 4];
         for (i, chunk) in mel_bytes.chunks_exact(4).enumerate() {
             let arr: [u8; 4] = chunk.try_into().unwrap();

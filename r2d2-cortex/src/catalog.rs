@@ -54,7 +54,7 @@ impl CortexCatalog {
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.15, 
+                required_ram_gb: 0.15,
             },
             CognitiveSense::Audio => ModelDescriptor {
                 // openai/whisper-tiny : ~75 Mo. Transcrit le flux à la volée. Frugalité totale.
@@ -65,7 +65,7 @@ impl CortexCatalog {
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.2, 
+                required_ram_gb: 0.2,
             },
             CognitiveSense::Vision => ModelDescriptor {
                 // llava-1.5-7b-hf quantifié ou llava-phi. On s'appuie sur la structure LLaVA standard.
@@ -77,7 +77,7 @@ impl CortexCatalog {
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: Some(vec!["preprocessor_config.json"]),
-                required_ram_gb: 4.5, 
+                required_ram_gb: 4.5,
             },
             CognitiveSense::Reasoning => ModelDescriptor {
                 // Qwen2.5-1.5B-Instruct-GGUF : Ultra-rapide pour le Cortex central, au format GGUF.
@@ -89,7 +89,7 @@ impl CortexCatalog {
                 config_file: None,
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 1.1, 
+                required_ram_gb: 1.1,
             },
         }
     }
