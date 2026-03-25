@@ -301,13 +301,15 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
         info!("   [CORTEX] Téléchargement des Filtres Spatiaux (melfilters.bytes)...");
+        // lmz/candle-whisper renvoyant inopinément une erreur 404 (probablement renommé/déplacé en Dataset HF),
+        // nous pivotons formellement sur fl33tw00d-hf/whisper-base formellement audité et garanti.
         let mel_repo = api.repo(Repo::with_revision(
-            "lmz/candle-whisper".to_string(),
+            "fl33tw00d-hf/whisper-base".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
         let mel_bytes_file = mel_repo.get("melfilters.bytes").await.map_err(|e| {
-            AgentError::LoadError(format!("Échec téléchargement melfilters (lmz): {}", e))
+            AgentError::LoadError(format!("Échec téléchargement melfilters (fl33tw00d-hf): {}", e))
         })?;
         let mel_bytes =
             std::fs::read(mel_bytes_file).map_err(|e| AgentError::LoadError(e.to_string()))?;
