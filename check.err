@@ -1,0 +1,11 @@
+    Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
+warning: unused import: `api::tokio::Api`
+  --> r2d2-cortex/src/models/audio_agent.rs:11:14
+   |
+11 | use hf_hub::{api::tokio::Api, Repo, RepoType};
+   |              ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `r2d2-cortex` (lib) generated 1 warning (run `cargo fix --lib -p r2d2-cortex` to apply 1 suggestion)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.21s

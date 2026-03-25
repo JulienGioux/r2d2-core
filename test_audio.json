@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"ingest_audio","arguments":{"agent":"AudioAgent","path":"/mnt/d/XXXX/R2D2/media_test/a8c9d829-8995-4fac-b982-6118835ff3af.ogg","target_session":"Session-Alpha"}}}
