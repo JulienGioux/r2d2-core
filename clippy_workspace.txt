@@ -1,7 +1,0 @@
-    Checking r2d2-secure-mem v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-secure-mem)
-    Checking r2d2-jsonai v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-jsonai)
-    Checking r2d2-kernel v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-kernel)
-    Checking r2d2-blackboard v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-blackboard)
-    Checking r2d2-paradox v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-paradox)
-    Checking r2d2-mcp v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-mcp)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.27s
