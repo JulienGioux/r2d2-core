@@ -1,5 +1,0 @@
-   Compiling candle-nn v0.8.4
-   Compiling r2d2-bitnet v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-bitnet)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.80s
-     Running unittests src/lib.rs (target/debug/deps/r2d2_bitnet-a6e03cf8b1bc4b57)
-   Doc-tests r2d2_bitnet

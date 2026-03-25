@@ -1,2 +1,0 @@
-    Checking r2d2-cortex v8.2.0 (/mnt/d/XXXX/R2D2/r2d2-cortex)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.71s

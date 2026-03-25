@@ -1,5 +1,0 @@
-commit 18b1fef4a84705110d625ddf38b311c0eed2df2a
-Author: Architect Rusty <rusty@r2d2.network>
-Date:   Mon Mar 23 07:02:23 2026 +0100
-
-    feat(mcp): unstub mcp_rust_sdk v0.1.1 stdio gateway (Brique 9)

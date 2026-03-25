@@ -91,6 +91,33 @@ impl ToolRegistry {
             }),
             requires_hitl: true, // Le Proxy HITL va automatiquement s'enclencher dû au pattern 'delete_'
         });
+
+        // Brique V: Synthèse Sensorielle
+        self.register(McpToolDef {
+            name: "ingest_audio".to_string(),
+            description: "Soumettre un fichier audio (.ogg Vorbis privilégié) au système nerveux périphérique de R2D2 pour transcription locale via Whisper.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "audio_path": { "type": "string", "description": "Chemin absolu vers l'archive audio locale." }
+                },
+                "required": ["audio_path"]
+            }),
+            requires_hitl: false,
+        });
+
+        self.register(McpToolDef {
+            name: "ingest_visual".to_string(),
+            description: "Soumettre une image ou keyframe au R2D2 Sensory Gateway pour analyse sémantique détaillée via le neuro-agent LLaVA.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "image_path": { "type": "string", "description": "Chemin absolu vers le fichier visuel local." }
+                },
+                "required": ["image_path"]
+            }),
+            requires_hitl: false,
+        });
     }
 
     pub fn register(&mut self, tool: McpToolDef) {

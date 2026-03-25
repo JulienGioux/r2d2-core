@@ -1,0 +1,17 @@
+[package]
+name = "r2d2-chunker"
+version = "8.2.0"
+edition = "2021"
+
+[dependencies]
+# Traitement Général & Types
+anyhow = { version = "1.0", features = ["backtrace"] }
+tracing = "0.1"
+bytemuck = "1.15"
+serde_json = "1.0"
+
+# Types locaux R2D2 Sensors
+r2d2-sensory = { path = "../r2d2-sensory" }
+
+# Traitement Audio (Symphonia)
+symphonia = { version = "0.5.4", features = ["all"] }

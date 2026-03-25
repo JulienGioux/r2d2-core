@@ -40,3 +40,11 @@ Thumbs.db
 # (Temporary data or log files created by the Sandbox/Gateway)
 /r2d2-data/
 logs/
+*.log
+*.err
+*.txt
+*.wav
+*.ogg
+*.json
+*.py
+media_test/

@@ -61,6 +61,13 @@ pub struct Fragment<State> {
     state: State,
 }
 
+impl<State> Fragment<State> {
+    /// Extrait formellement l'état interne en consommant le conteneur.
+    pub fn into_inner(self) -> State {
+        self.state
+    }
+}
+
 impl Fragment<Signal> {
     /// Crée un nouveau signal brut amnésique (Zeroize on Drop).
     pub fn new(raw_data: String) -> Self {
