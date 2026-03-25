@@ -19,7 +19,7 @@ fn main() {
     println!("max_source_positions: {}", config.max_source_positions);
 
     let pcm = vec![0f32; 480_000];
-    let mut mel_filters = vec![0f32; config.num_mel_bins * 201];
+    let mel_filters = vec![0f32; config.num_mel_bins * 201];
     let mel = pcm_to_mel(&config, &pcm, &mel_filters);
 
     println!("mel_filters size: {}", mel_filters.len());

@@ -3,7 +3,6 @@ use anyhow::{anyhow, Result};
 use r2d2_sensory::stimulus::{Stimulus, StimulusType};
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
 use tracing::{info, instrument};
 
 /// Agent spécialisé dans la découpe des flux sonores pour Whisper.
@@ -27,7 +26,7 @@ impl AudioChunker {
         info!("   -> Format ciblé: PCM s16le | 16000 Hz | Mono");
 
         let mut child = std::process::Command::new("ffmpeg")
-            .args(&[
+            .args([
                 "-i",
                 path,
                 "-f",
@@ -100,12 +99,11 @@ impl MediaChunker for AudioChunker {
         info!("-> Flux global: {} samples natifs.", total_samples);
 
         let mut stimuli = Vec::new();
-        let mut chunk_index = 0;
 
         // Découpage implacable en paquets de 30 secondes (480_000 samples max)
         // Whisper s'adapte dynamiquement (*Dynamic Positional Embeddings*) aux séquences de <30s sans broncher.
         // On NE PAD PLUS avec du vide pur (0.0), pour éradiquer 100% le terreau des Hallucinations !
-        for chunk in full_pcm.chunks(self.samples_per_chunk) {
+        for (chunk_index, chunk) in full_pcm.chunks(self.samples_per_chunk).enumerate() {
             let chunk_vec = chunk.to_vec();
 
             // Génération d'un fichier .bin brut pour transmission ultra-légère entre briques.
@@ -140,7 +138,6 @@ impl MediaChunker for AudioChunker {
             });
 
             stimuli.push(sub_stimulus);
-            chunk_index += 1;
         }
 
         info!(

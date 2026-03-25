@@ -19,8 +19,8 @@ fn main() {
     // On injecte un pic brutal uniquement sur les premiers 160 floats (Frame 0).
     // Les autres 15840 floats sont à zéro.
     let mut pcm = vec![0f32; 16_000];
-    for i in 0..160 {
-        pcm[i] = 1.0;
+    for item in pcm.iter_mut().take(160) {
+        *item = 1.0;
     }
 
     let mel_filters = vec![1.0f32; 80 * 201]; // Filtres bidon à 1.0
@@ -57,8 +57,8 @@ fn main() {
 
     // On analyse les variations brutes
     let mut energy_in_first_80 = 0.0;
-    for i in 0..80 {
-        energy_in_first_80 += mel[i].abs();
+    for item in mel.iter().take(80) {
+        energy_in_first_80 += item.abs();
     }
 
     let mut energy_in_first_frames = 0.0;
