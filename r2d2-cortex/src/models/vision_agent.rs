@@ -1,41 +1,67 @@
-use crate::agent::{CognitiveAgent, AgentError};
+use crate::agent::{AgentError, CognitiveAgent};
+use crate::catalog::{CognitiveSense, CortexCatalog};
 use async_trait::async_trait;
-use tracing::{info, instrument};
 use std::time::Instant;
+use tracing::{info, instrument};
 
-/// Agent Cortical dédié à la description de scènes (Vision) via LLaVA (Candle).
-pub struct VisionAgent {
+use candle_core::Device;
+
+/// Agent Cortical dédié à la perception visuelle (Mixture of Experts - Expert 1 : LLaVA).
+pub struct VisionAgentLlava {
+    name: String,
+    #[allow(dead_code)]
+    device: Device,
     active: bool,
+    // TODO: Intégrer les types LLaVA de candle-transformers une fois validés
+    // model: Option<candle_transformers::models::llava::Model>,
+    // processor: Option<Processor>,
 }
 
-impl VisionAgent {
+impl VisionAgentLlava {
     pub fn new() -> Self {
-        Self { active: false }
-    }
-
-    /// Processus interne d'inférence VLM (Vision-Language Model via Candle)
-    /// Le payload attendu est un chemin vers une Keyframe (Image) ou une vidéo.
-    async fn describe_scene(&self, visual_payload: &str) -> Result<String, AgentError> {
-        info!("VisionAgent: Chargement des tenseurs LLaVA (Simulé)...");
-        // En prod, si l'input est une vidéo, un process FFmpeg local extraira des frames à analyser séquentiellement
-        Ok(format!("Analyse des détails sémantiques de la scène visuelle : {}", visual_payload))
+        Self {
+            name: "VisionAgent-Llava".to_string(),
+            device: Device::Cpu,
+            active: false,
+        }
     }
 }
 
 #[async_trait]
-impl CognitiveAgent for VisionAgent {
-    fn name(&self) -> &'static str {
-        "VisionAgent-LLaVA"
+impl CognitiveAgent for VisionAgentLlava {
+    fn name(&self) -> &str {
+        &self.name
     }
 
+    #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
-        info!("Chargement de l'agent visuel (LLaVA) en VRAM...");
+        let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Vision);
+        self.name = format!(
+            "VisionAgent-Llava-{}",
+            desc.repo_id.split('/').last().unwrap_or("")
+        );
+
+        info!(
+            "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
+            self.name
+        );
+
+        // Simuler le téléchargement pour l'instant afin de valider la compilation de l'écosystème
+        // hf_hub::api::tokio::Api::new() ...
+
         self.active = true;
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Simulation Initiale).",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("Déchargement des modèles LLaVA de la VRAM...");
+        info!(
+            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            self.name
+        );
         self.active = false;
         Ok(())
     }
@@ -44,30 +70,32 @@ impl CognitiveAgent for VisionAgent {
         self.active
     }
 
-    #[instrument(skip_all, name = "VisionAgent::generate_thought")]
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    #[instrument(skip_all, name = "VisionAgentLlava::generate_thought")]
+    async fn generate_thought(&mut self, _prompt: &str) -> Result<String, AgentError> {
+        if !self.is_active() {
+            return Err(AgentError::NotActive);
+        }
         let start = Instant::now();
-        info!("👁️ VisionAgent focalise son 'Attention' sur le stimulus visuel...");
+        info!("👁️ VisionAgent-LLaVA démarre l'ingestion asynchrone...");
 
-        let description = self.describe_scene(prompt).await?;
-
-        // Formatage JsonAiV3 de la déduction Visuelle.
-        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-        let jsonai = format!(r#"{{
-            "id": "visual-{}",
-            "source": "{}",
-            "timestamp": "2026-03-24T22:00:00Z",
-            "is_fact": false,
-            "belief_state": "Perspective",
-            "consensus": "Uncertain",
-            "content": "{}"
-        }}"#, 
-            timestamp,
-            self.name(),
-            description.replace("\"", "\\\"")
+        // Fake inference pour valider l'architecture
+        let jsonai = format!(
+            r#"{{
+            "id": "vision-{}",
+            "source": {{ "Vision_Llava": "{}" }},
+            "timestamp": "2026-03-25T00:00:00Z",
+            "is_fact": true,
+            "belief_state": "Visual Extraction (Expert 1)",
+            "consensus": "DEBATED_SYNTHESIS",
+            "content": "J'observe une image contenant potentiellement la cible (Simulation)",
+            "ontological_tags": ["Vision", "Llava", "Perspective-1"],
+            "dependencies": []
+        }}"#,
+            start.elapsed().as_millis(),
+            self.name()
         );
 
-        info!("Analyse de scène (VLM) accomplie en {:?}", start.elapsed());
+        info!("Inférence visuelle accomplie en {:?}", start.elapsed());
         Ok(jsonai)
     }
 }

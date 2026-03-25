@@ -28,31 +28,69 @@ impl SensoryGateway {
             stimulus.stimulus_type
         );
 
-        let system_prompt = match stimulus.stimulus_type {
-            StimulusType::Audio => "Transcribe this audio precisely. Return JSONAI.",
-            StimulusType::Visual => "Analyze this image/frame and describe the scene focusing on logical details. Return JSONAI.",
-            _ => "Extract semantic facts from this input. Return JSONAI."
-        };
+        if stimulus.stimulus_type == StimulusType::Visual {
+            // Séquence Mixture of Experts (MoE) : Inférence Séquentielle (RAM < 8Go)
+            info!("-> Démarrage de la séquence Visual Mixture-of-Experts (MoE)...");
 
-        info!(
-            "-> Délégation à l'agent Cortical (Whisper/LLaVA en attente)... ({})",
-            system_prompt
-        );
+            let experts = [
+                "VisionAgent-Llava".to_string(),
+                "VisionAgent-Qwen".to_string(), // Séquence MoE validée.
+            ];
 
-        // Simulation d'un retour JSONAI brut non validé (Pour la phase de test)
-        let synthetic_jsonai = format!(
-            r#"{{
-            "id": "stimulus-{}",
-            "source": "CognitiveAgent",
-            "timestamp": "2026-03-24T20:00:00Z",
-            "is_fact": false,
-            "belief_state": "Perspective",
-            "consensus": "Uncertain",
-            "content": "Stimulus {} ingéré mais non entièrement traité via ML."
-        }}"#,
-            stimulus.id, stimulus.id
-        );
+            let mut moes_results = Vec::new();
+            let prompt = stimulus.payload_path.to_string_lossy().to_string();
 
-        Ok(Fragment::<Signal>::new(synthetic_jsonai))
+            for expert in &experts {
+                info!(
+                    "   [MoE] Activation Poids-Lourds de l'expert '{}'...",
+                    expert
+                );
+                self.cortex
+                    .activate(expert)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Échec activation MoE '{}': {:?}", expert, e))?;
+
+                let jsonai = self
+                    .cortex
+                    .interact_with(expert, &prompt)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Échec d'inférence MoE '{}': {:?}", expert, e))?;
+
+                moes_results.push(jsonai);
+            }
+
+            // Synthèse temporaire (En attendant le ParadoxEngine pour le vrai DEBATED_SYNTHESIS)
+            // On renvoie le résultat du dernier expert (qui encapsule les métadonnées JSONAI v3)
+            let final_jsonai = moes_results
+                .pop()
+                .unwrap_or_else(|| String::from("Aucun expert"));
+
+            Ok(Fragment::<Signal>::new(final_jsonai))
+        } else {
+            // Routage Classique (Non-MoE)
+            let (agent_name, prompt) = match stimulus.stimulus_type {
+                StimulusType::Audio => (
+                    "AudioAgent",
+                    stimulus.payload_path.to_string_lossy().to_string(),
+                ),
+                _ => return Err(anyhow::anyhow!("Type de stimulus non pris en charge")),
+            };
+
+            info!(
+                "-> Délégation à l'agent Cortical '{}' (Activation en RAM demandée)...",
+                agent_name
+            );
+            self.cortex
+                .activate(agent_name)
+                .await
+                .map_err(|e| anyhow::anyhow!("Échec d'allocation Cortex: {:?}", e))?;
+            let jsonai = self
+                .cortex
+                .interact_with(agent_name, &prompt)
+                .await
+                .map_err(|e| anyhow::anyhow!("Échec d'inférence Cortex: {:?}", e))?;
+
+            Ok(Fragment::<Signal>::new(jsonai))
+        }
     }
 }

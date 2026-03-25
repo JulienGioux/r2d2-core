@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 /// Définit le type de stimulus capté par le R2D2 Sensory Gateway.
 /// L'architecture Hexagonale permet de rajouter des sens physiques futuristes (ex: Tactile via robotique).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum StimulusType {
     /// Flux vocal ou enregistrement sonore
     Audio,

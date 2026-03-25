@@ -9,6 +9,7 @@ use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{Repo, RepoType};
 use tokenizers::Tokenizer;
+use crate::catalog::{CognitiveSense, CortexCatalog};
 
 /// Unité d'Extraction Sémantique Multilingue Ultra-Légère (130 Mo).
 /// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur de 384 dimensions).
@@ -54,29 +55,31 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
             self.name
         );
 
+        let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
+
         let api =
             hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
-            "intfloat/multilingual-e5-small".to_string(),
+            desc.repo_id.to_string(),
             RepoType::Model,
-            "main".to_string(),
+            desc.revision.to_string(),
         ));
 
         // Téléchargement des 3 artefacts critiques
         info!("   [CORTEX] Résolution des poids Safetensors...");
         let model_file = repo
-            .get("model.safetensors")
+            .get(desc.weights_file)
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
 
         info!("   [CORTEX] Résolution du dictionnaire Tokenizer...");
         let tokenizer_file = repo
-            .get("tokenizer.json")
+            .get(desc.tokenizer_file.unwrap())
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
         let config_file = repo
-            .get("config.json")
+            .get(desc.config_file.unwrap())
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
