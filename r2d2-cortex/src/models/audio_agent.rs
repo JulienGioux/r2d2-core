@@ -390,7 +390,10 @@ impl CognitiveAgent for AudioAgent {
         } else {
             "melfilters.bytes"
         };
-        info!("   [CORTEX] Téléchargement des Filtres Spatiaux ({})...", melfilters_filename);
+        info!(
+            "   [CORTEX] Téléchargement des Filtres Spatiaux ({})...",
+            melfilters_filename
+        );
         // -----------------------------------------------------------------------------------
         // [PARE-FEU RUSTY] : ROUTAGE HUGGINGFACE DYNAMIQUE POUR MELFILTERS
         // Historique : Le fichier n'existe pas toujours sur le repo officiel OpenAI.
