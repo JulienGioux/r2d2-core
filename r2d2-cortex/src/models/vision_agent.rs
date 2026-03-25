@@ -1,8 +1,8 @@
-use crate::agent::{CognitiveAgent, AgentError};
+use crate::agent::{AgentError, CognitiveAgent};
 use crate::catalog::{CognitiveSense, CortexCatalog};
 use async_trait::async_trait;
-use tracing::{info, instrument};
 use std::time::Instant;
+use tracing::{info, instrument};
 
 use candle_core::Device;
 
@@ -36,20 +36,32 @@ impl CognitiveAgent for VisionAgentLlava {
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Vision);
-        self.name = format!("VisionAgent-Llava-{}", desc.repo_id.split('/').last().unwrap_or(""));
+        self.name = format!(
+            "VisionAgent-Llava-{}",
+            desc.repo_id.split('/').last().unwrap_or("")
+        );
 
-        info!("🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'", self.name);
+        info!(
+            "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
+            self.name
+        );
         
         // Simuler le téléchargement pour l'instant afin de valider la compilation de l'écosystème
         // hf_hub::api::tokio::Api::new() ...
 
         self.active = true;
-        info!("🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Simulation Initiale).", self.name);
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Simulation Initiale).",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.", self.name);
+        info!(
+            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            self.name
+        );
         self.active = false;
         Ok(())
     }
@@ -60,12 +72,15 @@ impl CognitiveAgent for VisionAgentLlava {
 
     #[instrument(skip_all, name = "VisionAgentLlava::generate_thought")]
     async fn generate_thought(&mut self, _prompt: &str) -> Result<String, AgentError> {
-        if !self.is_active() { return Err(AgentError::NotActive); }
+        if !self.is_active() {
+            return Err(AgentError::NotActive);
+        }
         let start = Instant::now();
         info!("👁️ VisionAgent-LLaVA démarre l'ingestion asynchrone...");
 
         // Fake inference pour valider l'architecture
-        let jsonai = format!(r#"{{
+        let jsonai = format!(
+            r#"{{
             "id": "vision-{}",
             "source": {{ "Vision_Llava": "{}" }},
             "timestamp": "2026-03-25T00:00:00Z",
@@ -75,7 +90,7 @@ impl CognitiveAgent for VisionAgentLlava {
             "content": "J'observe une image contenant potentiellement la cible (Simulation)",
             "ontological_tags": ["Vision", "Llava", "Perspective-1"],
             "dependencies": []
-        }}"#, 
+        }}"#,
             start.elapsed().as_millis(),
             self.name()
         );

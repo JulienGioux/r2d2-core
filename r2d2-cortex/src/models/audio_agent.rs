@@ -1,12 +1,12 @@
-use crate::agent::{CognitiveAgent, AgentError};
+use crate::agent::{AgentError, CognitiveAgent};
 use crate::catalog::{CognitiveSense, CortexCatalog};
 use async_trait::async_trait;
-use tracing::{info, instrument};
 use std::time::Instant;
+use tracing::{info, instrument};
 
-use candle_core::{Device, Tensor, IndexOp};
+use candle_core::{Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
-use candle_transformers::models::whisper::{Config, model::Whisper, audio};
+use candle_transformers::models::whisper::{audio, model::Whisper, Config};
 use hf_hub::{Repo, RepoType};
 
 /// Agent Cortical dédié à la transcription Audio via Whisper (Candle).
@@ -37,11 +37,15 @@ impl AudioAgent {
 
     /// Processus interne d'inférence ML (Whisper - Candle Greedy)
     async fn transcribe(&mut self, audio_path: &str) -> Result<String, AgentError> {
-        info!("AudioAgent: Importation Tenseur-Brut 16kHz depuis ({})", audio_path);
-        
+        info!(
+            "AudioAgent: Importation Tenseur-Brut 16kHz depuis ({})",
+            audio_path
+        );
+
         let path = std::path::Path::new(audio_path);
-        let raw_bytes = std::fs::read(path).map_err(|e| AgentError::InferenceError(format!("Fichier binaire illisible: {}", e)))?;
-        
+        let raw_bytes = std::fs::read(path)
+            .map_err(|e| AgentError::InferenceError(format!("Fichier binaire illisible: {}", e)))?;
+
         // Reconstruction du flux f32 pur
         let mut pcm_data = vec![0f32; raw_bytes.len() / 4];
         for (i, chunk) in raw_bytes.chunks_exact(4).enumerate() {
@@ -58,10 +62,17 @@ impl AudioAgent {
         let mut sum_amp = 0.0f32;
         for &s in &pcm_data {
             let abs_s = s.abs();
-            if abs_s > max_amp { max_amp = abs_s; }
+            if abs_s > max_amp {
+                max_amp = abs_s;
+            }
             sum_amp += abs_s;
         }
-        info!("-> Tenseur PCM ({}) | Amplitude Max: {:.6} | Moyenne: {:.6}", pcm_data.len(), max_amp, sum_amp / pcm_data.len() as f32);
+        info!(
+            "-> Tenseur PCM ({}) | Amplitude Max: {:.6} | Moyenne: {:.6}",
+            pcm_data.len(),
+            max_amp,
+            sum_amp / pcm_data.len() as f32
+        );
         if max_amp < 0.0001 {
             info!("🚨 ALERTE ROUGE : LE SIGNAL EST TOTALEMENT VIDE (0.0) !");
         }
@@ -80,114 +91,166 @@ impl AudioAgent {
         let mel_bytes = include_bytes!("melfilters.bytes").as_slice();
         let mel_raw_len = mel_bytes.len() / 4;
         let filter_bins = mel_raw_len / 201; // n_fft(400)/2 + 1 = 201
-        
+
         // Diagnostic Mel Flottant Pur
         let mut mel_sum = 0f32;
         let mut mel_max = 0f32;
         let mut mel_min = 1000f32;
         for &m in &mel {
             mel_sum += m;
-            if m > mel_max { mel_max = m; }
-            if m < mel_min { mel_min = m; }
+            if m > mel_max {
+                mel_max = m;
+            }
+            if m < mel_min {
+                mel_min = m;
+            }
         }
-        info!(">>> STATS MEL BRUT: Max={}, Min={}, Moyenne={}", mel_max, mel_min, mel_sum / mel.len() as f32);
-        info!(">>> SONDAGE CANDLE : Sortie pcm_to_mel = {} floats", mel_len);
-        
+        info!(
+            ">>> STATS MEL BRUT: Max={}, Min={}, Moyenne={}",
+            mel_max,
+            mel_min,
+            mel_sum / mel.len() as f32
+        );
+        info!(
+            ">>> SONDAGE CANDLE : Sortie pcm_to_mel = {} floats",
+            mel_len
+        );
+
         // La géométrie exacte dépend obligatoirement du nombre de bins du filtre.
         let true_frames = mel_len / filter_bins;
-        info!(">>> DÉCOUPAGE GÉOMÉTRIQUE VÉRIFIÉ : [{} bins x {} frames]", filter_bins, true_frames);
-        
+        info!(
+            ">>> DÉCOUPAGE GÉOMÉTRIQUE VÉRIFIÉ : [{} bins x {} frames]",
+            filter_bins, true_frames
+        );
+
         // L'audit de `candle-transformers/audio.rs` prouve que la mémoire est écrite en `j * n_len + i`.
         // C'est un pur Row-Major `[bins, frames]`. Son injection dans `(1, filter_bins, true_frames)` est PARFAITE.
         let mut mel_tensor = Tensor::from_vec(mel, (1, filter_bins, true_frames), &self.device)
             .map_err(|e| AgentError::InferenceError(format!("Tensor Mel Error: {}", e)))?;
-            
+
         if filter_bins > num_mel_bins {
-            info!("-> Retaillement Spatial des FRÉQUENCES : {} -> {}", filter_bins, num_mel_bins);
-            mel_tensor = mel_tensor.narrow(1, 0, num_mel_bins).map_err(|e| AgentError::InferenceError(e.to_string()))?;
-        }
-        
-        let seq_len = mel_tensor.dim(2).unwrap_or(0);
-        if seq_len > 3000 {
-            info!("-> Retaillement Temporel des FRAMES (Padding Cut): {} -> 3000", seq_len);
-            mel_tensor = mel_tensor.narrow(2, 0, 3000).map_err(|e| AgentError::InferenceError(e.to_string()))?;
+            info!(
+                "-> Retaillement Spatial des FRÉQUENCES : {} -> {}",
+                filter_bins, num_mel_bins
+            );
+            mel_tensor = mel_tensor
+                .narrow(1, 0, num_mel_bins)
+                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
         }
 
-        info!("-> Injection Encodeur | Shape Final: {:?}", mel_tensor.shape());
-        let encoder_out = model.encoder.forward(&mel_tensor, true)
+        let seq_len = mel_tensor.dim(2).unwrap_or(0);
+        if seq_len > 3000 {
+            info!(
+                "-> Retaillement Temporel des FRAMES (Padding Cut): {} -> 3000",
+                seq_len
+            );
+            mel_tensor = mel_tensor
+                .narrow(2, 0, 3000)
+                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+        }
+
+        info!(
+            "-> Injection Encodeur | Shape Final: {:?}",
+            mel_tensor.shape()
+        );
+        let encoder_out = model
+            .encoder
+            .forward(&mel_tensor, true)
             .map_err(|e| AgentError::InferenceError(format!("Encodeur: {}", e)))?;
-            
-        let enc_max = encoder_out.max_all().unwrap().to_scalar::<f32>().unwrap_or(0.0);
-        let enc_min = encoder_out.min_all().unwrap().to_scalar::<f32>().unwrap_or(0.0);
-        info!("   Encodeur Out Shape: {:?} | Stats: [Max={}, Min={}]", encoder_out.shape(), enc_max, enc_min);
+
+        let enc_max = encoder_out
+            .max_all()
+            .unwrap()
+            .to_scalar::<f32>()
+            .unwrap_or(0.0);
+        let enc_min = encoder_out
+            .min_all()
+            .unwrap()
+            .to_scalar::<f32>()
+            .unwrap_or(0.0);
+        info!(
+            "   Encodeur Out Shape: {:?} | Stats: [Max={}, Min={}]",
+            encoder_out.shape(),
+            enc_max,
+            enc_min
+        );
 
         info!("-> Génération autorégressive (Incrémentale avec KV cache exclusif)...");
         let mut tokens = vec![50258, 50265, 50359, 50363];
-        let eot_token = 50257; 
-        
+        let eot_token = 50257;
+
         let mut log_tokens = Vec::new();
-        
+
         // Amorce initiale : tout le prompt
         let tokens_tensor = Tensor::new(tokens.as_slice(), &self.device)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?
-            .unsqueeze(0).unwrap();
+            .unsqueeze(0)
+            .unwrap();
 
-        for step in 0..150 { 
+        for step in 0..150 {
             // Forward complet à chaque étape : on passe toute la séquence accumulée.
             // Cela garantit que les `position_ids` de Whisper sont reconstruits parfaitement
             // et contourne un bug potentiel de non-incrémentation du tracking de position en `flush=false`.
             let current_tokens_tensor = Tensor::new(tokens.as_slice(), &self.device)
                 .map_err(|e| AgentError::InferenceError(e.to_string()))?
-                .unsqueeze(0).unwrap();
+                .unsqueeze(0)
+                .unwrap();
 
-            let hidden_states = model.decoder.forward(&current_tokens_tensor, &encoder_out, true)
+            let hidden_states = model
+                .decoder
+                .forward(&current_tokens_tensor, &encoder_out, true)
                 .map_err(|e| AgentError::InferenceError(format!("Décodeur: {}", e)))?;
-            
+
             let seq_len_l = hidden_states.dim(1).unwrap();
-            
+
             // On réduit à [1, 1, 384] pour la projection finale
             let last_hidden = hidden_states.i((.., seq_len_l - 1.., ..)).unwrap();
-            
+
             // Projection via la couche linéaire du décodeur pour obtenir les probabilités (51865 classes)
             let logits = model.decoder.final_linear(&last_hidden).unwrap();
-            
+
             let mut logits_slice = logits.i((0, 0, ..)).unwrap();
-            
+
             // Masque Anti-Hallucination Absolu (Bloque les probabilités des non-speech tokens comme `]`, `3`, etc.)
             if let Some(suppress) = &self.suppress_tensor {
                 logits_slice = logits_slice.broadcast_add(suppress).unwrap();
             }
 
             let next_token = logits_slice.argmax(0).unwrap().to_scalar::<u32>().unwrap();
-                
+
             tokens.push(next_token);
-            
+
             if step < 10 {
                 log_tokens.push(next_token);
             } else if step == 10 {
                 info!("   [DECODER 10 TKN] Séquence amont : {:?}", log_tokens);
             }
-            
+
             if next_token == eot_token {
-                info!("   [DECODER] Token EOT (50257) détecté à l'étape {}. Arrêt propre.", step);
+                info!(
+                    "   [DECODER] Token EOT (50257) détecté à l'étape {}. Arrêt propre.",
+                    step
+                );
                 break;
             }
 
             // Coupe-circuit : Attracteur de silence (Répétition stricte de 5 tokens BPE identiques)
             let len = tokens.len();
             if len > 5 {
-                if tokens[len-1] == tokens[len-2] && 
-                   tokens[len-2] == tokens[len-3] && 
-                   tokens[len-3] == tokens[len-4] && 
-                   tokens[len-4] == tokens[len-5] {
+                if tokens[len - 1] == tokens[len - 2]
+                    && tokens[len - 2] == tokens[len - 3]
+                    && tokens[len - 3] == tokens[len - 4]
+                    && tokens[len - 4] == tokens[len - 5]
+                {
                     info!("   [DECODER] Spirale Hallucinatoire détectée sur le token ({}). EOT forcé.", next_token);
                     break;
                 }
             }
         }
-        
+
         info!("-> Décodage Tokenizer linguistique...");
-        let decoded = tokenizer.decode(&tokens, true)
+        let decoded = tokenizer
+            .decode(&tokens, true)
             .map_err(|e| AgentError::InferenceError(format!("Tokenizer error: {}", e)))?;
 
         Ok(decoded.trim().to_string())
@@ -236,13 +299,19 @@ impl CognitiveAgent for AudioAgent {
         info!("   [CORTEX] Allocation VarBuilder et Tenseurs Memoire Whisper...");
         let config_str = std::fs::read_to_string(&config_file).unwrap();
         let config: Config = serde_json::from_str(&config_str).unwrap();
-        
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], candle_core::DType::F32, &self.device) }
-            .map_err(|e| AgentError::LoadError(format!("VarBuilder fail: {}", e)))?;
-            
+
+        let vb = unsafe {
+            VarBuilder::from_mmaped_safetensors(
+                &[model_file],
+                candle_core::DType::F32,
+                &self.device,
+            )
+        }
+        .map_err(|e| AgentError::LoadError(format!("VarBuilder fail: {}", e)))?;
+
         let model = Whisper::load(&vb, config.clone())
             .map_err(|e| AgentError::LoadError(format!("Whisper model instanciation: {}", e)))?;
-            
+
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_file)
             .map_err(|e| AgentError::LoadError(e.to_string()))?;
 
@@ -263,16 +332,22 @@ impl CognitiveAgent for AudioAgent {
         }
         let suppress_tensor = Tensor::new(suppress_mask.as_slice(), &self.device)
             .map_err(|e| AgentError::LoadError(format!("Suppress Tensor Error: {}", e)))?;
-            
+
         self.suppress_tensor = Some(suppress_tensor);
         self.active = true;
-        
-        info!("🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Tensors cached).", self.name);
+
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Tensors cached).",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.", self.name);
+        info!(
+            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            self.name
+        );
         self.active = false;
         self.model = None;
         self.tokenizer = None;
@@ -285,7 +360,9 @@ impl CognitiveAgent for AudioAgent {
 
     #[instrument(skip_all, name = "AudioAgent::generate_thought")]
     async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
-        if !self.is_active() { return Err(AgentError::NotActive); }
+        if !self.is_active() {
+            return Err(AgentError::NotActive);
+        }
         let start = Instant::now();
         info!("🎙️ AudioAgent démarre l'ingestion asynchrone (Forward Pass)...");
 

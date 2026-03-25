@@ -1,7 +1,7 @@
-use crate::agent::{CognitiveAgent, AgentError};
+use crate::agent::{AgentError, CognitiveAgent};
 use async_trait::async_trait;
-use tracing::{info, instrument};
 use std::time::Instant;
+use tracing::{info, instrument};
 
 use candle_core::Device;
 
@@ -31,14 +31,23 @@ impl CognitiveAgent for VisionAgentQwen {
 
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
-        info!("🔌 [CORTEX] Activation Poids-Lourds de l'agent '{}'", self.name);
+        info!(
+            "🔌 [CORTEX] Activation Poids-Lourds de l'agent '{}'",
+            self.name
+        );
         self.active = true;
-        info!("🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Simulation).", self.name);
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel (Simulation).",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.", self.name);
+        info!(
+            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            self.name
+        );
         self.active = false;
         Ok(())
     }
@@ -49,11 +58,14 @@ impl CognitiveAgent for VisionAgentQwen {
 
     #[instrument(skip_all, name = "VisionAgentQwen::generate_thought")]
     async fn generate_thought(&mut self, _prompt: &str) -> Result<String, AgentError> {
-        if !self.is_active() { return Err(AgentError::NotActive); }
+        if !self.is_active() {
+            return Err(AgentError::NotActive);
+        }
         let start = Instant::now();
         info!("👁️ VisionAgent-QWEN démarre l'ingestion asynchrone...");
 
-        let jsonai = format!(r#"{{
+        let jsonai = format!(
+            r#"{{
             "id": "vision-{}",
             "source": {{ "Vision_Qwen": "{}" }},
             "timestamp": "2026-03-25T00:00:20Z",
@@ -63,7 +75,7 @@ impl CognitiveAgent for VisionAgentQwen {
             "content": "Mon analyse indique une corrélation forte avec la cible, avec des détails d'arrière-plan divergents (Simulation)",
             "ontological_tags": ["Vision", "Qwen", "Perspective-2"],
             "dependencies": []
-        }}"#, 
+        }}"#,
             start.elapsed().as_millis(),
             self.name()
         );
