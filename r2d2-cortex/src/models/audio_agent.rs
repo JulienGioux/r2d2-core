@@ -219,8 +219,10 @@ impl AudioAgent {
                 "-> Injection Encodeur | Shape Final: {:?}",
                 mel_tensor.shape()
             );
-            let encoder_out = engine
-                .model
+            let mut local_model = engine.model.clone();
+            // Si la librairie le permet, forcer le clean du cache:
+            // local_model.reset_kv_cache(); // Retiré car un clone propre est toujours vierge.
+            let encoder_out = local_model
                 .encoder
                 .forward(&mel_tensor, true)
                 .map_err(|e| AgentError::InferenceError(format!("Encodeur: {}", e)))?;
@@ -254,8 +256,7 @@ impl AudioAgent {
                     .unsqueeze(0)
                     .unwrap();
 
-                let hidden_states = engine
-                    .model
+                let hidden_states = local_model
                     .decoder
                     .forward(&current_tokens_tensor, &encoder_out, true)
                     .map_err(|e| AgentError::InferenceError(format!("Décodeur: {}", e)))?;
@@ -266,7 +267,7 @@ impl AudioAgent {
                 let last_hidden = hidden_states.i((.., seq_len_l - 1.., ..)).unwrap();
 
                 // Projection via la couche linéaire du décodeur pour obtenir les probabilités
-                let logits = engine.model.decoder.final_linear(&last_hidden).unwrap();
+                let logits = local_model.decoder.final_linear(&last_hidden).unwrap();
 
                 let mut logits_slice = logits.i((0, 0, ..)).unwrap();
 
