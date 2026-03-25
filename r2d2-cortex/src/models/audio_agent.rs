@@ -76,7 +76,7 @@ impl AudioAgent {
         if max_amp < 0.0001 {
             info!("🚨 ALERTE ROUGE : LE SIGNAL EST TOTALEMENT VIDE (0.0) !");
         }
-        
+
         let config = self.config.as_ref().ok_or(AgentError::NotActive)?;
         let mel_filters = self.mel_filters.as_ref().ok_or(AgentError::NotActive)?;
         let tokenizer = self.tokenizer.as_ref().ok_or(AgentError::NotActive)?;
@@ -266,11 +266,18 @@ impl CognitiveAgent for AudioAgent {
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Audio);
-        self.name = format!("AudioAgent-{}", desc.repo_id.split('/').last().unwrap_or("Whisper"));
+        self.name = format!(
+            "AudioAgent-{}",
+            desc.repo_id.split('/').last().unwrap_or("Whisper")
+        );
 
-        info!("🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'", self.name);
+        info!(
+            "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
+            self.name
+        );
 
-        let api = hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api =
+            hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,
@@ -278,7 +285,9 @@ impl CognitiveAgent for AudioAgent {
         ));
 
         info!("   [CORTEX] Résolution des poids Safetensors principaux...");
-        let model_file = repo.get(desc.weights_file).await
+        let model_file = repo
+            .get(desc.weights_file)
+            .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
 
         info!("   [CORTEX] Résolution de la Configuration LLM...");
@@ -286,7 +295,9 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
         info!("   [CORTEX] Résolution du Dictionnaire Tokenizer...");
-        let tokenizer_file = repo.get(desc.tokenizer_file.unwrap()).await
+        let tokenizer_file = repo
+            .get(desc.tokenizer_file.unwrap())
+            .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
         info!("   [CORTEX] Chargement Statique des Filtres Spatiaux (Air-Gapped bytes)...");
@@ -368,8 +379,12 @@ impl CognitiveAgent for AudioAgent {
 
         let transcription = self.transcribe(prompt).await?;
 
-        let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
-        let jsonai = format!(r#"{{
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let jsonai = format!(
+            r#"{{
             "id": "audio-{}",
             "source": {{ "Audio": "{}" }},
             "timestamp": "2026-03-24T21:30:00Z",
@@ -379,7 +394,7 @@ impl CognitiveAgent for AudioAgent {
             "content": "{}",
             "ontological_tags": ["Audio", "Transcription"],
             "dependencies": []
-        }}"#, 
+        }}"#,
             timestamp,
             self.name(),
             transcription.replace("\"", "\\\"")

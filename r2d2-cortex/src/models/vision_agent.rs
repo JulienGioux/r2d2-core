@@ -45,7 +45,7 @@ impl CognitiveAgent for VisionAgentLlava {
             "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
             self.name
         );
-        
+
         // Simuler le téléchargement pour l'instant afin de valider la compilation de l'écosystème
         // hf_hub::api::tokio::Api::new() ...
 
