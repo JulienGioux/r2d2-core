@@ -42,30 +42,30 @@ pub struct CortexCatalog;
 
 impl CortexCatalog {
     /// Récupère l'empreinte génétique statique (Le Modèle) associée à un sens cognitif.
-    /// Ces choix sont optimisés spécifiquement pour des environnements Frugaux (RAM \<= 8Go).
+    /// Ces choix sont optimisés spécifiquement pour des environnements Frugaux (RAM <= 8Go).
     pub fn get_default_descriptor(sense: CognitiveSense) -> ModelDescriptor {
         match sense {
             CognitiveSense::Semantic => ModelDescriptor {
-                // intfloat/multilingual-e5-small : ~130 Mo, 384 dimensions. Le standard absolu.
-                repo_id: "intfloat/multilingual-e5-small",
+                // intfloat/multilingual-e5-large-instruct : ~2.2 Go, 1024 dimensions. Le nouveau standard absolu.
+                repo_id: "intfloat/multilingual-e5-large-instruct",
                 revision: "main",
                 weights_file: "model.safetensors",
                 tokenizer_file: Some("tokenizer.json"),
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.15,
+                required_ram_gb: 2.5,
             },
             CognitiveSense::Audio => ModelDescriptor {
-                // openai/whisper-tiny : ~75 Mo. Transcrit le flux à la volée. Frugalité totale.
-                repo_id: "openai/whisper-tiny",
+                // openai/whisper-large-v3-turbo : ~3 Go. Hautes performances de transcription.
+                repo_id: "openai/whisper-large-v3-turbo",
                 revision: "main",
                 weights_file: "model.safetensors",
                 tokenizer_file: Some("tokenizer.json"),
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.2,
+                required_ram_gb: 3.5,
             },
             CognitiveSense::Vision => ModelDescriptor {
                 // llava-1.5-7b-hf quantifié ou llava-phi. On s'appuie sur la structure LLaVA standard.

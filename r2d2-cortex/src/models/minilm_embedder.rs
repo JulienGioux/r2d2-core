@@ -11,9 +11,9 @@ use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{Repo, RepoType};
 use tokenizers::Tokenizer;
 
-/// Unité d'Extraction Sémantique Multilingue Ultra-Légère (130 Mo).
-/// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur de 384 dimensions).
-/// Il s'agit du modèle de classe mondiale "intfloat/multilingual-e5-small".
+/// Unité d'Extraction Sémantique Multilingue Haute Fidélité (2.2 Go).
+/// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur de 1024 dimensions).
+/// Il s'agit du modèle de classe mondiale "intfloat/multilingual-e5-large-instruct".
 pub struct MiniLmEmbedderAgent {
     name: String,
     device: Device,
@@ -28,7 +28,7 @@ impl MiniLmEmbedderAgent {
         let device = Device::Cpu;
 
         Self {
-            name: "Multilingual-E5-Small".to_string(),
+            name: "Multilingual-E5-Large-Instruct".to_string(),
             device,
             tokenizer: None,
             model: None,
@@ -131,8 +131,8 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
         let tokenizer = self.tokenizer.as_ref().unwrap();
         let model = self.model.as_ref().unwrap();
 
-        // 1. Tokenisation du texte brut avec le préfixe E5
-        let e5_prompt = format!("query: {}", prompt);
+        // 1. Tokenisation du texte brut avec le préfixe E5 Instruct
+        let e5_prompt = format!("Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: {}", prompt);
         let tokens = tokenizer
             .encode(e5_prompt, true)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
@@ -157,11 +157,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
         let mut vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
 
-        // COMPROMIS ARCHITECTURAL (ZEROPADDING ISO-COSINUS)
-        // La BDD attend des vecteurs HNSW en Haute Définition (1024 dimensions).
-        // MiniLM sort 384 dimensions. Sachant que DistCosine(A,B) = 1 - (A.B)/(||A||*||B||)
-        // Padder avec des zéros à la fin N'ALTÈRE NI le produit scalaire, NI la norme du vecteur !
-        // La similarité sémantique reste donc *mathématiquement identique* et parfaite pour pgvector.
+        // E5-Large sort nativement 1024 dimensions, ce qui correspond au form factor de pgvector.
         if vec_f32.len() < 1024 {
             vec_f32.resize(1024, 0.0);
         }
