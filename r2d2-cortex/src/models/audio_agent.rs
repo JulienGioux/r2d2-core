@@ -251,7 +251,10 @@ impl AudioAgent {
                 && tokens[len - 3] == tokens[len - 4]
                 && tokens[len - 4] == tokens[len - 5]
             {
-                info!("   [DECODER] Spirale Hallucinatoire détectée sur le token ({}). EOT forcé.", next_token);
+                info!(
+                    "   [DECODER] Spirale Hallucinatoire détectée sur le token ({}). EOT forcé.",
+                    next_token
+                );
                 break;
             }
         }
