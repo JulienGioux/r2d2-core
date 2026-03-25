@@ -17,6 +17,12 @@ pub struct VisionAgentLlava {
     // processor: Option<Processor>,
 }
 
+impl Default for VisionAgentLlava {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VisionAgentLlava {
     pub fn new() -> Self {
         Self {
@@ -38,7 +44,7 @@ impl CognitiveAgent for VisionAgentLlava {
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Vision);
         self.name = format!(
             "VisionAgent-Llava-{}",
-            desc.repo_id.split('/').last().unwrap_or("")
+            desc.repo_id.split('/').next_back().unwrap_or("")
         );
 
         info!(

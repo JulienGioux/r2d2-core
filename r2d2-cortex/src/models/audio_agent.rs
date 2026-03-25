@@ -21,6 +21,12 @@ pub struct AudioAgent {
     suppress_tensor: Option<Tensor>,
 }
 
+impl Default for AudioAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AudioAgent {
     pub fn new() -> Self {
         Self {
@@ -189,10 +195,6 @@ impl AudioAgent {
         let mut log_tokens = Vec::new();
 
         // Amorce initiale : tout le prompt
-        let tokens_tensor = Tensor::new(tokens.as_slice(), &self.device)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?
-            .unsqueeze(0)
-            .unwrap();
 
         for step in 0..150 {
             // Forward complet à chaque étape : on passe toute la séquence accumulée.
@@ -243,15 +245,14 @@ impl AudioAgent {
 
             // Coupe-circuit : Attracteur de silence (Répétition stricte de 5 tokens BPE identiques)
             let len = tokens.len();
-            if len > 5 {
-                if tokens[len - 1] == tokens[len - 2]
-                    && tokens[len - 2] == tokens[len - 3]
-                    && tokens[len - 3] == tokens[len - 4]
-                    && tokens[len - 4] == tokens[len - 5]
-                {
-                    info!("   [DECODER] Spirale Hallucinatoire détectée sur le token ({}). EOT forcé.", next_token);
-                    break;
-                }
+            if len > 5
+                && tokens[len - 1] == tokens[len - 2]
+                && tokens[len - 2] == tokens[len - 3]
+                && tokens[len - 3] == tokens[len - 4]
+                && tokens[len - 4] == tokens[len - 5]
+            {
+                info!("   [DECODER] Spirale Hallucinatoire détectée sur le token ({}). EOT forcé.", next_token);
+                break;
             }
         }
 
@@ -275,7 +276,7 @@ impl CognitiveAgent for AudioAgent {
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Audio);
         self.name = format!(
             "AudioAgent-{}",
-            desc.repo_id.split('/').last().unwrap_or("Whisper")
+            desc.repo_id.split('/').next_back().unwrap_or("Whisper")
         );
 
         info!(
@@ -365,9 +366,9 @@ impl CognitiveAgent for AudioAgent {
         // sont formellement masqués par un -Infini pour forcer l'usage du dictionnaire principal.
         let vocab_size = config.vocab_size as usize;
         let mut suppress_mask = vec![0.0f32; vocab_size];
-        for i in 0..vocab_size {
+        for (i, mask) in suppress_mask.iter_mut().enumerate().take(vocab_size) {
             if config.suppress_tokens.contains(&(i as u32)) {
-                suppress_mask[i] = f32::NEG_INFINITY;
+                *mask = f32::NEG_INFINITY;
             }
         }
         let suppress_tensor = Tensor::new(suppress_mask.as_slice(), &self.device)

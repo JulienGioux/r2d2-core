@@ -13,6 +13,12 @@ pub struct VisionAgentQwen {
     active: bool,
 }
 
+impl Default for VisionAgentQwen {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VisionAgentQwen {
     pub fn new() -> Self {
         Self {
