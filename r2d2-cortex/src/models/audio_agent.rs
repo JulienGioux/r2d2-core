@@ -291,7 +291,9 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
 
         info!("   [CORTEX] Résolution de la Configuration LLM...");
-        let config_file = repo.get(desc.config_file.unwrap()).await
+        let config_file = repo
+            .get(desc.config_file.unwrap())
+            .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
         info!("   [CORTEX] Résolution du Dictionnaire Tokenizer...");
