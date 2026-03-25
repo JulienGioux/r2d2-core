@@ -103,51 +103,93 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
                                 json!({ "content": [{ "type": "text", "text": format!("🚨 Cluster R2D2 [{}] systématiquement radié de l'Index PostgreSQL avec succès.", cluster_id) }] })
                             }
                             "ingest_audio" => {
-                                let audio_path = args.get("audio_path").and_then(|a| a.as_str()).unwrap_or("");
-                                
-                                let cortex = std::sync::Arc::new(r2d2_cortex::CortexRegistry::new());
-                                cortex.register_agent(Box::new(r2d2_cortex::models::audio_agent::AudioAgent::new())).await;
+                                let audio_path = args
+                                    .get("audio_path")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or("");
+
+                                let cortex =
+                                    std::sync::Arc::new(r2d2_cortex::CortexRegistry::new());
+                                cortex
+                                    .register_agent(Box::new(
+                                        r2d2_cortex::models::audio_agent::AudioAgent::new(),
+                                    ))
+                                    .await;
                                 let gateway = r2d2_sensory::gateway::SensoryGateway::new(cortex);
-                                
+
                                 let stimulus = r2d2_sensory::stimulus::Stimulus::new(
                                     "mcp-audio-stimulus", // ID technique pour la session
                                     r2d2_sensory::stimulus::StimulusType::Audio,
-                                    std::path::PathBuf::from(audio_path)
+                                    std::path::PathBuf::from(audio_path),
                                 );
 
                                 match gateway.ingest(stimulus).await {
                                     Ok(fragment) => {
                                         // On ingère le fragment (qui contient le retour JSONAI) dans le Blackboard
-                                        match gw.ingest_thought("SensoryGateway", "AudioAgent", fragment.into_inner().raw_data).await {
-                                            Ok(fid) => json!({ "content": [{ "type": "text", "text": format!("🎧 Audio transcrit. Fragment injecté: {}", fid) }] }),
-                                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("Erreur d'ancrage Blackboard: {}", e) }], "isError": true })
+                                        match gw
+                                            .ingest_thought(
+                                                "SensoryGateway",
+                                                "AudioAgent",
+                                                fragment.into_inner().raw_data,
+                                            )
+                                            .await
+                                        {
+                                            Ok(fid) => {
+                                                json!({ "content": [{ "type": "text", "text": format!("🎧 Audio transcrit. Fragment injecté: {}", fid) }] })
+                                            }
+                                            Err(e) => {
+                                                json!({ "content": [{ "type": "text", "text": format!("Erreur d'ancrage Blackboard: {}", e) }], "isError": true })
+                                            }
                                         }
                                     }
-                                    Err(e) => json!({ "content": [{ "type": "text", "text": format!("Erreur d'ingestion audio: {}", e) }], "isError": true })
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur d'ingestion audio: {}", e) }], "isError": true })
+                                    }
                                 }
                             }
                             "ingest_visual" => {
-                                let image_path = args.get("image_path").and_then(|a| a.as_str()).unwrap_or("");
-                                
-                                let cortex = std::sync::Arc::new(r2d2_cortex::CortexRegistry::new());
-                                cortex.register_agent(Box::new(r2d2_cortex::models::vision_agent::VisionAgentLlava::new())).await;
+                                let image_path = args
+                                    .get("image_path")
+                                    .and_then(|a| a.as_str())
+                                    .unwrap_or("");
+
+                                let cortex =
+                                    std::sync::Arc::new(r2d2_cortex::CortexRegistry::new());
+                                cortex
+                                    .register_agent(Box::new(
+                                        r2d2_cortex::models::vision_agent::VisionAgentLlava::new(),
+                                    ))
+                                    .await;
                                 cortex.register_agent(Box::new(r2d2_cortex::models::vision_agent_qwen::VisionAgentQwen::new())).await;
                                 let gateway = r2d2_sensory::gateway::SensoryGateway::new(cortex);
-                                
+
                                 let stimulus = r2d2_sensory::stimulus::Stimulus::new(
                                     "mcp-visual-stimulus",
                                     r2d2_sensory::stimulus::StimulusType::Visual,
-                                    std::path::PathBuf::from(image_path)
+                                    std::path::PathBuf::from(image_path),
                                 );
 
                                 match gateway.ingest(stimulus).await {
                                     Ok(fragment) => {
-                                        match gw.ingest_thought("SensoryGateway", "VisionAgent", fragment.into_inner().raw_data).await {
-                                            Ok(fid) => json!({ "content": [{ "type": "text", "text": format!("👁️ Vision processée. Fragment injecté: {}", fid) }] }),
-                                            Err(e) => json!({ "content": [{ "type": "text", "text": format!("Erreur d'ancrage Blackboard: {}", e) }], "isError": true })
+                                        match gw
+                                            .ingest_thought(
+                                                "SensoryGateway",
+                                                "VisionAgent",
+                                                fragment.into_inner().raw_data,
+                                            )
+                                            .await
+                                        {
+                                            Ok(fid) => {
+                                                json!({ "content": [{ "type": "text", "text": format!("👁️ Vision processée. Fragment injecté: {}", fid) }] })
+                                            }
+                                            Err(e) => {
+                                                json!({ "content": [{ "type": "text", "text": format!("Erreur d'ancrage Blackboard: {}", e) }], "isError": true })
+                                            }
                                         }
                                     }
-                                    Err(e) => json!({ "content": [{ "type": "text", "text": format!("Erreur d'ingestion visuelle: {}", e) }], "isError": true })
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur d'ingestion visuelle: {}", e) }], "isError": true })
+                                    }
                                 }
                             }
                             _ => {

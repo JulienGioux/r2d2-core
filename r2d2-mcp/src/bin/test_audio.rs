@@ -62,4 +62,3 @@ async fn main() {
     }
     println!("\n🏁 [TEST BENCH] Tous les fragments ont été traités avec succès.");
 }
-

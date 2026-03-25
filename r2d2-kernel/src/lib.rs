@@ -68,7 +68,6 @@ impl<State> Fragment<State> {
     }
 }
 
-
 impl Fragment<Signal> {
     /// Crée un nouveau signal brut amnésique (Zeroize on Drop).
     pub fn new(raw_data: String) -> Self {

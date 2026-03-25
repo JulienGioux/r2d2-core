@@ -4,12 +4,12 @@ use async_trait::async_trait;
 use tracing::{info, instrument};
 
 // Importations Candle et Tokenizer
+use crate::catalog::{CognitiveSense, CortexCatalog};
 use candle_core::{Device, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{Repo, RepoType};
 use tokenizers::Tokenizer;
-use crate::catalog::{CognitiveSense, CortexCatalog};
 
 /// Unité d'Extraction Sémantique Multilingue Ultra-Légère (130 Mo).
 /// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur de 384 dimensions).
