@@ -375,28 +375,36 @@ impl CognitiveAgent for AudioAgent {
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
+        info!("   [CORTEX] Chargement préliminaire de la Configuration...");
+        let config_str = std::fs::read_to_string(&config_file).unwrap();
+        let config: Config = serde_json::from_str(&config_str).unwrap();
+
         info!("   [CORTEX] Résolution du Dictionnaire Tokenizer...");
         let tokenizer_file = repo
             .get(desc.tokenizer_file.unwrap())
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
-        info!("   [CORTEX] Téléchargement des Filtres Spatiaux (melfilters.bytes)...");
+        let melfilters_filename = if config.num_mel_bins == 128 {
+            "melfilters128.bytes"
+        } else {
+            "melfilters.bytes"
+        };
+        info!("   [CORTEX] Téléchargement des Filtres Spatiaux ({})...", melfilters_filename);
         // -----------------------------------------------------------------------------------
-        // [PARE-FEU RUSTY] : ROUTAGE HUGGINGFACE EXPLICITE POUR MELFILTERS
-        // Historique : Le fichier n'existe pas sur le repo principal `openai/whisper-tiny`.
-        // Une erreur 404 casse l'initialisation. Le dépôt `fl33tw00d-hf/whisper-base` a été
-        // formellement validé (Audité le 25 Mars 2026) comme contenant cet artéfact binaire exact.
-        // NE CHANGEZ CETTE CHAÎNE QUE SI LE DÉPÔT EST HORS-LIGNE !
+        // [PARE-FEU RUSTY] : ROUTAGE HUGGINGFACE DYNAMIQUE POUR MELFILTERS
+        // Historique : Le fichier n'existe pas toujours sur le repo officiel OpenAI.
+        // Le dépôt de référence `lmz/candle-whisper` fournit officiellement les
+        // filtres spatiaux dynamiques (80 ou 128 pour Large-v3).
         // -----------------------------------------------------------------------------------
         let mel_repo = api.repo(Repo::with_revision(
-            "fl33tw00d-hf/whisper-base".to_string(),
+            "lmz/candle-whisper".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
-        let mel_bytes_file = mel_repo.get("melfilters.bytes").await.map_err(|e| {
+        let mel_bytes_file = mel_repo.get(melfilters_filename).await.map_err(|e| {
             AgentError::LoadError(format!(
-                "Échec téléchargement melfilters (fl33tw00d-hf): {}",
+                "Échec téléchargement filtres mel (lmz/candle-whisper): {}",
                 e
             ))
         })?;
@@ -409,8 +417,6 @@ impl CognitiveAgent for AudioAgent {
         }
 
         info!("   [CORTEX] Allocation VarBuilder et Tenseurs Memoire Whisper...");
-        let config_str = std::fs::read_to_string(&config_file).unwrap();
-        let config: Config = serde_json::from_str(&config_str).unwrap();
 
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(
