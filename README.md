@@ -151,7 +151,8 @@ graph TD;
     LLM[Agent Externe / Claude / Gemini] -->|Stdio JSON-RPC| Brique9(Gateway MCP);
     Brique9 -->|Ingestion| Brique1(JSONAI v3.1);
     Brique1 -->|Unverified| Brique3(Paradox Engine);
-    Brique3 <-->|Embeddings E5 1024D| Brique4(Cortex Local);
+    Brique3 <-->|Vectors 1024D (E5-Large-Instruct)| Brique4(Cortex Local);
+    Brique3 <-->|Audio (Whisper-Large-v3-Turbo)| Brique4;
     Brique3 -->|Consensus| Brique2(Kernel & Blackboard);
     Brique2 -->|Validated| Brique7(Vector DB PostgreSQL HNSW);
 ```
