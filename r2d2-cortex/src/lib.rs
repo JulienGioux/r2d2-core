@@ -5,8 +5,10 @@
 //! garantissant qu'un seul modèle lourd n'occupe la mémoire à un instant T.
 
 pub mod agent;
+pub mod catalog;
 pub mod models;
 pub mod registry;
 
 pub use agent::{AgentError, CognitiveAgent};
+pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};
 pub use registry::CortexRegistry;

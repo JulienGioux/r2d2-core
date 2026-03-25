@@ -31,7 +31,7 @@ impl SensoryGateway {
         if stimulus.stimulus_type == StimulusType::Visual {
             // Séquence Mixture of Experts (MoE) : Inférence Séquentielle (RAM < 8Go)
             info!("-> Démarrage de la séquence Visual Mixture-of-Experts (MoE)...");
-
+            
             let experts = [
                 "VisionAgent-Llava".to_string(),
                 "VisionAgent-Qwen".to_string(), // Séquence MoE validée.

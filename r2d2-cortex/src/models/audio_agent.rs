@@ -49,7 +49,8 @@ impl AudioAgent {
         // Reconstruction du flux f32 pur
         let mut pcm_data = vec![0f32; raw_bytes.len() / 4];
         for (i, chunk) in raw_bytes.chunks_exact(4).enumerate() {
-            pcm_data[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+            let arr: [u8; 4] = chunk.try_into().unwrap();
+            pcm_data[i] = f32::from_le_bytes(arr);
         }
 
         // On s'assure par précaution qu'aucune altération de base ne dépasse 30 secondes
@@ -88,8 +89,7 @@ impl AudioAgent {
         let mel_len = mel.len();
         // --- SONDAGE TENSORIEL DE LA VÉRITÉ MATHÉMATIQUE ---
         // Avant de créer le Tenseur, nous DEBONS savoir ce que `pcm_to_mel` a réellement forgé.
-        let mel_bytes = include_bytes!("melfilters.bytes").as_slice();
-        let mel_raw_len = mel_bytes.len() / 4;
+        let mel_raw_len = mel_filters.len();
         let filter_bins = mel_raw_len / 201; // n_fft(400)/2 + 1 = 201
 
         // Diagnostic Mel Flottant Pur
@@ -302,11 +302,17 @@ impl CognitiveAgent for AudioAgent {
             .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
-        info!("   [CORTEX] Chargement Statique des Filtres Spatiaux (Air-Gapped bytes)...");
-        let mel_bytes = include_bytes!("melfilters.bytes").as_slice();
+        info!("   [CORTEX] Téléchargement des Filtres Spatiaux (melfilters.bytes)...");
+        let mel_bytes_file = repo
+            .get("melfilters.bytes")
+            .await
+            .map_err(|e| AgentError::LoadError(format!("Échec téléchargement melfilters: {}", e)))?;
+        let mel_bytes = std::fs::read(mel_bytes_file)
+            .map_err(|e| AgentError::LoadError(e.to_string()))?;
         let mut mel_raw = vec![0f32; mel_bytes.len() / 4];
         for (i, chunk) in mel_bytes.chunks_exact(4).enumerate() {
-            mel_raw[i] = f32::from_le_bytes(chunk.try_into().unwrap());
+            let arr: [u8; 4] = chunk.try_into().unwrap();
+            mel_raw[i] = f32::from_le_bytes(arr);
         }
 
         info!("   [CORTEX] Allocation VarBuilder et Tenseurs Memoire Whisper...");
