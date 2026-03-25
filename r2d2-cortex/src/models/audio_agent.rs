@@ -138,10 +138,17 @@ impl AudioAgent {
                 .map_err(|e| AgentError::InferenceError(e.to_string()))?;
         }
 
+        // -----------------------------------------------------------------------------------
+        // [PARE-FEU RUSTY] : NE JAMAIS PAD LE TENSEUR AVEC DU VIDE (0.0) POUR ATTEINDRE 30S !
+        // Historique : L'ajout de 0.0 pour forcer 30s de frame créait un "Attracteur de Silence".
+        // Le modèle Whisper possède un mécanisme d'Embedding Positionnel Dynamique qui lui
+        // permet de traiter des séquences de longueur arbitraire (< 30s) parfaitement.
+        // Si le signal a 12s, le tenseur fera 12s. Le padding est structurellement toxique.
+        // -----------------------------------------------------------------------------------
         let seq_len = mel_tensor.dim(2).unwrap_or(0);
         if seq_len > 3000 {
             info!(
-                "-> Retaillement Temporel des FRAMES (Padding Cut): {} -> 3000",
+                "-> Retaillement Temporel des FRAMES (Truncate Cut): {} -> 3000",
                 seq_len
             );
             mel_tensor = mel_tensor
@@ -291,7 +298,9 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
 
         info!("   [CORTEX] Résolution de la Configuration LLM...");
-        let config_file = repo.get(desc.config_file.unwrap()).await
+        let config_file = repo
+            .get(desc.config_file.unwrap())
+            .await
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
 
         info!("   [CORTEX] Résolution du Dictionnaire Tokenizer...");
@@ -301,15 +310,23 @@ impl CognitiveAgent for AudioAgent {
             .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
 
         info!("   [CORTEX] Téléchargement des Filtres Spatiaux (melfilters.bytes)...");
-        // lmz/candle-whisper renvoyant inopinément une erreur 404 (probablement renommé/déplacé en Dataset HF),
-        // nous pivotons formellement sur fl33tw00d-hf/whisper-base formellement audité et garanti.
+        // -----------------------------------------------------------------------------------
+        // [PARE-FEU RUSTY] : ROUTAGE HUGGINGFACE EXPLICITE POUR MELFILTERS
+        // Historique : Le fichier n'existe pas sur le repo principal `openai/whisper-tiny`.
+        // Une erreur 404 casse l'initialisation. Le dépôt `fl33tw00d-hf/whisper-base` a été
+        // formellement validé (Audité le 25 Mars 2026) comme contenant cet artéfact binaire exact.
+        // NE CHANGEZ CETTE CHAÎNE QUE SI LE DÉPÔT EST HORS-LIGNE !
+        // -----------------------------------------------------------------------------------
         let mel_repo = api.repo(Repo::with_revision(
             "fl33tw00d-hf/whisper-base".to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
         let mel_bytes_file = mel_repo.get("melfilters.bytes").await.map_err(|e| {
-            AgentError::LoadError(format!("Échec téléchargement melfilters (fl33tw00d-hf): {}", e))
+            AgentError::LoadError(format!(
+                "Échec téléchargement melfilters (fl33tw00d-hf): {}",
+                e
+            ))
         })?;
         let mel_bytes =
             std::fs::read(mel_bytes_file).map_err(|e| AgentError::LoadError(e.to_string()))?;

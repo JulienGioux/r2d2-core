@@ -84,7 +84,7 @@ impl CortexCatalog {
                 repo_id: "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
                 revision: "main",
                 // Note: En mode GGUF, config/tokenizer sont souvent inclus dans le poid.
-                weights_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf", 
+                weights_file: "qwen2.5-1.5b-instruct-q4_k_m.gguf",
                 tokenizer_file: None,
                 config_file: None,
                 auxiliary_repo: None,
