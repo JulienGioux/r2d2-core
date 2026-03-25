@@ -28,24 +28,29 @@ impl AudioChunker {
 
         let mut child = std::process::Command::new("ffmpeg")
             .args(&[
-                "-i", path,
-                "-f", "s16le",
-                "-ac", "1", // Downmix forcé mono
-                "-ar", "16000", // Downsampling qualitatif
-                "-loglevel", "quiet",
-                "-"
+                "-i",
+                path,
+                "-f",
+                "s16le",
+                "-ac",
+                "1", // Downmix forcé mono
+                "-ar",
+                "16000", // Downsampling qualitatif
+                "-loglevel",
+                "quiet",
+                "-",
             ])
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .spawn()
             .map_err(|e| anyhow!("Erreur lancement FFmpeg: {}", e))?;
-            
+
         let mut raw_bytes = Vec::new();
         if let Some(mut stdout) = child.stdout.take() {
             use std::io::Read;
             stdout.read_to_end(&mut raw_bytes)?;
         }
-        
+
         let status = child.wait()?;
         if !status.success() {
             let mut stderr_bytes = Vec::new();
@@ -53,9 +58,12 @@ impl AudioChunker {
                 use std::io::Read;
                 let _ = err.read_to_end(&mut stderr_bytes);
             }
-            return Err(anyhow!("FFmpeg a échoué: {}", String::from_utf8_lossy(&stderr_bytes)));
+            return Err(anyhow!(
+                "FFmpeg a échoué: {}",
+                String::from_utf8_lossy(&stderr_bytes)
+            ));
         }
-        
+
         // Cast sécurisé des bytes FFmpeg s16le en vec de flottants f32 [-1.0, 1.0]
         let mut original_pcm = vec![0f32; raw_bytes.len() / 2];
         for (i, chunk) in raw_bytes.chunks_exact(2).enumerate() {
@@ -80,12 +88,15 @@ impl MediaChunker for AudioChunker {
 
     #[instrument(skip(self, parent_stimulus))]
     fn chunk(&self, parent_stimulus: &Stimulus) -> Result<Vec<Stimulus>> {
-        info!("AudioChunker : Extraction intégrale de {}", parent_stimulus.payload_path.display());
-        
+        info!(
+            "AudioChunker : Extraction intégrale de {}",
+            parent_stimulus.payload_path.display()
+        );
+
         let path_str = parent_stimulus.payload_path.to_string_lossy().to_string();
         let full_pcm = self.decode_audio_to_pcm(&path_str)?;
         let total_samples = full_pcm.len();
-        
+
         info!("-> Flux global: {} samples natifs.", total_samples);
 
         let mut stimuli = Vec::new();
@@ -99,9 +110,12 @@ impl MediaChunker for AudioChunker {
             if chunk_vec.len() < self.samples_per_chunk {
                 chunk_vec.resize(self.samples_per_chunk, 0.0);
             }
-            
+
             // Génération d'un fichier .bin brut pour transmission ultra-légère entre briques.
-            let chunk_filename = format!("chunk_audio_{}_part_{}.bin", parent_stimulus.id, chunk_index);
+            let chunk_filename = format!(
+                "chunk_audio_{}_part_{}.bin",
+                parent_stimulus.id, chunk_index
+            );
             let mut out_path = std::env::temp_dir();
             out_path.push(&chunk_filename);
 
@@ -110,14 +124,17 @@ impl MediaChunker for AudioChunker {
             let bytes: &[u8] = bytemuck::cast_slice(&chunk_vec);
             f.write_all(bytes)?;
 
-            info!("   [CHUNK {}] Fichier RAW 30s sauvé vers {:?}", chunk_index, out_path);
+            info!(
+                "   [CHUNK {}] Fichier RAW 30s sauvé vers {:?}",
+                chunk_index, out_path
+            );
 
             let mut sub_stimulus = Stimulus::new(
                 format!("{}-part-{}", parent_stimulus.id, chunk_index),
                 StimulusType::Audio,
-                out_path
+                out_path,
             );
-            
+
             // Flag explicite pour Whisper : Inutile de lancer Symphonia.
             sub_stimulus.metadata = serde_json::json!({
                 "format": "raw_pcm_f32le_normalized",
@@ -129,7 +146,10 @@ impl MediaChunker for AudioChunker {
             chunk_index += 1;
         }
 
-        info!("-> AudioChunking achevé : {} fragments générés.", stimuli.len());
+        info!(
+            "-> AudioChunking achevé : {} fragments générés.",
+            stimuli.len()
+        );
         Ok(stimuli)
     }
 }

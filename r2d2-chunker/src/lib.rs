@@ -5,8 +5,8 @@
 //! sans avoir à gérer eux-mêmes le traitement du signal, la vidéo ou les flux PDF.
 //! Le `Chunker` est la moulinette industrielle avant le Cortex.
 
-pub mod strategy;
 pub mod audio_chunker;
+pub mod strategy;
 
-pub use strategy::MediaChunker;
 pub use audio_chunker::AudioChunker;
+pub use strategy::MediaChunker;
