@@ -102,14 +102,11 @@ impl MediaChunker for AudioChunker {
         let mut stimuli = Vec::new();
         let mut chunk_index = 0;
 
-        // Découpage implacable en paquets de 30 secondes (480_000 samples)
-        // On pad de zéros le dernier chunk s'il est plus court, car le Transformer Whisper
-        // est entraîné strictement sur des vecteurs positionnels de 1500 (3000 frames).
+        // Découpage implacable en paquets de 30 secondes (480_000 samples max)
+        // Whisper s'adapte dynamiquement (*Dynamic Positional Embeddings*) aux séquences de <30s sans broncher.
+        // On NE PAD PLUS avec du vide pur (0.0), pour éradiquer 100% le terreau des Hallucinations !
         for chunk in full_pcm.chunks(self.samples_per_chunk) {
-            let mut chunk_vec = chunk.to_vec();
-            if chunk_vec.len() < self.samples_per_chunk {
-                chunk_vec.resize(self.samples_per_chunk, 0.0);
-            }
+            let chunk_vec = chunk.to_vec();
 
             // Génération d'un fichier .bin brut pour transmission ultra-légère entre briques.
             let chunk_filename = format!(
