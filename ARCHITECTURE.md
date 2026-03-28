@@ -19,3 +19,10 @@ Ce document fige les règles d'or et anti-patterns critiques pour l'évolution d
 
 ## 5. Cadrage strict des signaux bruts (Zéro Padding Artificiel)
 **Règle (AudioChunker)** : Ne jamais introduire de vide numérique (silence absolu `0.0`) pour combler artificiellement des buffers d'inférence temporels (ex: 30s imposés par Whisper). `candle` gère structurellement la projection de signaux arbitraires tronqués via les vecteurs de position dynamiques. Combler avec de la donnée morte incite les transformers d'attention à projeter des hallucinations bouclées.
+
+## 6. Isolation Mutuelle du KV Cache (Pattern Clone Shallow)
+**Alerte** : Partager une structure de modèle ML (`Whisper` par ex.) via `Arc` interdit strictement son emprunt mutable (erreur `cannot borrow data in an Arc as mutable`), indispensable au remplissage du KV Cache lors de la génération.
+**Règle** : Ne **JAMAIS** utiliser de `std::sync::Mutex` sur un modèle entier, sous peine de sérialisation complète du Thread Pool et de pollution du cache entre requêtes concurrentes. À l'intérieur de `spawn_blocking`, opérer un clone `let mut local_model = engine.model.clone();`. Sous `candle`, cela clone de façon ultra-peu coûteuse les C-pointeurs (Tenseurs/Weights) tout en isolant formellement l'instance et son KV Cache interne pour ce thread actif.
+
+## 7. Routage Dynamique des Filtres Spatiaux (Mel-Filters)
+**Règle** : L'ingestion audio ne doit jamais supposer une géométrie fixe de 80 bins. Elle doit lire dynamiquement le `config.num_mel_bins` du modèle distant (ex: 128 bins pour `whisper-large-v3-turbo`) et router le téléchargement tensoriel du dictionnaire approprié (`melfilters128.bytes`) sur HuggingFace, garantissant un back-end évolutif sans intervention de l'Architecte.

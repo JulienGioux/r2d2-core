@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod catalog;
+pub mod memory;
 pub mod models;
 pub mod registry;
 

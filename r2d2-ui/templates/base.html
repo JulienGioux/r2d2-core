@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R2D2 Sovereign Console</title>
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Custom Premium Vanilla CSS -->
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dark-theme">
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar glass-panel">
+            <div class="sidebar-header">
+                <i data-lucide="cpu" class="logo-icon"></i>
+                <h1>R2D2 OS</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content">
+                    <i data-lucide="layout-dashboard"></i> Dashboard
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content">
+                    <i data-lucide="brain-circuit"></i> Cortex Live
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content">
+                    <i data-lucide="database"></i> Memory Audit
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="pulse-dot"></span>
+                    <span class="status-text">{{ status }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content (Dynamic via HTMX) -->
+        <main id="main-content" class="main-content">
+            <div class="dashboard-grid">
+                <!-- Welcome Card -->
+                <div class="glass-card col-span-2">
+                    <h2>Paradox Engine 1.58b</h2>
+                    <p>Système Souverain d'Intelligence Artificielle en ligne. Architecte détecté. Sécurité Zero-Trust Active.</p>
+                </div>
+                
+                <!-- Chatbot Interface -->
+                <div class="glass-card chat-panel col-span-2">
+                    <div class="chat-header">
+                        <i data-lucide="message-square"></i>
+                        <h3>Terminal Cognitif (JsonAi V3)</h3>
+                    </div>
+                    <div id="chat-history" class="chat-history">
+                        <div class="message system">
+                            <i data-lucide="terminal"></i>
+                            <div class="message-content">
+                                <strong>System Initialize</strong>
+                                <p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <form class="chat-input-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend">
+                        <input type="text" name="prompt" placeholder="Entrez une directive ou un stimulus cognitif..." required autocomplete="off">
+                        <button type="submit" class="btn-primary">
+                            <i data-lucide="send"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </main>
+    </div>
+    <script>
+        // Init Lucide icons
+        lucide.createIcons();
+        
+        // Re-init icons after htmx swap
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            lucide.createIcons();
+            
+            // Auto scroll to bottom of chat
+            const chatHistory = document.getElementById('chat-history');
+            if (chatHistory) {
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<div class="dashboard-grid">
+    <div class="glass-card col-span-2">
+        <h2>Cortex Live Analysis</h2>
+        <p>Surveillance de l'état tensoriel du réseau Paradox 1.58b et de l'allocation VRAM / RAM.</p>
+    </div>
+    
+    <div class="glass-card">
+        <div class="chat-header" style="padding: 0 0 16px 0; border: none;">
+            <i data-lucide="activity"></i>
+            <h3>Isolation VRAM</h3>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 16px;">
+            <div style="background: rgba(0,0,0,0.2); padding: 16px; border-radius: 8px; border-left: 3px solid var(--accent-color);">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <strong>ParadoxEngine (1.58b CPU)</strong>
+                    <span style="color: var(--accent-color);">ACTIF</span>
+                </div>
+                <!-- Barre de progression RAM (Mock) -->
+                <div style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                    <div style="width: 25%; height: 100%; background: var(--accent-color); box-shadow: 0 0 8px var(--accent-color);"></div>
+                </div>
+                <p style="margin-top: 8px; font-size: 0.8rem; text-align: right;">420 MB / 16 GB</p>
+            </div>
+            
+            <div style="background: rgba(0,0,0,0.2); padding: 16px; border-radius: 8px; border-left: 3px solid var(--text-secondary);">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                    <strong>MinilmEmbedder (E5-Small)</strong>
+                    <span style="color: var(--text-secondary);">DORMANT</span>
+                </div>
+                <div style="height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+                    <div style="width: 0%; height: 100%; background: var(--text-secondary);"></div>
+                </div>
+                <p style="margin-top: 8px; font-size: 0.8rem; text-align: right;">0 MB / 16 GB</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="glass-card">
+        <div class="chat-header" style="padding: 0 0 16px 0; border: none;">
+            <i data-lucide="network"></i>
+            <h3>Sensory Gateway</h3>
+        </div>
+        <p style="margin-top: 16px;">
+            Les stimuli visuels, auditifs et temporels sont acheminés en toute sécurité via le routeur synchrone.
+        </p>
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px;">
+            <span style="background: rgba(138,43,226,0.2); color: #c471ed; padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(138,43,226,0.4);">
+                Vision (Gemini 2.5) PENDING
+            </span>
+            <span style="background: rgba(0,229,255,0.2); color: var(--accent-color); padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; border: 1px solid rgba(0,229,255,0.4);">
+                Audio (Whisper Mlx) OFFLINE
+            </span>
+        </div>
+    </div>
+</div>

@@ -46,7 +46,7 @@ impl CortexCatalog {
     pub fn get_default_descriptor(sense: CognitiveSense) -> ModelDescriptor {
         match sense {
             CognitiveSense::Semantic => ModelDescriptor {
-                // intfloat/multilingual-e5-small : ~130 Mo, 384 dimensions. Le standard absolu.
+                // intfloat/multilingual-e5-small : ~400 Mo, 384 dimensions. Adapté RAM 12Go.
                 repo_id: "intfloat/multilingual-e5-small",
                 revision: "main",
                 weights_file: "model.safetensors",
@@ -54,10 +54,10 @@ impl CortexCatalog {
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.15,
+                required_ram_gb: 1.0,
             },
             CognitiveSense::Audio => ModelDescriptor {
-                // openai/whisper-tiny : ~75 Mo. Transcrit le flux à la volée. Frugalité totale.
+                // openai/whisper-tiny : ~150 Mo. Tolérance matérielle absolue sur Laptop GTX.
                 repo_id: "openai/whisper-tiny",
                 revision: "main",
                 weights_file: "model.safetensors",
@@ -65,19 +65,18 @@ impl CortexCatalog {
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
                 auxiliary_files: None,
-                required_ram_gb: 0.2,
+                required_ram_gb: 1.5,
             },
             CognitiveSense::Vision => ModelDescriptor {
-                // llava-1.5-7b-hf quantifié ou llava-phi. On s'appuie sur la structure LLaVA standard.
-                // Note : Pour une RAM de 8Go, on privilégiera des poids GGUF q4k si disponibles, ou des variantes réduites.
-                repo_id: "llava-hf/llava-1.5-7b-hf",
+                // vikhyatk/moondream2 : Petit modèle vision (1.8B) idéal pour l'inférence RAM-limited.
+                repo_id: "vikhyatk/moondream2",
                 revision: "main",
-                weights_file: "model.safetensors.index.json", // Load shard index ou gguf
+                weights_file: "model.safetensors",
                 tokenizer_file: Some("tokenizer.json"),
                 config_file: Some("config.json"),
                 auxiliary_repo: None,
-                auxiliary_files: Some(vec!["preprocessor_config.json"]),
-                required_ram_gb: 4.5,
+                auxiliary_files: None,
+                required_ram_gb: 2.5,
             },
             CognitiveSense::Reasoning => ModelDescriptor {
                 // Qwen2.5-1.5B-Instruct-GGUF : Ultra-rapide pour le Cortex central, au format GGUF.
@@ -94,3 +93,4 @@ impl CortexCatalog {
         }
     }
 }
+

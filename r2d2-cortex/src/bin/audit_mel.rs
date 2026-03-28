@@ -83,3 +83,5 @@ fn main() {
         println!(">>> CONCLUSION : Indéterminé par ce test simple.");
     }
 }
+
+

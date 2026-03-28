@@ -1,0 +1,50 @@
+<script>
+function showTab(btn, index) {
+    const msg = btn.closest('.message-content');
+    const tabs = msg.querySelectorAll('.tab-content');
+    const btns = msg.querySelectorAll('.view-toggles button');
+    tabs.forEach(t => t.style.display = 'none');
+    btns.forEach(b => { b.style.background = 'transparent'; b.style.color = '#888'; });
+    tabs[index].style.display = 'block';
+    btn.style.background = 'var(--bg-tertiary)';
+    btn.style.color = '#fff';
+}
+</script>
+<div class="dashboard-grid">
+    <!-- Welcome Card -->
+    <div class="glass-card col-span-2">
+        <h2>Paradox Engine 1.58b</h2>
+        <p>Système Souverain d'Intelligence Artificielle en ligne. Architecte détecté. Sécurité Zero-Trust Active.</p>
+    </div>
+    
+    <!-- Chatbot Interface -->
+    <div class="glass-card chat-panel col-span-2">
+        <div class="chat-header">
+            <i data-lucide="message-square"></i>
+            <h3>Terminal Cognitif (JsonAi V3)</h3>
+        </div>
+        <div id="chat-history" class="chat-history">
+            <div class="message system">
+                <i data-lucide="terminal"></i>
+                <div class="message-content">
+                    <strong>System Initialize</strong>
+                    <p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p>
+                </div>
+            </div>
+        </div>
+        <form class="chat-input-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" hx-on::after-request="this.reset()" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; gap: 8px; width: 100%;">
+                <select name="provider" class="glass-card" style="padding: 0 16px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: var(--text-primary); outline: none; border-radius: 8px; font-family: 'Inter', sans-serif;">
+                    <option value="gemini">Gemini 2.5 Flash</option>
+                    <option value="mistral">Mistral Large</option>
+                    <option value="consensus">Mode Débat (Gemini ⚔️ Mistral)</option>
+                    <option value="local">Paradox Local (Mock)</option>
+                </select>
+                <input type="text" name="prompt" placeholder="Entrez une directive ou un stimulus cognitif..." required autocomplete="off" style="flex: 1;">
+                <button type="submit" class="btn-primary">
+                    <i data-lucide="send"></i>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>

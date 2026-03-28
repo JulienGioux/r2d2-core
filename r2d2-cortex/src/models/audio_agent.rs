@@ -402,15 +402,21 @@ impl CognitiveAgent for AudioAgent {
         // Le dépôt de référence `lmz/candle-whisper` fournit officiellement les
         // filtres spatiaux dynamiques (80 ou 128 pour Large-v3).
         // -----------------------------------------------------------------------------------
+        let repo_id = if config.num_mel_bins == 128 {
+            "FL33TW00D-HF/distil-whisper-large-v3"
+        } else {
+            "FL33TW00D-HF/whisper-base"
+        };
+
         let mel_repo = api.repo(Repo::with_revision(
-            "lmz/candle-whisper".to_string(),
+            repo_id.to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
         let mel_bytes_file = mel_repo.get(melfilters_filename).await.map_err(|e| {
             AgentError::LoadError(format!(
-                "Échec téléchargement filtres mel (lmz/candle-whisper): {}",
-                e
+                "Échec téléchargement filtres mel ({}): {}",
+                repo_id, e
             ))
         })?;
         let mel_bytes =
@@ -518,3 +524,4 @@ impl CognitiveAgent for AudioAgent {
         Ok(jsonai)
     }
 }
+
