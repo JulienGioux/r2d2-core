@@ -1,0 +1,172 @@
+<div class="chat-container glass-panel" style="display: flex; flex: 1; min-height: 0; border-radius: 12px; overflow: hidden;">
+    <!-- Chat Sidebar (History) -->
+    <div class="chat-sidebar" style="width: 260px; border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; background: rgba(0,0,0,0.2);">
+        <div style="padding: 16px;">
+            <button class="btn-primary" style="width: 100%; display: flex; justify-content: center; gap: 8px;" hx-post="/api/chat/new" hx-target="#main-content">
+                <i data-lucide="plus"></i> Nouvelle Conversation
+            </button>
+        </div>
+        <div class="chat-sessions-list" hx-get="/api/chat/history/list" hx-trigger="load, chat-updated from:body" style="flex: 1; overflow-y: auto;">
+            <!-- Loaded via HTMX -->
+            <div style="padding: 16px; color: #888; text-align: center; font-size: 0.9em;">
+                Chargement de l'historique...
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Main Content -->
+    <div class="chat-main" style="flex: 1; display: flex; flex-direction: column; background: rgba(0,0,0,0.4);">
+        <div class="chat-header" style="padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; align-items: center; gap: 12px;">
+            <i data-lucide="message-square"></i>
+            <h3 style="margin: 0; font-weight: 500;">Terminal Cognitif (JsonAi V3)</h3>
+        </div>
+        
+        <div id="chat-history" class="chat-history" style="flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px;">
+            {{ history_html|safe }}
+        </div>
+
+        <style>
+            #thinking-indicator { display: none; }
+            .htmx-request#thinking-indicator { display: flex !important; }
+        </style>
+        <div id="thinking-indicator" class="htmx-indicator" style="margin: 0 24px 8px 24px; font-size: 0.8rem; color: var(--highlight-color); align-items: center; gap: 8px;">
+            <i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Cognition en cours... (Routage API)
+        </div>
+        
+        <div style="padding: 24px; padding-top: 0;">
+            <!-- Zone d'affichage des attachements (HTMX Target) -->
+            <div id="context-attachments" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
+                <!-- Les attaches s'ajouteront ici dynamiquement -->
+            </div>
+
+            <form id="chat-form" class="chat-input-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" hx-indicator="#chat-form" hx-on::after-request="this.querySelector('input[name=prompt]').value=''" style="display: flex; flex-direction: column; gap: 8px;">
+                <style>
+                    /* Busy state Lock */
+                    #chat-form.htmx-request { pointer-events: none; opacity: 0.6; }
+                    #chat-form.htmx-request input { cursor: not-allowed; }
+                </style>
+                <div style="display: flex; gap: 8px; width: 100%;">
+                    <!-- Bouton Trombone pour ouvrir la modale contextuelle -->
+                    <button type="button" class="btn-secondary" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 0 16px; border-radius: 8px; color: #888; cursor: pointer; display: flex; align-items: center;" onclick="document.getElementById('context-modal').style.display = 'flex';">
+                        <i data-lucide="paperclip" style="width: 18px; height: 18px;"></i>
+                    </button>
+
+                    <!-- Bouton Clé pour ouvrir le Vault R2D2 -->
+                    <button type="button" class="btn-secondary" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 0 16px; border-radius: 8px; color: #f39c12; cursor: pointer; display: flex; align-items: center;" onclick="document.getElementById('vault-modal').style.display = 'flex';">
+                        <i data-lucide="key" style="width: 18px; height: 18px;"></i>
+                    </button>
+
+                    <select name="provider" class="glass-card" style="padding: 0 16px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: var(--text-primary); outline: none; border-radius: 8px; font-family: 'Inter', sans-serif;">
+                        <option value="gemini">Gemini 2.5 Flash</option>
+                        <option value="mistral">Mistral Large</option>
+                        <option value="consensus">Mode Débat (Gemini ⚔️ Mistral)</option>
+                        <option value="local">Paradox Local (Mock)</option>
+                    </select>
+                    <input type="text" name="prompt" placeholder="Entrez une directive ou un stimulus cognitif..." required autocomplete="off" style="flex: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 12px 16px; border-radius: 8px; color: white;">
+                    <button type="submit" class="chat-submit-btn">
+                        <i data-lucide="send"></i>
+                    </button>
+                </div>
+                <div style="display: flex; align-items: center; gap: 12px; padding: 4px 8px;">
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: #a0a0a0; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a0a0a0'">
+                        <input type="checkbox" name="deep_github_analysis" value="true" style="margin:0; width: 14px; height: 14px; cursor: pointer;" title="Active l'agent MCP On-The-Fly pour explorer le dépôt GitHub durant l'inférence.">
+                        <i data-lucide="github" style="width: 14px; height: 14px;"></i> Deep Github Analysis (On-The-Fly)
+                    </label>
+                </div>
+            </form>
+            <div style="text-align: center; color: rgba(255,255,255,0.4); font-size: 0.75em; margin-top: 8px;">
+                R2D2 Cortex peut faire des erreurs. Considérez vérifier les informations critiques.
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function showTab(btn, index) {
+    const msg = btn.closest('.message-content');
+    const tabs = msg.querySelectorAll('.tab-content');
+    const btns = msg.querySelectorAll('.view-toggles button');
+    tabs.forEach(t => t.style.display = 'none');
+    btns.forEach(b => { b.style.background = 'transparent'; b.style.color = '#888'; });
+    tabs[index].style.display = 'block';
+    btn.style.background = 'var(--bg-tertiary)';
+    btn.style.color = '#fff';
+}
+</script>
+
+<!-- Modal d'Attachement Contextuel MCP GitHub -->
+<div id="context-modal" class="glass-panel" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+    <div style="background: var(--bg-secondary); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; width: 450px; padding: 24px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i data-lucide="github"></i> Attacher un Dépôt Code</h3>
+            <button onclick="document.getElementById('context-modal').style.display = 'none'" style="background: transparent; border: none; color: white; cursor: pointer;"><i data-lucide="x"></i></button>
+        </div>
+        
+        <form hx-post="/api/chat/context/attach" hx-target="#context-attachments" hx-swap="beforeend" hx-on::after-request="document.getElementById('context-modal').style.display = 'none'; lucide.createIcons();">
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                <label style="font-size: 0.9em; color: #aaa;">URL ou Dépôt Github (ex: JulienGioux/r2d2-core)</label>
+                <input type="text" name="repo_url" placeholder="user/repo" required style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); padding: 10px 12px; border-radius: 6px; color: white;">
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
+                <label style="font-size: 0.9em; color: #aaa;">Stratégie d'Analyse Périphérique (MCP Server)</label>
+                
+                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 12px; background: rgba(50, 150, 250, 0.05); border: 1px solid rgba(50, 150, 250, 0.2); border-radius: 8px;">
+                    <input type="radio" name="analyze_mode" value="on_the_fly" checked style="margin-top: 4px;">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: 500; color: #fff;">On-The-Fly (Exploration en Direct)</span>
+                        <span style="font-size: 0.8em; color: #888;">L'agent R2D2 explorera le code dynamiquement via appels outils (search_code, lire un fichier). Rapide à lancer, bloquant pendant la réponse.</span>
+                    </div>
+                </label>
+
+                <label style="display: flex; align-items: flex-start; gap: 12px; cursor: pointer; padding: 12px; background: rgba(150, 50, 250, 0.05); border: 1px solid rgba(150, 50, 250, 0.2); border-radius: 8px;">
+                    <input type="radio" name="analyze_mode" value="async" style="margin-top: 4px;">
+                    <div style="display: flex; flex-direction: column;">
+                        <span style="font-weight: 500; color: #fff;">Async (Vampire) + On-The-Fly</span>
+                        <span style="font-size: 0.8em; color: #888;">Envoie le dépôt dans la Vampire Queue pour un scrapping vectorisé total (RAG local) + Accès Outils On-the-fly. Idéal pour les dépôts complexes.</span>
+                    </div>
+                </label>
+            </div>
+            
+            <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; margin-top: 24px; display: flex; gap: 8px;">
+                <i data-lucide="link"></i> Lier la Source
+            </button>
+        </form>
+    </div>
+</div>
+
+<!-- Modal du Vault R2D2 -->
+<div id="vault-modal" class="glass-panel" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 1000; justify-content: center; align-items: center;">
+    <div style="background: var(--bg-secondary); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; width: 550px; padding: 24px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3 style="margin: 0; display: flex; align-items: center; gap: 8px;"><i data-lucide="key" style="color: #f39c12;"></i> Configuration du Vault (Clés API)</h3>
+            <button onclick="document.getElementById('vault-modal').style.display = 'none'" style="background: transparent; border: none; color: white; cursor: pointer;"><i data-lucide="x"></i></button>
+        </div>
+        
+        <p style="color: #a0a0a0; font-size: 0.85rem; margin-bottom: 8px;">
+            Injectez vos clés sécurisées pour utiliser les outils de contexte (GitHub) ou les modèles de modèles (Gemini).
+        </p>
+
+        <div hx-get="/api/admin/keys" hx-trigger="load" id="vault-chat-keys-container">
+            <div style="color: #888; font-style: italic;"><i data-lucide="loader-2" class="spin"></i> Déchiffrement du Vault...</div>
+        </div>
+
+        <form hx-post="/api/admin/keys" hx-target="#vault-chat-keys-container" onsubmit="setTimeout(() => { this.reset(); lucide.createIcons(); }, 500)" style="display: flex; gap: 12px; align-items: flex-end; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 150px;">
+                <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Fournisseur</label>
+                <select name="provider" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                    <option value="GITHUB_PERSONAL_ACCESS_TOKEN">GITHUB_PERSONAL_ACCESS_TOKEN</option>
+                    <option value="GEMINI_API_KEY">GEMINI_API_KEY</option>
+                    <option value="MISTRAL_API_KEY">MISTRAL_API_KEY</option>
+                    <option value="HF_TOKEN">HF_TOKEN</option>
+                </select>
+            </div>
+            <div style="flex: 2; min-width: 200px;">
+                <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Nouvelle Clé (Vide pour purger)</label>
+                <input type="password" name="api_key" placeholder="Insérer la clé ici..." style="width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none; font-family: monospace;">
+            </div>
+            <button type="submit" class="btn-primary" style="padding: 8px 16px; height: 38px;">
+                <i data-lucide="download" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"></i>
+            </button>
+        </form>
+    </div>
+</div>

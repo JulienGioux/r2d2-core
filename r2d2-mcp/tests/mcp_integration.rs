@@ -69,7 +69,7 @@ for line in sys.stdin:
 "#;
 
     // En test, on va utiliser "python3" "-c"
-    let mut client = McpUniversalClient::spawn("python3", &["-c", py_mock])
+    let mut client = McpUniversalClient::spawn("python3", &["-c", py_mock], None)
         .await
         .expect("Erreur au spawn du client MCP mocké");
 

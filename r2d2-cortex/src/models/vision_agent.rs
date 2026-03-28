@@ -7,7 +7,7 @@ use tracing::{info, instrument};
 use std::sync::Arc;
 use std::time::Duration;
 
-use candle_core::{Device, Tensor};
+use candle_core::Device;
 // Si l'on souhaite implémenter le forward complet à l'avenir :
 // use candle_nn::VarBuilder;
 // use candle_transformers::models::llava;
@@ -92,7 +92,7 @@ impl VisionAgentLlava {
     /// Boucle d'analye d'image : extraction CLIP puis génération textuelle
     async fn analyze_image(&mut self, _prompt: &str) -> Result<String, AgentError> {
         self.circuit_breaker.check()?;
-        let engine = self.engine.as_ref().cloned().ok_or(AgentError::NotActive)?;
+        let _engine = self.engine.as_ref().cloned().ok_or(AgentError::NotActive)?;
 
         let result = tokio::task::spawn_blocking(move || -> Result<String, AgentError> {
             info!("-> Traitement visuel dans Thread Isolé (Spawn Blocking)");

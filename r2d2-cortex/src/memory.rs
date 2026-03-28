@@ -37,6 +37,18 @@ impl SemanticMemory {
         })
     }
 
+    pub fn len(&self) -> usize {
+        self.metadata.len()
+    }
+
+    pub fn get_sample_axioms(&self, limit: usize) -> Vec<(usize, String)> {
+        self.metadata
+            .iter()
+            .take(limit)
+            .map(|m| (m.id, m.content.clone()))
+            .collect()
+    }
+
     /// Recherche les K chunks les plus pertinents via Similarité Cosinus
     /// La requête doit avoir été vectorisée (embed) par MiniLmEmbedder.
     pub fn search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<String>> {
@@ -76,8 +88,15 @@ impl SemanticMemory {
         scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         let mut results = Vec::new();
-        for (id, score) in scores.iter().take(top_k) {
-            tracing::debug!("RAG Match ID {} avec score: {:.4}", id, score);
+        for (id, score) in scores.iter() {
+            if *score < 0.35 {
+                tracing::debug!("RAG Match ID {} ignoré (score insuffisant: {:.4})", id, score);
+                continue; // Ignore low similarity
+            }
+            if results.len() >= top_k {
+                break;
+            }
+            tracing::debug!("RAG Match ID {} conservé avec score: {:.4}", id, score);
             if let Some(meta) = self.metadata.iter().find(|m| m.id == *id) {
                 results.push(meta.content.clone());
             }

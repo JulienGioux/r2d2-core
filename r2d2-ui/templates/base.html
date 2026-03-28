@@ -14,25 +14,47 @@
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
     <!-- Custom Premium Vanilla CSS -->
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
 </head>
 <body class="dark-theme">
-    <div class="app-container">
+    <div class="app-container" id="appContainer">
+        <!-- Hack Pure CSS pour bascule -->
+        <input type="checkbox" id="sidebarToggle" style="display:none;">
+
+        <!-- Hover Zone to auto-expand sidebar -->
+        <div class="sidebar-hover-zone"></div>
+        
+        <!-- Floating Hamburger Menu -->
+        <label for="sidebarToggle" class="sidebar-floating-btn" aria-label="Ouvrir le menu">
+            <i data-lucide="menu"></i>
+        </label>
+
         <!-- Sidebar -->
-        <aside class="sidebar glass-panel">
+        <aside class="sidebar glass-panel" id="mainSidebar">
             <div class="sidebar-header">
                 <i data-lucide="cpu" class="logo-icon"></i>
                 <h1>R2D2 OS</h1>
+                <div class="sidebar-controls">
+                    <button class="pin-btn" id="pinSidebarBtn" aria-label="Epingler le menu" title="Épingler/Désépingler">
+                        <i data-lucide="pin"></i>
+                    </button>
+                </div>
             </div>
             <nav class="sidebar-nav">
                 <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content">
                     <i data-lucide="layout-dashboard"></i> Dashboard
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/chat" hx-target="#main-content">
+                    <i data-lucide="message-square"></i> Conversations
                 </a>
                 <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content">
                     <i data-lucide="brain-circuit"></i> Cortex Live
                 </a>
                 <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content">
                     <i data-lucide="database"></i> Memory Audit
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/admin" hx-target="#main-content">
+                    <i data-lucide="shield-alert"></i> Admin & Spéc.
                 </a>
             </nav>
             <div class="sidebar-footer">
@@ -44,42 +66,47 @@
         </aside>
 
         <!-- Main Content (Dynamic via HTMX) -->
-        <main id="main-content" class="main-content">
-            <div class="dashboard-grid">
-                <!-- Welcome Card -->
-                <div class="glass-card col-span-2">
-                    <h2>Paradox Engine 1.58b</h2>
-                    <p>Système Souverain d'Intelligence Artificielle en ligne. Architecte détecté. Sécurité Zero-Trust Active.</p>
-                </div>
-                
-                <!-- Chatbot Interface -->
-                <div class="glass-card chat-panel col-span-2">
-                    <div class="chat-header">
-                        <i data-lucide="message-square"></i>
-                        <h3>Terminal Cognitif (JsonAi V3)</h3>
-                    </div>
-                    <div id="chat-history" class="chat-history">
-                        <div class="message system">
-                            <i data-lucide="terminal"></i>
-                            <div class="message-content">
-                                <strong>System Initialize</strong>
-                                <p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p>
-                            </div>
-                        </div>
-                    </div>
-                    <form class="chat-input-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend">
-                        <input type="text" name="prompt" placeholder="Entrez une directive ou un stimulus cognitif..." required autocomplete="off">
-                        <button type="submit" class="btn-primary">
-                            <i data-lucide="send"></i>
-                        </button>
-                    </form>
-                </div>
+        <main id="main-content" class="main-content" hx-get="/ui/dashboard" hx-trigger="load">
+            <div style="display:flex; justify-content:center; align-items:center; height:100%;">
+                <i data-lucide="loader-2" class="spin" style="color: #4a90e2; width: 32px; height: 32px;"></i>
             </div>
         </main>
     </div>
     <script>
         // Init Lucide icons
         lucide.createIcons();
+        
+        // Pin State Logic (LocalStorage)
+        const appContainer = document.getElementById('appContainer');
+        const pinSidebarBtn = document.getElementById('pinSidebarBtn');
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        
+        // Restore pinned state from localStorage
+        const isPinned = localStorage.getItem('r2d2_sidebar_pinned') === 'true';
+        if (isPinned) {
+            appContainer.classList.add('sidebar-pinned');
+        }
+
+        // Pin Button Logic
+        if(pinSidebarBtn) {
+            pinSidebarBtn.addEventListener('click', () => {
+                const willPin = !appContainer.classList.contains('sidebar-pinned');
+                appContainer.classList.toggle('sidebar-pinned', willPin);
+                localStorage.setItem('r2d2_sidebar_pinned', willPin);
+                if(sidebarToggle) sidebarToggle.checked = false;
+            });
+        }
+        
+        // Active Nav Item Sync (Instant Feedback)
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Replier la sidebar après sélection (Pure CSS disable via checkbox)
+                if(sidebarToggle) sidebarToggle.checked = false;
+            });
+        });
         
         // Re-init icons after htmx swap
         document.body.addEventListener('htmx:afterSwap', function(evt) {

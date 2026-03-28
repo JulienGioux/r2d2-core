@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod memory;
 pub mod models;
 pub mod registry;
+pub mod security;
 
 pub use agent::{AgentError, CognitiveAgent};
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};

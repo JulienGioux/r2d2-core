@@ -77,10 +77,15 @@ body.dark-theme::after {
 /* Grille Principale */
 .app-container {
     display: grid;
-    grid-template-columns: 260px 1fr;
+    grid-template-columns: 1fr;
     height: 100vh;
     position: relative;
     z-index: 10;
+    transition: grid-template-columns 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-container.sidebar-pinned {
+    grid-template-columns: 260px 1fr;
 }
 
 /* ==== Composants de Verre (Oeuvre d'art Apple) ==== */
@@ -135,6 +140,96 @@ body.dark-theme::after {
     display: flex;
     flex-direction: column;
     padding: 32px 24px;
+    
+    /* Configuration Rétractable par Défaut */
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: 260px;
+    z-index: 1000;
+    transform: translateX(-100%);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Pure CSS Hover & Toggle Logic */
+.sidebar-hover-zone:hover ~ .sidebar,
+#sidebarToggle:checked ~ .sidebar,
+.sidebar:hover {
+    transform: translateX(0);
+    box-shadow: var(--shadow-deep);
+}
+
+.app-container.sidebar-pinned .sidebar {
+    position: relative;
+    transform: translateX(0);
+    box-shadow: none;
+    z-index: 10;
+    transition: box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Sidebar Utilities & UX */
+.sidebar-hover-zone {
+    position: fixed;
+    top: 0; bottom: 0; left: 0;
+    width: 30px;
+    z-index: 998;
+}
+.app-container.sidebar-pinned .sidebar-hover-zone {
+    display: none;
+}
+
+.sidebar-floating-btn {
+    position: fixed;
+    top: 24px; left: 24px;
+    z-index: 999;
+    background: var(--panel-base);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid var(--panel-border);
+    border-top: 1px solid var(--panel-border-top);
+    border-radius: 12px;
+    width: 44px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-float);
+    transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-floating-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.app-container.sidebar-pinned .sidebar-floating-btn {
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.8);
+}
+
+.sidebar-controls {
+    margin-left: auto;
+    display: flex;
+}
+
+.pin-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pin-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+}
+
+.app-container.sidebar-pinned .pin-btn {
+    color: var(--accent-pure);
+    background: rgba(0, 240, 255, 0.1);
 }
 
 .sidebar-header {
@@ -142,6 +237,7 @@ body.dark-theme::after {
     align-items: center;
     gap: 16px;
     margin-bottom: 56px;
+    width: 100%;
 }
 
 .logo-icon {
@@ -304,17 +400,55 @@ p { color: var(--text-secondary); font-size: 1rem; line-height: 1.6; font-weight
 .chat-input-form input::placeholder { color: var(--text-tertiary); }
 
 .btn-primary {
-    background: var(--text-primary);
-    border: none; color: var(--bg-void); width: 52px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-    box-shadow: 0 4px 14px rgba(255,255,255,0.15);
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.02) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-top: 1px solid rgba(255, 255, 255, 0.3);
+    color: var(--text-primary);
+    padding: 10px 20px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    cursor: pointer; transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    font-weight: 500;
+    font-size: 0.95rem;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+}
+
+.btn-primary::after {
+    content: "";
+    position: absolute;
+    top: 0; left: -100%;
+    width: 50%; height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    transform: skewX(-25deg);
+    transition: left 0.7s;
 }
 
 .btn-primary:hover {
     transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(255,255,255,0.25);
-    background: #e0e0e0;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.1);
+    border-top-color: rgba(255,255,255,0.5);
+    background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
+}
+.btn-primary:hover::after {
+    left: 200%;
 }
 .btn-primary:active { transform: translateY(1px); }
-.btn-primary i { width: 20px; height: 20px; }
+.btn-primary i { width: 18px; height: 18px; }
+
+/* Special button for chat input icon-only */
+.chat-submit-btn {
+    width: 52px;
+    padding: 0;
+    background: var(--text-primary);
+    color: var(--bg-void);
+    border: none;
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 4px 14px rgba(255,255,255,0.15);
+}
+.chat-submit-btn:hover { background: #e0e0e0; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255,255,255,0.25); }
+.chat-submit-btn:active { transform: translateY(1px); }

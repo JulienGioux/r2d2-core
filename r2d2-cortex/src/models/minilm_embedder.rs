@@ -149,7 +149,16 @@ impl MiniLmEmbedderAgent {
             .encode(e5_prompt, true)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
-        let token_ids = tokens.get_ids().to_vec();
+        let mut token_ids = tokens.get_ids().to_vec();
+        
+        // Axiome Frugalité & Sécurité : Les transformers E5 panic si token > 512 (Position Embeddings)
+        if token_ids.len() > 512 {
+            tracing::warn!("⚠️ Truncature sémantique automatique: le vecteur dépasse 512 tokens ({}). Le focus seul est conservé.", token_ids.len());
+            let sep_token = token_ids.last().copied().unwrap_or(2); // 2 est souvent SEP en BERT
+            token_ids.truncate(512);
+            token_ids[511] = sep_token;
+        }
+
         let token_tensor = Tensor::new(token_ids.as_slice(), &self.device)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?
             .unsqueeze(0)
@@ -165,7 +174,7 @@ impl MiniLmEmbedderAgent {
             .i((0, 0, ..))
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
-        let mut vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
+        let vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
 
         if vec_f32.len() < 1024 {
             // E5 sort 384 dimensions. Pgvector exige parfois 1024.
