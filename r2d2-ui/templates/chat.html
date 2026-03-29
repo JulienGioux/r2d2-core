@@ -53,8 +53,8 @@
 
                     <select name="provider" style="background: transparent; border: none; color: #888; font-size: 0.8rem; font-family: var(--font-sans); outline: none; margin-left: 8px; cursor: pointer;">
                         <option value="gemini">Gemini 2.5 Flash</option>
-                        <option value="mistral">Mistral Large</option>
-                        <option value="consensus">Mode Débat</option>
+                        <option value="universal">Universal Gateway (Marketplace)</option>
+                        <option value="consensus">Mode Débat Crucible</option>
                         <option value="local">Paradox Local</option>
                     </select>
                 </div>
@@ -154,8 +154,11 @@ function showTab(btn, index) {
                 <select name="provider" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
                     <option value="GITHUB_PERSONAL_ACCESS_TOKEN">GITHUB_PERSONAL_ACCESS_TOKEN</option>
                     <option value="GEMINI_API_KEY">GEMINI_API_KEY</option>
-                    <option value="MISTRAL_API_KEY">MISTRAL_API_KEY</option>
                     <option value="HF_TOKEN">HF_TOKEN</option>
+                    <option disabled>────────── Gateway Universal ──────────</option>
+                    <option value="UNIVERSAL_API_BASE">UNIVERSAL_API_BASE (ex: http://localhost:11434/v1)</option>
+                    <option value="UNIVERSAL_API_KEY">UNIVERSAL_API_KEY (Token OpenAI/Groq)</option>
+                    <option value="UNIVERSAL_MODEL_NAME">UNIVERSAL_MODEL_NAME (ex: llama-3.1)</option>
                 </select>
             </div>
             <div style="flex: 2; min-width: 200px;">

@@ -25,7 +25,7 @@ pub enum AgenticControlFlow {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ModelProvider {
     GeminiFlash,
-    MistralLarge,
+    OpenAICompatible,
     ParadoxLocal,
     Consensus,
 }
@@ -99,7 +99,7 @@ impl ReasoningAgent {
     pub fn set_provider(&mut self, format: &str) {
         self.provider = match format {
             "gemini" => ModelProvider::GeminiFlash,
-            "mistral" => ModelProvider::MistralLarge,
+            "universal" | "mistral" | "openai" | "ollama" => ModelProvider::OpenAICompatible,
             "consensus" => ModelProvider::Consensus,
             _ => ModelProvider::ParadoxLocal,
         };
@@ -239,43 +239,61 @@ impl ReasoningAgent {
         Ok(GeminiResponse::Text(clean_json.to_string()))
     }
 
-    pub async fn call_mistral(&self, system_prompt: &str, history: &[ChatMessage]) -> Result<String, AgentError> {
-        let api_key = Vault::get_api_key("MISTRAL_API_KEY")
-            .ok_or_else(|| AgentError::InferenceError("Clef MISTRAL_API_KEY non definie dans le Vault !".to_string()))?;
-        let url = "https://api.mistral.ai/v1/chat/completions";
+    pub async fn call_openai_compatible(&self, system_prompt: &str, history: &[ChatMessage]) -> Result<String, AgentError> {
+        let api_key = Vault::get_api_key("UNIVERSAL_API_KEY").unwrap_or_else(|| "".to_string());
+        let mut url = Vault::get_api_key("UNIVERSAL_API_BASE")
+            .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
         
-        let mut mistral_msgs = vec![json!({ "role": "system", "content": system_prompt })];
+        // Ensure /chat/completions suffix
+        if !url.ends_with("/chat/completions") {
+             if url.ends_with("/") {
+                 url.push_str("chat/completions");
+             } else {
+                 url.push_str("/chat/completions");
+             }
+        }
+        
+        let mut openai_msgs = vec![json!({ "role": "system", "content": system_prompt })];
         for msg in history {
             match msg.role {
                 MessageRole::User => {
-                    mistral_msgs.push(json!({ "role": "user", "content": &msg.text }));
+                    openai_msgs.push(json!({ "role": "user", "content": &msg.text }));
                 },
                 MessageRole::Assistant => {
-                    mistral_msgs.push(json!({ "role": "assistant", "content": &msg.text }));
+                    openai_msgs.push(json!({ "role": "assistant", "content": &msg.text }));
                 },
                 MessageRole::FunctionResult => {
-                    mistral_msgs.push(json!({ "role": "user", "content": format!("Function result for {}: {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
+                    openai_msgs.push(json!({ "role": "user", "content": format!("Function result for {}: {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
                 },
                 MessageRole::FunctionCall => {
-                    mistral_msgs.push(json!({ "role": "assistant", "content": format!("Called function {} with {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
+                    openai_msgs.push(json!({ "role": "assistant", "content": format!("Called function {} with {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
                 }
             }
         }
 
+        let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+            .unwrap_or_else(|| "mistral-large-latest".to_string());
+
         let payload = json!({
-            "model": "mistral-large-latest",
-            "messages": mistral_msgs
+            "model": model_name,
+            "messages": openai_msgs,
+            "temperature": 0.4
         });
         
         let client = self.http_client.as_ref().unwrap();
-        let res = client.post(url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&payload).send().await
-            .map_err(|e| AgentError::InferenceError(format!("Erreur HTTP: {}", e)))?;
-        if !res.status().is_success() {
-            return Err(AgentError::InferenceError(format!("Cloud API Reject: {}", res.text().await.unwrap_or_default())));
+        let mut req = client.post(&url).header("Content-Type", "application/json");
+        
+        if !api_key.is_empty() && api_key != "NO_KEY" {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
         }
+        
+        let res = req.json(&payload).send().await
+            .map_err(|e| AgentError::InferenceError(format!("Erreur HTTP OpenAI-Compatible: {}", e)))?;
+            
+        if !res.status().is_success() {
+            return Err(AgentError::InferenceError(format!("OpenAI-Compatible API Reject: {} (URL: {})", res.text().await.unwrap_or_default(), url)));
+        }
+        
         let json_body: serde_json::Value = res.json().await.unwrap();
         let text = json_body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
         
@@ -309,15 +327,15 @@ impl ReasoningAgent {
             info!("⏳ [CRUCIBLE] Waiting 15s (Mistral Quota)...");
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
-            info!("🔥 [CRUCIBLE] Passe {} : Mistral Red Teaming en cours...", iteration);
-            let mistral_critique = self.call_mistral(system_prompt, &mistral_history).await?;
+            info!("🔥 [CRUCIBLE] Passe {} : Avocat du Diable Red Teaming en cours...", iteration);
+            let mistral_critique = self.call_openai_compatible(system_prompt, &mistral_history).await?;
             
             if mistral_critique.contains("ACCORD_ATTEINT") {
                 info!("✅ [CRUCIBLE] Consensus Parfait atteint à l'itération {} !", iteration);
                 break;
             }
 
-            info!("⚔️ [CRUCIBLE] Critique de Mistral : {}...", &mistral_critique.chars().take(150).collect::<String>());
+            info!("⚔️ [CRUCIBLE] Critique : {}...", &mistral_critique.chars().take(150).collect::<String>());
             mistral_history.push(ChatMessage { role: MessageRole::Assistant, text: mistral_critique.clone(), function_name: None });
             
             info!("⏳ [CRUCIBLE] Waiting 15s (Gemma Quota)...");
@@ -436,15 +454,15 @@ impl ReasoningAgent {
             let _ = tx.send(DebateEvent::SystemEvent("Throttling API : 12s d'attente imposée pour préserver le quota Mistral...".to_string())).await;
             tokio::time::sleep(tokio::time::Duration::from_secs(12)).await;
 
-            let _ = tx.send(DebateEvent::SystemEvent(format!("Passe {} : Mistral Large exerce la Critique...", iteration))).await;
-            let mistral_critique = self.call_mistral(&system_prompt, &mistral_history).await?;
+            let _ = tx.send(DebateEvent::SystemEvent(format!("Passe {} : L'Avocat Critique structure son propos...", iteration))).await;
+            let mistral_critique = self.call_openai_compatible(&system_prompt, &mistral_history).await?;
             
             if iteration >= 3 && mistral_critique.contains("ACCORD_ATTEINT") {
-                let _ = tx.send(DebateEvent::SystemEvent("✅ Consensus Actif validé par Mistral Large !".to_string())).await;
+                let _ = tx.send(DebateEvent::SystemEvent("✅ Consensus Actif validé par l'Avocat Critique !".to_string())).await;
                 break;
             }
 
-            let _ = tx.send(DebateEvent::Turn { iteration, author: "Mistral Large (Critique)".to_string(), content: mistral_critique.clone() }).await;
+            let _ = tx.send(DebateEvent::Turn { iteration, author: "Agent Critique (Universal Gateway)".to_string(), content: mistral_critique.clone() }).await;
             mistral_history.push(ChatMessage { role: MessageRole::Assistant, text: mistral_critique.clone(), function_name: None });
             
             let _ = tx.send(DebateEvent::SystemEvent("Throttling API : 12s d'attente imposée avant inférence Gemma...".to_string())).await;
@@ -559,20 +577,21 @@ impl ReasoningAgent {
                        return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
                     },
                     GeminiResponse::Text(t) => {
-                        ("Gemini 2.5 Flash Cloud Node", "CloudDistillation", t)
+                        ("Gemini 2.5 Flash Cloud Node".to_string(), "CloudDistillation", t)
                     }
                 }
             },
-            ModelProvider::MistralLarge => {
-                let text = self.call_mistral(&system_prompt, &self.history).await?;
-                ("Mistral Large Cloud Node", "CloudDistillation", text)
+            ModelProvider::OpenAICompatible => {
+                let text = self.call_openai_compatible(&system_prompt, &self.history).await?;
+                let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME").unwrap_or_else(|| "Unknown".to_string());
+                (format!("Universal Node ({})", model_name), "UniversalSynthesis", text)
             },
             ModelProvider::Consensus => {
-                ("Consensus Loop", "Debate SSE", "Ceci est un signal SSE, cette trace ne devrait pas apparaitre.".to_string())
+                ("Consensus Loop".to_string(), "Debate SSE", "Ceci est un signal SSE, cette trace ne devrait pas apparaitre.".to_string())
             },
             ModelProvider::ParadoxLocal => {
                 let text = format!("**[MOCK LOCAL]** Chef, la Brique VII 'ParadoxEngine 1.58b' Bare-Metal nécessite des poids GGUF pour inférer. Pour l'heure, ceci est un échafaudage d'attente zero-dependency.\n\nMemoire Recall: {} ...", context);
-                ("ParadoxLocal (Mock)", "MockSynthesis", text)
+                ("ParadoxLocal (Mock)".to_string(), "MockSynthesis", text)
             }
         };
 
