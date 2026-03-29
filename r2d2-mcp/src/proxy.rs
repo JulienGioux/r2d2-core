@@ -22,7 +22,7 @@ impl Default for SemanticProxy {
 impl SemanticProxy {
     pub fn new() -> Self {
         Self {
-            paradox_engine: ParadoxSolver,
+            paradox_engine: ParadoxSolver::new(),
             hitl: HumanInTheLoop::new(),
         }
     }

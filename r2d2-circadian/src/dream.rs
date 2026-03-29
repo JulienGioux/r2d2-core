@@ -53,10 +53,10 @@ impl DreamSimulator {
             prompt.push_str(&format!("- [{}] {}\n", f.id, f.content));
         }
 
-        // 3. Appel de l'Agent BitNet (Inférence Locale)
+        // 3. Appel de l'Agent de Raisonnement (Slow-Path MCTS)
         let response = match self
             .cortex
-            .interact_with("BitNet-1.58b-Cognitive", &prompt)
+            .interact_with("Paradox-MultiAPI Router", &prompt)
             .await
         {
             Ok(json_str) => json_str,
@@ -76,7 +76,7 @@ impl DreamSimulator {
             }
         };
 
-        match unverified.verify(self.solver.as_ref()) {
+        match unverified.verify(self.solver.as_ref()).await {
             Ok(validated) => {
                 info!("🧠 [Dream Results] Consensus MCTS validé par le ParadoxEngine !");
                 let guard = validated.finalize();

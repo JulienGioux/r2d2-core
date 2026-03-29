@@ -55,7 +55,7 @@ impl McpGateway {
             .map_err(|e: AgentError| anyhow::anyhow!(e))?;
 
         Ok(Self {
-            validator: ParadoxSolver,
+            validator: ParadoxSolver::new(),
             blackboard,
             cortex,
             proxy: SemanticProxy::new(),
@@ -82,7 +82,7 @@ impl McpGateway {
 
         // 3. Soumettre le fragment au Paradox Engine (Typestate 3)
         // La méthode .verify() consomme le fragment et recrache soit Validated soit une Erreur.
-        let validated_fragment = unverified.verify(&self.validator)?;
+        let validated_fragment = unverified.verify(&self.validator).await?;
 
         info!(
             "Pensée de {} vérifiée et certifiée par Parad0x !",

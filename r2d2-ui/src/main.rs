@@ -71,6 +71,7 @@ struct ChatTemplate {
 #[derive(Template)]
 #[template(path = "memory.html")]
 struct MemoryTemplate {
+    #[allow(dead_code)]
     pub total_vectors: usize,
     pub sample_axioms: Vec<(usize, String)>,
 }
@@ -426,7 +427,7 @@ async fn handle_chat(
     // 1. Initialiser le Provider (Gemini/Mistral/Local)
     cortex.set_provider(&input.provider);
 
-    let mut final_prompt = input.prompt.clone();
+    let final_prompt = input.prompt.clone();
 
     // Gestion des Sources GitHub assignées au prompt
     let mut otf_repos = Vec::new();
@@ -442,7 +443,7 @@ async fn handle_chat(
 
     // 2. Résolution cognitive RAG
     let mut current_prompt = final_prompt.clone();
-    let mut json_resp = String::new();
+    let json_resp;
     let mut is_function_result = false;
     let mut last_function_name = String::new();
 

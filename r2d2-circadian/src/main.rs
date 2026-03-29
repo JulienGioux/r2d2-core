@@ -6,6 +6,7 @@ use r2d2_cortex::{
     models::{
         audio_agent::AudioAgent, bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent,
         vision_agent::VisionAgentLlava, vision_agent_qwen::VisionAgentQwen,
+        reasoning_agent::ReasoningAgent,
     },
     CortexRegistry,
 };
@@ -38,7 +39,7 @@ async fn main() -> Result<()> {
     let blackboard = Arc::new(PostgresBlackboard::new(&db_url).await?);
 
     info!("Initialisation du Moteur de Résolution Paradoxale...");
-    let solver = Arc::new(ParadoxSolver);
+    let solver = Arc::new(ParadoxSolver::new());
 
     info!("Chargement du Registre Cortex (Plugins IA)...");
     let cortex = Arc::new(CortexRegistry::new());
@@ -54,10 +55,13 @@ async fn main() -> Result<()> {
     cortex
         .register_agent(Box::new(VisionAgentQwen::new()))
         .await;
-
-    // Activation à chaud de l'agent 1.58-bit pour la réflexion locale
     cortex
-        .activate("BitNet-1.58b-Cognitive")
+        .register_agent(Box::new(ReasoningAgent::new()))
+        .await;
+
+    // Activation à chaud de l'agent de Raisonnement
+    cortex
+        .activate("Paradox-MultiAPI Router")
         .await
         .map_err(|e: AgentError| anyhow::anyhow!(e))?;
 

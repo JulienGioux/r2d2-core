@@ -57,19 +57,26 @@ async fn test_semantic_proxy_allow_safe() {
 
 #[tokio::test]
 async fn test_mcp_universal_client_init() {
-    // Un simple script python mock_mcp_server qui repond à tout :
     let py_mock = r#"
 import sys
 import json
-for line in sys.stdin:
-    req = json.loads(line)
-    res = {"jsonrpc": "2.0", "id": req["id"], "result": {"success": True}}
-    sys.stdout.write(json.dumps(res) + '\n')
-    sys.stdout.flush()
+sys.stderr.write("Ready to receive\n")
+sys.stderr.flush()
+while True:
+    line = sys.stdin.readline()
+    if not line:
+        break
+    try:
+        req = json.loads(line)
+        res = {"jsonrpc": "2.0", "id": req.get("id"), "result": {"success": True}}
+        sys.stdout.write(json.dumps(res) + '\n')
+        sys.stdout.flush()
+    except Exception:
+        pass
 "#;
 
-    // En test, on va utiliser "python3" "-c"
-    let mut client = McpUniversalClient::spawn("python3", &["-c", py_mock], None)
+    // En test, on va utiliser "python3" "-u" "-c"
+    let mut client = McpUniversalClient::spawn("python3", &["-u", "-c", py_mock], None)
         .await
         .expect("Erreur au spawn du client MCP mocké");
 

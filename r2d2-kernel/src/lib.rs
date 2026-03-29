@@ -78,7 +78,9 @@ impl Fragment<Signal> {
 
     /// Tente de parser le signal brut vers une structure `Unverified`.
     pub fn parse(self) -> Result<Fragment<Unverified>, KernelError> {
-        // TODO: Insérer ici le parseur JSONAI v3.1.
+        let _: r2d2_jsonai::JsonAiV3 = serde_json::from_str(&self.state.raw_data)
+            .map_err(|e| KernelError::ValidationFailed(format!("Signal non conforme JSONAI V3.1: {}", e)))?;
+
         Ok(Fragment {
             state: Unverified {
                 payload: self.state.raw_data,
@@ -88,9 +90,12 @@ impl Fragment<Signal> {
 }
 
 /// Port (Hexagonal Architecture) décrivant le validateur de vérité.
-pub trait TruthValidator {
+pub trait TruthValidator: Send + Sync {
     /// Prend en entrée un payload brut et retourne (Payload_Validé, Preuve_Inférence)
-    fn validate_payload(&self, payload: &str) -> Result<(String, String), KernelError>;
+    fn validate_payload(
+        &self, 
+        payload: &str
+    ) -> impl std::future::Future<Output = Result<(String, String), KernelError>> + Send;
 }
 
 impl Fragment<Unverified> {
@@ -98,11 +103,11 @@ impl Fragment<Unverified> {
     ///
     /// Retourne un fragment `Validated` uniquement si le consensus épistémologique
     /// est atteint sans paradoxe.
-    pub fn verify<V: TruthValidator>(
+    pub async fn verify<V: TruthValidator>(
         self,
         validator: &V,
     ) -> Result<Fragment<Validated>, KernelError> {
-        let (verified_payload, poi) = validator.validate_payload(&self.state.payload)?;
+        let (verified_payload, poi) = validator.validate_payload(&self.state.payload).await?;
 
         Ok(Fragment {
             state: Validated {
@@ -127,18 +132,18 @@ mod tests {
 
     struct MockValidator;
     impl TruthValidator for MockValidator {
-        fn validate_payload(&self, payload: &str) -> Result<(String, String), KernelError> {
+        async fn validate_payload(&self, payload: &str) -> Result<(String, String), KernelError> {
             Ok((payload.to_string(), "poi_0xABCDEF_R2D2".to_string()))
         }
     }
 
-    #[test]
-    fn test_typestate_pipeline() {
-        let signal = Fragment::new("{\"is_fact\": true}".to_string());
+    #[tokio::test]
+    async fn test_typestate_pipeline() {
+        let signal = Fragment::new("{\"id\":\"test\",\"source\":\"Vision\",\"content\":\"test\",\"is_fact\":true,\"consensus_level\":\"ConsensusReached\",\"ontological_tags\":[]}".to_string());
 
         let unverified = signal.parse().expect("Doit parser");
         let validator = MockValidator;
-        let validated = unverified.verify(&validator).expect("Doit valider");
+        let validated = unverified.verify(&validator).await.expect("Doit valider");
 
         // Impossible de compiler: let err = unverified.finalize();
 
