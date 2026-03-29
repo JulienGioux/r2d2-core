@@ -63,6 +63,9 @@ struct CortexTemplate {}
 #[template(path = "chat.html")]
 struct ChatTemplate {
     history_html: String,
+    github_configured: bool,
+    active_sources_html: String,
+    library_repos: Vec<String>,
 }
 
 #[derive(Template)]
@@ -105,6 +108,7 @@ pub fn list_local_hf_models() -> Vec<String> {
         <p>{{ prompt }}</p>
     </div>
 </div>
+{{ mcp_feedback|safe }}
 <div class="message system">
     <i data-lucide="brain-circuit" style="margin-top: 4px;"></i>
     <div class="message-content" style="width: 100%;">
@@ -135,6 +139,7 @@ pub fn list_local_hf_models() -> Vec<String> {
 <script>if (typeof lucide !== 'undefined') { lucide.createIcons(); }</script>
 "#, ext = "html")]
 struct ChatResponseTemplate {
+    mcp_feedback: String,
     prompt: String,
     model_name: String,
     response_md: String,
@@ -148,9 +153,7 @@ struct ChatInput {
     provider: String,
     prompt: String,
     #[serde(default)]
-    attached_contexts: Vec<String>,
-    #[serde(default)]
-    deep_github_analysis: Option<String>,
+    github_sources: String,
 }
 
 #[tokio::main]
@@ -205,7 +208,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/system/logs", get(stream_system_logs))
         .route("/admin/keys", get(get_admin_keys))
         .route("/admin/keys", post(set_admin_keys))
-        .route("/api/chat/context/attach", post(attach_context));
+        .route("/chat/context/attach", post(attach_context))
+        .route("/chat/context/remove", post(remove_context));
 
     let app = Router::new()
         .route("/", get(render_index))
@@ -266,10 +270,41 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
         core_count,
     }.render().unwrap())
 }
+
 async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
     let mut history_html = String::new();
+    let mut active_sources_html = String::new();
+
     if let Some(session) = chat_history::load_session(&session_id) {
+        // Generate existing attachment pills
+        for repo in &session.github_sources {
+            if repo.starts_with("github-async://") {
+                 let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
+                 let r = repo.replace("github-async://", "");
+                 active_sources_html.push_str(&format!(
+                    "<div id=\"{}\" class=\"context-pill context-pill-async\">\
+                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
+                        <span>{} (Async Queued)</span>\
+                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
+                            <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
+                        </button>\
+                        <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
+                    </div>", id_val, r, repo, id_val, repo));
+            } else {
+                 let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
+                 active_sources_html.push_str(&format!(
+                    "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
+                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
+                        <span>{} (Cognitive Tool)</span>\
+                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
+                            <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
+                        </button>\
+                        <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
+                    </div>", id_val, repo, repo, id_val, repo));
+            }
+        }
+
         let mut i = 0;
         while i < session.turns.len() {
             let user_turn = &session.turns[i];
@@ -289,7 +324,7 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                 pulldown_cmark::html::push_html(&mut html_output, parser);
                 
                 history_html.push_str(&ChatResponseTemplate {
-                    prompt, model_name, response_md: html_output, jsonai: json_resp, latency, consensus,
+                    mcp_feedback: String::new(), prompt, model_name, response_md: html_output, jsonai: json_resp, latency, consensus,
                 }.render().unwrap());
                 i += 2;
             } else { i += 1; }
@@ -298,7 +333,21 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
     if history_html.is_empty() {
         history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p></div></div>".into();
     }
-    Html(ChatTemplate { history_html }.render().unwrap())
+    let github_configured = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
+    let queue = read_queue();
+    let mut final_library_repos: Vec<String> = queue
+       .into_iter()
+       .map(|v| v.notebook)
+       .filter(|n| n.contains("/"))
+       .collect();
+       
+    // Hardcoded permanent repository for the project core architecture
+    final_library_repos.push("JulienGioux/r2d2-core".to_string());
+    
+    final_library_repos.sort();
+    final_library_repos.dedup();
+
+    Html(ChatTemplate { history_html, github_configured, active_sources_html, library_repos: final_library_repos }.render().unwrap())
 }
 async fn render_cortex() -> impl IntoResponse { Html(CortexTemplate {}.render().unwrap()) }
 
@@ -326,6 +375,7 @@ async fn handle_chat(
     State(state): State<AppState>,
     Form(input): Form<ChatInput>
 ) -> impl IntoResponse {
+    tracing::info!("📥 [handle_chat] Received prompt: '{}', github_sources: '{}'", input.prompt, input.github_sources);
     // Handling the Consensus Stream Request locally
     if input.provider == "consensus" {
         *state.pending_debate_prompt.lock().await = Some(input.prompt.clone());
@@ -350,103 +400,146 @@ async fn handle_chat(
         return resp;
     }
 
+    let session_id = state.current_chat_session.lock().await.clone();
+    
     let mut cortex = state.agent.lock().await;
+
+    // Isoler le contexte : on s'assure que le Cortex a bien chargé l'historique de cette session spécifique
+    if let Some(session) = chat_history::load_session(&session_id) {
+        let mut history = Vec::new();
+        for turn in session.turns {
+            history.push(r2d2_cortex::models::reasoning_agent::ChatMessage {
+                role: if turn.role == "user" { 
+                    r2d2_cortex::models::reasoning_agent::MessageRole::User 
+                } else { 
+                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant 
+                },
+                text: turn.content,
+                function_name: None,
+            });
+        }
+        cortex.set_history(history);
+    } else {
+        cortex.clear_history();
+    }
 
     // 1. Initialiser le Provider (Gemini/Mistral/Local)
     cortex.set_provider(&input.provider);
 
     let mut final_prompt = input.prompt.clone();
 
-    // Gestion du Pre-fetch "On-The-Fly" via MCP GitHub Server
-    let is_deep_analysis = input.deep_github_analysis.as_deref() == Some("true") || input.deep_github_analysis.as_deref() == Some("on");
-    
+    // Gestion des Sources GitHub assignées au prompt
     let mut otf_repos = Vec::new();
-    for ctx in &input.attached_contexts {
-        if ctx.starts_with("github-otf://") {
-            otf_repos.push(ctx.replace("github-otf://", ""));
-        }
-    }
-
-    // Fallback: extracting repo from prompt if checkbox is checked but no repo was explicitly attached via modal
-    if is_deep_analysis && otf_repos.is_empty() {
-        if let Some(idx) = input.prompt.find("github.com/") {
-            let rest = &input.prompt[idx + 11..];
-            let parts: Vec<&str> = rest.split(|c: char| !c.is_alphanumeric() && c != '-' && c != '.').collect();
-            if parts.len() >= 2 {
-                otf_repos.push(format!("{}/{}", parts[0], parts[1]));
+    if !input.github_sources.is_empty() {
+        for ctx in input.github_sources.split(',') {
+            if !ctx.trim().is_empty() {
+                otf_repos.push(ctx.trim().to_string());
             }
         }
     }
 
-    if is_deep_analysis {
-        for repo in &otf_repos {
-            tracing::info!("Pre-Fetching MCP GitHub OTF pour {} ...", repo);
-            let (cmd, args) = if cfg!(target_os = "windows") {
-                // S'assurer de supporter les contextes UNIX dans WSL avec fallback natif
-                ("bash", vec!["-c", "npx -y @modelcontextprotocol/server-github"])
-            } else {
-                ("bash", vec!["-c", "npx -y @modelcontextprotocol/server-github"])
-            };
-            
-            let env_vars = r2d2_cortex::security::vault::Vault::get_runtime_env("github");
-
-            match r2d2_mcp::client::McpUniversalClient::spawn(cmd, &args, Some(env_vars)).await {
-                Ok(mut mcp) => {
-                    match mcp.initialize().await {
-                        Ok(_) => {
-                            let search_args = serde_json::json!({
-                                "q": format!("{} repo:{}", input.prompt, repo),
-                            });
-                            
-                            match mcp.call_tool("search_code", search_args).await {
-                                Ok(res) => {
-                                    final_prompt.push_str(&format!("\n\n[RÉTRO-SENSORY : RÉSULTAT MCP GITHUB ({})] :\n{:?}", repo, res));
-                                },
-                                Err(e) => {
-                                    tracing::error!("Erreur lors de l'appel outil search_code sur {}: {}", repo, e);
-                                    final_prompt.push_str(&format!("\n\n[ERREUR SENSORY] Impossible d'exécuter la recherche dans le dépôt {} : {}", repo, e));
-                                }
-                            }
-                            let _ = mcp.shutdown().await;
-                        },
-                        Err(e) => {
-                            tracing::error!("Impossible d'initialiser le serveur MCP GitHub (authentification ou crash) : {}", e);
-                            final_prompt.push_str(&format!("\n\n[ERREUR SENSORY] Le serveur MCP n'a pas pu s'initialiser pour le dépôt {} (Vérifiez votre clé GITHUB_PERSONAL_ACCESS_TOKEN dans le Vault). Détail: {}", repo, e));
-                        }
-                    }
-                },
-                Err(e) => {
-                    tracing::error!("Impossible de spawner le processus bash npx pour MCP GitHub : {}", e);
-                    final_prompt.push_str(&format!("\n\n[ERREUR SYSTEME] L'environnement système n'arrive pas à lancer `npx` (Conflit WSL/Path). Détail : {}", e));
-                }
-            }
-        }
-    }
+    let mut mcp_feedback_html = String::new();
 
     // 2. Résolution cognitive RAG
-    let thought_future = cortex.generate_thought(&final_prompt);
-    let timeout_duration = if input.attached_contexts.is_empty() { 15 } else { 60 }; // Timeout étendu pour l'OTF MCP
-    let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_duration), thought_future).await;
-    
-    let json_resp = match result {
-        Ok(Ok(resp)) => resp,
-        Ok(Err(e)) => {
-            serde_json::to_string(&serde_json::json!({
-                "content": format!("Erreur Cortex: {}", e),
-                "source": {"ParadoxEngine": "Error"},
-                "consensus": "Error",
-                "id": "paradox-multiapi-error"
-            })).unwrap()
-        },
-        Err(_) => {
-            serde_json::to_string(&serde_json::json!({
-                "content": "Défaillance de l'hyperviseur: Délai d'attente Cloud API expiré (> 15s). Cloud ou Proxy injoignable.",
-                "source": {"ParadoxEngine": "Timeout"},
-                "consensus": "Error",
-                "id": "paradox-timeout"
-            })).unwrap()
-        }
-    };
+    let mut current_prompt = final_prompt.clone();
+    let mut json_resp = String::new();
+    let mut is_function_result = false;
+    let mut last_function_name = String::new();
+
+    loop {
+        let thought_future = cortex.generate_thought_agentic(&current_prompt, &otf_repos, is_function_result, &last_function_name);
+        let timeout_duration = if otf_repos.is_empty() { 15 } else { 120 }; // Timeout étendu pour appel agentique potentiels via MCP
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_duration), thought_future).await;
+        
+        match result {
+            Ok(Ok(r2d2_cortex::models::reasoning_agent::AgenticControlFlow::Completed(resp))) => {
+                json_resp = resp;
+                break;
+            },
+            Ok(Ok(r2d2_cortex::models::reasoning_agent::AgenticControlFlow::FunctionCallRequest { name, args })) => {
+                tracing::info!("Agent initiated MCP tool call: {} with args {:?}", name, args);
+                
+                // Lazy initialization du Daemon MCP (Actor Pattern)
+                let github_token = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").unwrap_or_default();
+                let mut mcp_lock = cortex.mcp_client.lock().await;
+                let mut init_failed = false;
+                if mcp_lock.is_none() {
+                    tracing::info!("Instantiating persistent MCP Daemon...");
+                    match r2d2_cortex::mcp_client::McpClient::new(&github_token).await {
+                        Ok(client) => {
+                            *mcp_lock = Some(client);
+                        },
+                        Err(e) => {
+                            tracing::error!("Failed to instantiate MCP Daemon: {}", e);
+                            current_prompt = format!("Erreur système interne: impossible d'instancier le démon MCP. L'appel 'npx' a échoué (Timeout ou Proxy). Raison : {}", e);
+                            is_function_result = true;
+                            last_function_name = name.clone();
+                            mcp_feedback_html.push_str(&format!(
+                                "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur d'Amorçage Outil `github-mcp::{}`: Daemon Instantiation Failed</div>",
+                                name
+                            ));
+                            init_failed = true;
+                        }
+                    }
+                }
+
+                if !init_failed {
+                    if let Some(ref mcp) = *mcp_lock {
+                        match mcp.call_tool(&name, args).await {
+                            Ok(res) => {
+                                let mut res_str = res.to_string();
+                                if res_str.len() > 250_000 {
+                                    res_str = res_str.chars().take(250_000).collect();
+                                    res_str.push_str("... [RESULT TRUNCATED BY R2D2]");
+                                }
+                                current_prompt = format!("{}", res_str);
+                                is_function_result = true;
+                                last_function_name = name.clone();
+                                mcp_feedback_html.push_str(&format!(
+                                    "<div style='font-size:0.8rem; color:#888; border-left:2px solid #3b82f6; padding-left:8px; margin-bottom:8px;'><i data-lucide='cpu' style='width:14px;'></i> Outil `github-mcp::{}` exécuté.</div>",
+                                    name
+                                ));
+                            },
+                            Err(e) => {
+                                current_prompt = format!("Tool {} execution failed: {}", name, e);
+                                is_function_result = true;
+                                last_function_name = name.clone();
+                                mcp_feedback_html.push_str(&format!(
+                                    "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur `github-mcp::{}`: {}</div>",
+                                    name, e
+                                ));
+                            }
+                        }
+                    } else {
+                        current_prompt = format!("System Error: MCP Daemon unavailable. Tool {} aborted.", name);
+                        is_function_result = true;
+                        last_function_name = name.clone();
+                    }
+                }
+                
+                drop(mcp_lock);
+                continue;
+            },
+            Ok(Err(e)) => {
+                json_resp = serde_json::to_string(&serde_json::json!({
+                    "content": format!("Erreur Cortex: {}", e),
+                    "source": {"ParadoxEngine": "Error"},
+                    "consensus": "Error",
+                    "id": "paradox-multiapi-error"
+                })).unwrap();
+                break;
+            },
+            Err(_) => {
+                json_resp = serde_json::to_string(&serde_json::json!({
+                    "content": "Défaillance de l'hyperviseur: Délai d'attente Cloud API expiré (> 15s). Cloud ou Proxy injoignable.",
+                    "source": {"ParadoxEngine": "Timeout"},
+                    "consensus": "Error",
+                    "id": "paradox-timeout"
+                })).unwrap();
+                break;
+            }
+        };
+    }
     
     // 3. Parsing du V3 JSONAI pour extraction du discours et des Traces
     let parsed: serde_json::Value = serde_json::from_str(&json_resp).unwrap_or(serde_json::json!({ "content": json_resp, "source": {"ParadoxEngine": "Unknown"} }));
@@ -462,6 +555,7 @@ async fn handle_chat(
     pulldown_cmark::html::push_html(&mut html_output, parser);
 
     let tmpl = ChatResponseTemplate {
+        mcp_feedback: mcp_feedback_html,
         prompt: input.prompt.clone(),
         model_name,
         response_md: html_output,
@@ -471,7 +565,7 @@ async fn handle_chat(
     };
     
     let session_id = state.current_chat_session.lock().await.clone();
-    chat_history::save_turn(&session_id, &input.prompt, &json_resp);
+    chat_history::save_turn(&session_id, &input.prompt, &json_resp, otf_repos.clone());
 
     let mut resp = Html(tmpl.render().unwrap()).into_response();
     resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
@@ -573,8 +667,29 @@ async fn info_chat_session(axum::extract::Path(id): axum::extract::Path<String>)
 
 async fn new_chat_session(State(state): State<AppState>) -> impl IntoResponse {
     *state.current_chat_session.lock().await = uuid::Uuid::new_v4().to_string();
+    state.agent.lock().await.clear_history();
     let history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p></div></div>".into();
-    axum::response::Html(ChatTemplate { history_html }.render().unwrap())
+    let github_configured = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
+    
+    let queue = read_queue();
+    let mut final_library_repos: Vec<String> = queue
+       .into_iter()
+       .map(|v| v.notebook)
+       .filter(|n| n.contains("/"))
+       .collect();
+       
+    // Hardcoded permanent repository for the project core architecture
+    final_library_repos.push("JulienGioux/r2d2-core".to_string());
+    
+    final_library_repos.sort();
+    final_library_repos.dedup();
+
+    axum::response::Html(ChatTemplate { 
+        history_html, 
+        github_configured, 
+        active_sources_html: String::new(),
+        library_repos: final_library_repos
+    }.render().unwrap())
 }
 
 async fn load_chat_history(
@@ -582,6 +697,23 @@ async fn load_chat_history(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     *state.current_chat_session.lock().await = id.clone();
+    if let Some(session) = chat_history::load_session(&id) {
+        let mut history = Vec::new();
+        for turn in session.turns {
+            history.push(r2d2_cortex::models::reasoning_agent::ChatMessage {
+                role: if turn.role == "user" { 
+                    r2d2_cortex::models::reasoning_agent::MessageRole::User 
+                } else { 
+                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant 
+                },
+                text: turn.content,
+                function_name: None,
+            });
+        }
+        state.agent.lock().await.set_history(history);
+    } else {
+        state.agent.lock().await.clear_history();
+    }
     render_chat(State(state)).await
 }
 
@@ -631,7 +763,13 @@ async fn handle_sse_stream(State(state): State<AppState>) -> Sse<impl tokio_stre
                     "id": format!("paradox-multiapi-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
                 });
                 
-                crate::chat_history::save_turn(&session_id, &prompt_for_save, &serde_json::to_string(&json_struct).unwrap());
+                // Dans le stream SSE (débat final), on recharge github_sources depuis la db s'ils existaient, ou on passe vide.
+                // Au moment du get initial, l'historique a ete charge.
+                let mut current_sources = Vec::new();
+                if let Some(session) = crate::chat_history::load_session(&session_id) {
+                    current_sources = session.github_sources.clone();
+                }
+                crate::chat_history::save_turn(&session_id, &prompt_for_save, &serde_json::to_string(&json_struct).unwrap(), current_sources);
 
                 let parser = pulldown_cmark::Parser::new(&content);
                 let mut md_html = String::new();
@@ -929,7 +1067,7 @@ async fn get_admin_keys() -> axum::response::Response {
 }
 
 async fn set_admin_keys(Form(params): Form<KeyUpdateParams>) -> axum::response::Response {
-    r2d2_cortex::security::vault::Vault::set_in_memory_key(&params.provider, &params.api_key);
+    r2d2_cortex::security::vault::Vault::set_api_key(&params.provider, &params.api_key);
     get_admin_keys().await
 }
 
@@ -939,9 +1077,13 @@ struct AttachContextPayload {
     analyze_mode: String,
 }
 
-async fn attach_context(Form(payload): Form<AttachContextPayload>) -> impl IntoResponse {
+async fn attach_context(
+    State(state): State<AppState>,
+    Form(payload): Form<AttachContextPayload>
+) -> impl IntoResponse {
     let mode = payload.analyze_mode.as_str();
     let repo = payload.repo_url.trim();
+    let session_id = state.current_chat_session.lock().await.clone();
 
     if mode == "async" {
         let mut queue = read_queue();
@@ -956,30 +1098,53 @@ async fn attach_context(Form(payload): Form<AttachContextPayload>) -> impl IntoR
         });
         write_queue(&queue);
         
+        // Persist local session Context
+        let prefixed_repo = format!("github-async://{}", repo);
+        chat_history::append_github_source(&session_id, &prefixed_repo);
+
+        let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
         let html_snippet = format!(
-            "<div class=\"glass-card\" style=\"font-size: 0.8em; padding: 4px 12px; border-radius: 12px; display: flex; align-items: center; gap: 6px; background: rgba(150,50,250,0.1); border: 1px solid rgba(150,50,250,0.3);\">\
-                <i data-lucide=\"github\" style=\"width: 14px; height: 14px; color: #9b59b6;\"></i>\
-                <span style=\"color: #e0e0e0;\">{} (Async Queued)</span>\
-                <input type=\"hidden\" name=\"attached_contexts[]\" value=\"github-async://{}\">\
+            "<div id=\"{}\" class=\"context-pill context-pill-async\">\
+                <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
+                <span>{} (Async Queued)</span>\
+                <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
+                    <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
+                </button>\
+                <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
             </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>",
-            repo, repo
+            id_val, repo, prefixed_repo, id_val, prefixed_repo
         );
         axum::response::Html(html_snippet)
         
     } else {
+        chat_history::append_github_source(&session_id, repo);
         let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
         
         let html_snippet = format!(
-            "<div id=\"{}\" class=\"glass-card\" style=\"font-size: 0.8em; padding: 4px 12px; border-radius: 12px; display: flex; align-items: center; gap: 6px; background: rgba(50,150,250,0.1); border: 1px solid rgba(50,150,250,0.3);\">\
-                <i data-lucide=\"github\" style=\"width: 14px; height: 14px; color: #3498db;\"></i>\
-                <span style=\"color: #e0e0e0;\">{} (On-The-Fly)</span>\
-                <button type=\"button\" style=\"background:none; border:none; color:inherit; cursor:pointer; padding: 0; display: flex; align-items: center;\" onclick=\"document.getElementById('{}').remove();\">\
-                    <i data-lucide=\"x\" style=\"width: 12px; height: 12px; color: #e74c3c;\"></i>\
+            "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
+                <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
+                <span>{} (Cognitive Tool)</span>\
+                <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
+                    <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
                 </button>\
-                <input type=\"hidden\" name=\"attached_contexts[]\" value=\"github-otf://{}\">\
+                <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
             </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>",
-            id_val, repo, id_val, repo
+            id_val, repo, repo, id_val, repo
         );
         axum::response::Html(html_snippet)
     }
+}
+
+#[derive(serde::Deserialize)]
+struct RemoveContextPayload {
+    repo: String,
+}
+
+async fn remove_context(
+    State(state): State<AppState>,
+    Form(payload): Form<RemoveContextPayload>
+) -> impl IntoResponse {
+    let session_id = state.current_chat_session.lock().await.clone();
+    chat_history::remove_github_source(&session_id, &payload.repo);
+    axum::response::Html("") // Return empty block to swap out the pill
 }

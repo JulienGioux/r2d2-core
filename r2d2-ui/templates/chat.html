@@ -25,58 +25,48 @@
             {{ history_html|safe }}
         </div>
 
-        <style>
-            #thinking-indicator { display: none; }
-            .htmx-request#thinking-indicator { display: flex !important; }
-        </style>
-        <div id="thinking-indicator" class="htmx-indicator" style="margin: 0 24px 8px 24px; font-size: 0.8rem; color: var(--highlight-color); align-items: center; gap: 8px;">
-            <i data-lucide="loader-2" class="spin" style="width: 14px; height: 14px;"></i> Cognition en cours... (Routage API)
-        </div>
-        
-        <div style="padding: 24px; padding-top: 0;">
-            <!-- Zone d'affichage des attachements (HTMX Target) -->
-            <div id="context-attachments" style="margin-bottom: 12px; display: flex; gap: 8px; flex-wrap: wrap;">
-                <!-- Les attaches s'ajouteront ici dynamiquement -->
+        <form id="chat-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" hx-indicator="#chat-form" hx-on::after-request="const ta = this.querySelector('textarea[name=prompt]'); ta.value=''; ta.style.height=''; setTimeout(()=>lucide.createIcons(),50);" class="unified-input-shell" style="margin-top: auto;">
+            <!-- Zone d'attachements de contexte au-dessus du texte -->
+            <div id="context-attachments" class="shell-attachments">
+                {{ active_sources_html|safe }}
             </div>
+            
+            <!-- Textarea auto-extensible -->
+            <textarea name="prompt" class="chat-textarea" placeholder="Entrez une directive ou un stimulus cognitif..." required rows="1" oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'" onkeydown="if(event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.closest('form').querySelector('button[type=submit]').click(); }"></textarea>
+            
+            <!-- Barre d'outils inférieure -->
+            <div class="shell-toolbelt">
+                <div class="toolbelt-left">
+                    {% if github_configured %}
+                    <button type="button" class="btn-icon active-github" title="Attacher Source GitHub (MCP)" onclick="document.getElementById('context-modal').style.display = 'flex';">
+                        <i data-lucide="github"></i>
+                    </button>
+                    {% else %}
+                    <button type="button" class="btn-icon" title="Clé GITHUB manquante dans le Vault" style="cursor: not-allowed; opacity: 0.5;">
+                        <i data-lucide="github"></i>
+                    </button>
+                    {% endif %}
 
-            <form id="chat-form" class="chat-input-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" hx-indicator="#chat-form" hx-on::after-request="this.querySelector('input[name=prompt]').value=''" style="display: flex; flex-direction: column; gap: 8px;">
-                <style>
-                    /* Busy state Lock */
-                    #chat-form.htmx-request { pointer-events: none; opacity: 0.6; }
-                    #chat-form.htmx-request input { cursor: not-allowed; }
-                </style>
-                <div style="display: flex; gap: 8px; width: 100%;">
-                    <!-- Bouton Trombone pour ouvrir la modale contextuelle -->
-                    <button type="button" class="btn-secondary" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 0 16px; border-radius: 8px; color: #888; cursor: pointer; display: flex; align-items: center;" onclick="document.getElementById('context-modal').style.display = 'flex';">
-                        <i data-lucide="paperclip" style="width: 18px; height: 18px;"></i>
+                    <button type="button" class="btn-icon active-key" title="Configurer le Vault R2D2" onclick="document.getElementById('vault-modal').style.display = 'flex';">
+                        <i data-lucide="key"></i>
                     </button>
 
-                    <!-- Bouton Clé pour ouvrir le Vault R2D2 -->
-                    <button type="button" class="btn-secondary" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); padding: 0 16px; border-radius: 8px; color: #f39c12; cursor: pointer; display: flex; align-items: center;" onclick="document.getElementById('vault-modal').style.display = 'flex';">
-                        <i data-lucide="key" style="width: 18px; height: 18px;"></i>
-                    </button>
-
-                    <select name="provider" class="glass-card" style="padding: 0 16px; border: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.5); color: var(--text-primary); outline: none; border-radius: 8px; font-family: 'Inter', sans-serif;">
+                    <select name="provider" style="background: transparent; border: none; color: #888; font-size: 0.8rem; font-family: var(--font-sans); outline: none; margin-left: 8px; cursor: pointer;">
                         <option value="gemini">Gemini 2.5 Flash</option>
                         <option value="mistral">Mistral Large</option>
-                        <option value="consensus">Mode Débat (Gemini ⚔️ Mistral)</option>
-                        <option value="local">Paradox Local (Mock)</option>
+                        <option value="consensus">Mode Débat</option>
+                        <option value="local">Paradox Local</option>
                     </select>
-                    <input type="text" name="prompt" placeholder="Entrez une directive ou un stimulus cognitif..." required autocomplete="off" style="flex: 1; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); padding: 12px 16px; border-radius: 8px; color: white;">
-                    <button type="submit" class="chat-submit-btn">
-                        <i data-lucide="send"></i>
-                    </button>
                 </div>
-                <div style="display: flex; align-items: center; gap: 12px; padding: 4px 8px;">
-                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.85rem; color: #a0a0a0; transition: color 0.2s;" onmouseover="this.style.color='#fff'" onmouseout="this.style.color='#a0a0a0'">
-                        <input type="checkbox" name="deep_github_analysis" value="true" style="margin:0; width: 14px; height: 14px; cursor: pointer;" title="Active l'agent MCP On-The-Fly pour explorer le dépôt GitHub durant l'inférence.">
-                        <i data-lucide="github" style="width: 14px; height: 14px;"></i> Deep Github Analysis (On-The-Fly)
-                    </label>
-                </div>
-            </form>
-            <div style="text-align: center; color: rgba(255,255,255,0.4); font-size: 0.75em; margin-top: 8px;">
-                R2D2 Cortex peut faire des erreurs. Considérez vérifier les informations critiques.
+                
+                <button type="submit" class="chat-submit-btn" style="width: 36px; height: 36px; border-radius: 50%;">
+                    <i data-lucide="arrow-up" style="width: 18px; height: 18px;"></i>
+                </button>
             </div>
+        </form>
+
+        <div style="text-align: center; color: rgba(255,255,255,0.4); font-size: 0.75em; margin-bottom: 12px;">
+            R2D2 Cortex peut faire des erreurs. Vérifiez méticuleusement les informations processées.
         </div>
     </div>
 </div>
@@ -103,8 +93,16 @@ function showTab(btn, index) {
         
         <form hx-post="/api/chat/context/attach" hx-target="#context-attachments" hx-swap="beforeend" hx-on::after-request="document.getElementById('context-modal').style.display = 'none'; lucide.createIcons();">
             <div style="display: flex; flex-direction: column; gap: 8px;">
-                <label style="font-size: 0.9em; color: #aaa;">URL ou Dépôt Github (ex: JulienGioux/r2d2-core)</label>
-                <input type="text" name="repo_url" placeholder="user/repo" required style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); padding: 10px 12px; border-radius: 6px; color: white;">
+                <label style="font-size: 0.9em; color: #aaa;">Bibliothèque de Sources (Dépôts R2D2)</label>
+                <select name="library_repo" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); padding: 10px 12px; border-radius: 6px; color: white; cursor: pointer;" onchange="if(this.value) document.getElementById('manual-repo-input').value = this.value;">
+                    <option value="">-- Sélectionner depuis la Bibliothèque --</option>
+                    {% for repo in library_repos %}
+                    <option value="{{ repo }}">{{ repo }}</option>
+                    {% endfor %}
+                </select>
+
+                <label style="font-size: 0.9em; color: #aaa; margin-top: 12px;">Ou Attacher depuis GitHub manuellement</label>
+                <input id="manual-repo-input" type="text" name="repo_url" placeholder="user/repo" required style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); padding: 10px 12px; border-radius: 6px; color: white;">
             </div>
             
             <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 16px;">
@@ -170,3 +168,15 @@ function showTab(btn, index) {
         </form>
     </div>
 </div>
+
+<script>
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        if(evt.detail.elt.id === "chat-form") {
+            let repos = [];
+            evt.detail.elt.querySelectorAll('input[name="github_source_item"], input[name="github_sources"]').forEach(function(input) {
+                repos.push(input.value);
+            });
+            evt.detail.parameters['github_sources'] = repos.join(',');
+        }
+    });
+</script>

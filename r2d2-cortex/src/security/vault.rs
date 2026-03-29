@@ -22,17 +22,33 @@ pub struct Vault;
 impl Vault {
     /// Retourne une clé API depuis le Vault sécurisé, la RAM Paranoïaque ou fallback sur les variables d'environnement.
     pub fn get_api_key(identifier: &str) -> Option<String> {
-        if let Some(val) = in_memory_vault().lock().unwrap().get(identifier) {
-            return Some(val.clone());
+        let actual_identifiers = if identifier == "HUGGINGFACE_TOKEN" || identifier == "HF_TOKEN" {
+            vec!["HUGGINGFACE_TOKEN", "HF_TOKEN"]
+        } else {
+            vec![identifier]
+        };
+
+        for id in &actual_identifiers {
+            if let Some(val) = in_memory_vault().lock().unwrap().get(*id) {
+                return Some(val.clone());
+            }
         }
+
         
         let vault = Self::load_vault();
-        if let Some(val) = vault.keys.get(identifier) {
-            return Some(val.clone());
+        for id in &actual_identifiers {
+            if let Some(val) = vault.keys.get(*id) {
+                return Some(val.clone());
+            }
         }
         
         // Fallback transparent (rétrocompatibilité)
-        std::env::var(identifier).ok()
+        for id in &actual_identifiers {
+            if let Ok(val) = std::env::var(id) {
+                return Some(val);
+            }
+        }
+        None
     }
 
     /// Enregistre ou met à jour une clé API dans le Vault sécurisé
@@ -113,6 +129,19 @@ impl Vault {
                     env.insert("GEMINI_API_KEY".to_string(), token.clone());
                 } else if let Ok(val) = std::env::var("GEMINI_API_KEY") {
                     env.insert("GEMINI_API_KEY".to_string(), val);
+                }
+            },
+            "huggingface" | "hf" | "mistral" => {
+                // Mistral utilise parfois le token pour les bases HF, ou on peut juste fournir HF_TOKEN partout où on demande l'un ou l'autre.
+                if let Some(token) = mem.get("HUGGINGFACE_TOKEN").or_else(|| mem.get("HF_TOKEN")) {
+                    env.insert("HUGGINGFACE_TOKEN".to_string(), token.clone());
+                    env.insert("HF_TOKEN".to_string(), token.clone());
+                } else if let Some(token) = vault.keys.get("HUGGINGFACE_TOKEN").or_else(|| vault.keys.get("HF_TOKEN")) {
+                    env.insert("HUGGINGFACE_TOKEN".to_string(), token.clone());
+                    env.insert("HF_TOKEN".to_string(), token.clone());
+                } else if let Ok(val) = std::env::var("HUGGINGFACE_TOKEN").or_else(|_| std::env::var("HF_TOKEN")) {
+                    env.insert("HUGGINGFACE_TOKEN".to_string(), val.clone());
+                    env.insert("HF_TOKEN".to_string(), val);
                 }
             },
             _ => {}

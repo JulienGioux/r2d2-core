@@ -57,8 +57,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
 
-        let api =
-            hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api = hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,

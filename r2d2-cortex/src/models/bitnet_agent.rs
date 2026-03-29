@@ -49,7 +49,7 @@ impl CognitiveAgent for BitNetAgent {
         let config = BitNetConfig::default();
 
         info!("   [BitNet] Résolution des poids via HuggingFace Hub...");
-        let api_result = hf_hub::api::tokio::Api::new();
+        let api_result = hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build();
 
         let vb = match api_result {
             Ok(api) => {
