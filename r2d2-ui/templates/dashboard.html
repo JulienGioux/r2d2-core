@@ -1,0 +1,111 @@
+<div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr); gap: 24px; animation: slideIn 0.3s ease-out;">
+    
+    <!-- Hero / Welcome Card -->
+    <div class="glass-card" style="grid-column: span 4; display: flex; align-items: center; justify-content: space-between; padding: 32px; background: linear-gradient(135deg, rgba(74, 144, 226, 0.1) 0%, rgba(0, 0, 0, 0.4) 100%);">
+        <div>
+            <h1 style="margin: 0 0 8px 0; font-size: 2.5em; font-weight: 700; background: linear-gradient(45deg, #fff, #4a90e2); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
+                Paradox Engine 1.58b
+            </h1>
+            <p style="margin: 0; color: #aaa; font-size: 1.1em;">
+                Système Souverain d'Intelligence Artificielle.
+            </p>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="pulse-dot" style="background: #2ecc71;"></span>
+                <span style="color: #2ecc71; font-weight: 500;">Système Nominal</span>
+            </div>
+            <div style="font-family: monospace; color: #888;">UPTIME LOGIQUE: {{ uptime_formatted }}</div>
+        </div>
+    </div>
+
+    <!-- Quick Stats Widgets -->
+    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px; {% if alert_threshold %}border: 1px solid rgba(231, 76, 60, 0.5); box-shadow: 0 0 15px rgba(231, 76, 60, 0.2);{% endif %}">
+        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
+            <span>RAM Hôte Globale</span>
+            <i data-lucide="cpu" style="width: 20px; {% if alert_threshold %}color: #e74c3c;{% endif %}"></i>
+        </div>
+        <div style="font-size: 2em; font-weight: 600; {% if alert_threshold %}color: #e74c3c;{% endif %}">{{ used_ram_gb }} <span style="font-size: 0.5em; color: #666;">GB / {{ total_ram_gb }} GB</span></div>
+        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;">
+            <div style="width: {{ ram_percent }}%; height: 100%; background: {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %}; border-radius: 2px; box-shadow: 0 0 8px {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %};"></div>
+        </div>
+    </div>
+
+    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
+            <span>Axiomes Mémoire</span>
+            <i data-lucide="database" style="width: 20px;"></i>
+        </div>
+        <div style="font-size: 2em; font-weight: 600;">{{ memory_vectors_count }}</div>
+        <div style="font-size: 0.85em; color: #2ecc71; display: flex; align-items: center; gap: 4px;">
+            Vecteurs chargés en Mmap
+        </div>
+    </div>
+
+    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
+            <span>Agents Actifs</span>
+            <i data-lucide="bot" style="width: 20px;"></i>
+        </div>
+        <div style="font-size: 2em; font-weight: 600;">{{ active_agents_count }} <span style="font-size: 0.5em; color: #666;">/ 4</span></div>
+        <div style="font-size: 0.85em; color: #fff;">
+            Raisonnement Parallèle
+        </div>
+    </div>
+
+    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
+            <span>Architecture Core</span>
+            <i data-lucide="cpu" style="width: 20px;"></i>
+        </div>
+        <div style="font-size: 1.5em; font-weight: 600;">{{ core_count }} <span style="font-size: 0.5em; color: #666;">Cores</span></div>
+        <div style="font-size: 0.85em; color: #2ecc71;">
+            Optimisé Localement
+        </div>
+    </div>
+
+    <!-- Live Activity Log -->
+    <div class="glass-card" style="grid-column: span 2; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
+            <i data-lucide="activity"></i>
+            <h3 style="margin: 0; font-weight: 500;">Activité Récente</h3>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9em; color: #ccc;">
+            <div style="display: flex; gap: 16px;">
+                <span style="color: #888; font-family: monospace;">T-00:01</span>
+                <span>Détection de visage (SensoryGateway) -> Qwen3-VL</span>
+            </div>
+            <div style="display: flex; gap: 16px;">
+                <span style="color: #888; font-family: monospace;">T-00:04</span>
+                <span>Sauvegarde des embeddings (1.4K chunks) -> vector.bin</span>
+            </div>
+            <div style="display: flex; gap: 16px;">
+                <span style="color: #888; font-family: monospace;">T-00:15</span>
+                <span>Vampire Job 'Rust-Engineering' Complété.</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="glass-card" style="grid-column: span 2; display: flex; flex-direction: column; gap: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
+            <i data-lucide="zap"></i>
+            <h3 style="margin: 0; font-weight: 500;">Actions Rapides</h3>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <button class="btn-primary" hx-get="/ui/chat" hx-target="#main-content" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i data-lucide="message-square"></i> Nouveau Chat
+            </button>
+            <button class="btn-primary" hx-get="/ui/admin" hx-target="#main-content" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i data-lucide="shield-alert"></i> Manager Modèles
+            </button>
+            <button class="btn-primary" hx-get="/ui/memory" hx-target="#main-content" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i data-lucide="search"></i> Requête RAG
+            </button>
+            <button class="btn-primary" hx-post="/api/system/purge" style="background: rgba(231, 76, 60, 0.2); border: 1px solid rgba(231, 76, 60, 0.5); color: #e74c3c; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                <i data-lucide="trash-2"></i> Purger VRAM
+            </button>
+        </div>
+    </div>
+
+</div>

@@ -42,12 +42,34 @@ pub struct CortexCatalog;
 
 impl CortexCatalog {
     /// Récupère l'empreinte génétique statique (Le Modèle) associée à un sens cognitif.
-    /// Ces choix sont optimisés spécifiquement pour des environnements Frugaux (RAM <= 8Go).
+    /// Ces choix sont optimisés spécifiquement pour des environnements Frugaux (RAM \<= 8Go).
     pub fn get_default_descriptor(sense: CognitiveSense) -> ModelDescriptor {
         match sense {
             CognitiveSense::Semantic => ModelDescriptor {
-                // intfloat/multilingual-e5-large-instruct : ~2.2 Go, 1024 dimensions. Le nouveau standard absolu.
-                repo_id: "intfloat/multilingual-e5-large-instruct",
+                // intfloat/multilingual-e5-small : ~400 Mo, 384 dimensions. Adapté RAM 12Go.
+                repo_id: "intfloat/multilingual-e5-small",
+                revision: "main",
+                weights_file: "model.safetensors",
+                tokenizer_file: Some("tokenizer.json"),
+                config_file: Some("config.json"),
+                auxiliary_repo: None,
+                auxiliary_files: None,
+                required_ram_gb: 1.0,
+            },
+            CognitiveSense::Audio => ModelDescriptor {
+                // openai/whisper-tiny : ~150 Mo. Tolérance matérielle absolue sur Laptop GTX.
+                repo_id: "openai/whisper-tiny",
+                revision: "main",
+                weights_file: "model.safetensors",
+                tokenizer_file: Some("tokenizer.json"),
+                config_file: Some("config.json"),
+                auxiliary_repo: None,
+                auxiliary_files: None,
+                required_ram_gb: 1.5,
+            },
+            CognitiveSense::Vision => ModelDescriptor {
+                // vikhyatk/moondream2 : Petit modèle vision (1.8B) idéal pour l'inférence RAM-limited.
+                repo_id: "vikhyatk/moondream2",
                 revision: "main",
                 weights_file: "model.safetensors",
                 tokenizer_file: Some("tokenizer.json"),
@@ -55,29 +77,6 @@ impl CortexCatalog {
                 auxiliary_repo: None,
                 auxiliary_files: None,
                 required_ram_gb: 2.5,
-            },
-            CognitiveSense::Audio => ModelDescriptor {
-                // openai/whisper-large-v3-turbo : ~3 Go. Hautes performances de transcription.
-                repo_id: "openai/whisper-large-v3-turbo",
-                revision: "main",
-                weights_file: "model.safetensors",
-                tokenizer_file: Some("tokenizer.json"),
-                config_file: Some("config.json"),
-                auxiliary_repo: None,
-                auxiliary_files: None,
-                required_ram_gb: 3.5,
-            },
-            CognitiveSense::Vision => ModelDescriptor {
-                // llava-1.5-7b-hf quantifié ou llava-phi. On s'appuie sur la structure LLaVA standard.
-                // Note : Pour une RAM de 8Go, on privilégiera des poids GGUF q4k si disponibles, ou des variantes réduites.
-                repo_id: "llava-hf/llava-1.5-7b-hf",
-                revision: "main",
-                weights_file: "model.safetensors.index.json", // Load shard index ou gguf
-                tokenizer_file: Some("tokenizer.json"),
-                config_file: Some("config.json"),
-                auxiliary_repo: None,
-                auxiliary_files: Some(vec!["preprocessor_config.json"]),
-                required_ram_gb: 4.5,
             },
             CognitiveSense::Reasoning => ModelDescriptor {
                 // Qwen2.5-1.5B-Instruct-GGUF : Ultra-rapide pour le Cortex central, au format GGUF.
@@ -94,3 +93,4 @@ impl CortexCatalog {
         }
     }
 }
+

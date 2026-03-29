@@ -6,7 +6,7 @@ fn main() {
 
     let api = Api::new().unwrap();
     let repo = api.repo(Repo::with_revision(
-        "openai/whisper-large-v3-turbo".to_string(),
+        "openai/whisper-tiny".to_string(),
         RepoType::Model,
         "main".to_string(),
     ));
@@ -47,3 +47,4 @@ fn main() {
     let eot = tokenizer.decode(&[50257], false).unwrap();
     println!("Token 50257 désigne -> '{}'", eot);
 }
+

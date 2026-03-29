@@ -59,11 +59,39 @@ impl SensoryGateway {
                 moes_results.push(jsonai);
             }
 
-            // Synthèse temporaire (En attendant le ParadoxEngine pour le vrai DEBATED_SYNTHESIS)
-            // On renvoie le résultat du dernier expert (qui encapsule les métadonnées JSONAI v3)
-            let final_jsonai = moes_results
-                .pop()
-                .unwrap_or_else(|| String::from("Aucun expert"));
+            // Synthèse de Triangulation (DEBATED_SYNTHESIS) JSONAI v3
+            let mut debates = Vec::new();
+            for (i, res) in moes_results.iter().enumerate() {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(res) {
+                    let expert_name = parsed.get("source").map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string());
+                    let content = parsed.get("content").and_then(|c| c.as_str()).unwrap_or("");
+                    debates.push(format!("[Expert {} - {}] : {}", i + 1, expert_name, content));
+                } else {
+                    debates.push(format!("[Expert {}] : {}", i + 1, res));
+                }
+            }
+
+            let synthesis_content = debates.join("\n\n---\n\n");
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            let final_jsonai = format!(
+                r#"{{
+            "id": "moe-synthesis-{}",
+            "source": "System",
+            "timestamp": "2026-03-25T00:00:00Z",
+            "is_fact": false,
+            "belief_state": "Perspective",
+            "consensus": "DebatedSynthesis",
+            "content": "{}",
+            "ontological_tags": ["Vision", "MoE", "Triangulation"],
+            "dependencies": []
+        }}"#,
+                timestamp,
+                synthesis_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+            );
 
             Ok(Fragment::<Signal>::new(final_jsonai))
         } else {

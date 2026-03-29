@@ -11,9 +11,9 @@ use candle_transformers::models::bert::{BertModel, Config, DTYPE};
 use hf_hub::{Repo, RepoType};
 use tokenizers::Tokenizer;
 
-/// Unité d'Extraction Sémantique Multilingue Haute Fidélité (2.2 Go).
-/// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur de 1024 dimensions).
-/// Il s'agit du modèle de classe mondiale "intfloat/multilingual-e5-large-instruct".
+/// Unité d'Extraction Sémantique Multilingue Légère (400 Mo).
+/// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur).
+/// Modèle: "intfloat/multilingual-e5-small".
 pub struct MiniLmEmbedderAgent {
     name: String,
     device: Device,
@@ -28,7 +28,7 @@ impl MiniLmEmbedderAgent {
         let device = Device::Cpu;
 
         Self {
-            name: "Multilingual-E5-Large-Instruct".to_string(),
+            name: "Multilingual-E5-Small".to_string(),
             device,
             tokenizer: None,
             model: None,
@@ -57,8 +57,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
 
-        let api =
-            hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api = hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,
@@ -124,6 +123,17 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
     }
 
     async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+        let vec_f32 = self.embed_raw(prompt, true).await?;
+        // Format R2D2: On exporte sous format JSON array
+        let str_export = serde_json::to_string(&vec_f32).unwrap();
+        Ok(str_export)
+    }
+}
+
+impl MiniLmEmbedderAgent {
+    /// Méthode spécialisée pour la Brique VIII (RAG Zero-Copy).
+    /// Permet de choisir le préfixe ('query: ' ou 'passage: ') selon E5.
+    pub async fn embed_raw(&mut self, prompt: &str, is_query: bool) -> Result<Vec<f32>, AgentError> {
         if !self.is_active() {
             return Err(AgentError::NotActive);
         }
@@ -131,13 +141,23 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
         let tokenizer = self.tokenizer.as_ref().unwrap();
         let model = self.model.as_ref().unwrap();
 
-        // 1. Tokenisation du texte brut avec le préfixe E5 Instruct
-        let e5_prompt = format!("Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: {}", prompt);
+        let prefix = if is_query { "query: " } else { "passage: " };
+        let e5_prompt = format!("{}{}", prefix, prompt);
+        
         let tokens = tokenizer
             .encode(e5_prompt, true)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
-        let token_ids = tokens.get_ids().to_vec();
+        let mut token_ids = tokens.get_ids().to_vec();
+        
+        // Axiome Frugalité & Sécurité : Les transformers E5 panic si token > 512 (Position Embeddings)
+        if token_ids.len() > 512 {
+            tracing::warn!("⚠️ Truncature sémantique automatique: le vecteur dépasse 512 tokens ({}). Le focus seul est conservé.", token_ids.len());
+            let sep_token = token_ids.last().copied().unwrap_or(2); // 2 est souvent SEP en BERT
+            token_ids.truncate(512);
+            token_ids[511] = sep_token;
+        }
+
         let token_tensor = Tensor::new(token_ids.as_slice(), &self.device)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?
             .unsqueeze(0)
@@ -145,27 +165,25 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
         let token_type_ids = token_tensor.zeros_like().unwrap();
 
-        // 2. Propagation Avant (Forward Pass)
         let embeddings = model
             .forward(&token_tensor, &token_type_ids, None)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
-        // Extract L2 vector
         let cls_embedding = embeddings
             .i((0, 0, ..))
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
-        let mut vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
+        let vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
 
-        // E5-Large sort nativement 1024 dimensions, ce qui correspond au form factor de pgvector.
         if vec_f32.len() < 1024 {
-            vec_f32.resize(1024, 0.0);
+            // E5 sort 384 dimensions. Pgvector exige parfois 1024.
+            // Mais pour notre RAG binaire, on veut garder le RAW 384 !
+            // Donc si on est appelé par embed_raw, on retourne RAW (384).
+            // Le padding à 1024 va se faire dans generate_thought si on veut, 
+            // mais gardons le RAW réel pour être Bare-Metal et frugal (384).
         }
-
-        // Format R2D2: On exporte sous format JSON array un simple string
-        // pour qu'il s'interface avec la fonction SQL de Blackboard
-        let str_export = serde_json::to_string(&vec_f32).unwrap();
-
-        Ok(str_export)
+        
+        Ok(vec_f32)
     }
 }
+

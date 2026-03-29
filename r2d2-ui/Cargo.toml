@@ -1,0 +1,33 @@
+[package]
+name = "r2d2-ui"
+version = "0.1.0"
+edition = "2021"
+authors = ["RustyMaster <rusty@r2d2.network>"]
+description = "R2D2 - Administration Console (HTMX/Axum)"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1.36", features = ["full"] }
+askama = { version = "0.12", features = ["with-axum"] }
+askama_axum = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+reqwest = { version = "0.12", features = ["json"] }
+tower-http = { version = "0.5", features = ["fs", "trace"] }
+sysinfo = "0.30"
+
+r2d2-cortex = { path = "../r2d2-cortex" }
+r2d2-jsonai = { path = "../r2d2-jsonai" }
+r2d2-mcp = { path = "../r2d2-mcp" }
+pulldown-cmark = "0.13.3"
+tokio-stream = "0.1"
+uuid = { version = "1.23.0", features = ["v4"] }
+async-stream = "0.3.6"
+dirs = "6.0.0"
+tracing-core = "0.1.36"
+chrono = "0.4.44"

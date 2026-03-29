@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R2D2 Sovereign Console</title>
+    <!-- HTMX -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Custom Premium Vanilla CSS -->
+    <link rel="stylesheet" href="/static/style.css?v=3.1">
+</head>
+<body class="dark-theme">
+    <div class="app-container" id="appContainer">
+        <!-- Hack Pure CSS pour bascule -->
+        <input type="checkbox" id="sidebarToggle" style="display:none;">
+
+        <!-- Hover Zone to auto-expand sidebar -->
+        <div class="sidebar-hover-zone"></div>
+        
+        <!-- Floating Hamburger Menu -->
+        <label for="sidebarToggle" class="sidebar-floating-btn" aria-label="Ouvrir le menu">
+            <i data-lucide="menu"></i>
+        </label>
+
+        <!-- Sidebar -->
+        <aside class="sidebar glass-panel" id="mainSidebar">
+            <div class="sidebar-header">
+                <i data-lucide="cpu" class="logo-icon"></i>
+                <h1>R2D2 OS</h1>
+                <div class="sidebar-controls">
+                    <button class="pin-btn" id="pinSidebarBtn" aria-label="Epingler le menu" title="Épingler/Désépingler">
+                        <i data-lucide="pin"></i>
+                    </button>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content">
+                    <i data-lucide="layout-dashboard"></i> Dashboard
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/chat" hx-target="#main-content">
+                    <i data-lucide="message-square"></i> Conversations
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content">
+                    <i data-lucide="brain-circuit"></i> Cortex Live
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content">
+                    <i data-lucide="database"></i> Memory Audit
+                </a>
+                <a href="#" class="nav-item" hx-get="/ui/admin" hx-target="#main-content">
+                    <i data-lucide="shield-alert"></i> Admin & Spéc.
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="pulse-dot"></span>
+                    <span class="status-text">{{ status }}</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content (Dynamic via HTMX) -->
+        <main id="main-content" class="main-content" hx-get="/ui/dashboard" hx-trigger="load">
+            <div style="display:flex; justify-content:center; align-items:center; height:100%;">
+                <i data-lucide="loader-2" class="spin" style="color: #4a90e2; width: 32px; height: 32px;"></i>
+            </div>
+        </main>
+    </div>
+    <script>
+        // Init Lucide icons
+        lucide.createIcons();
+        
+        // Pin State Logic (LocalStorage)
+        const appContainer = document.getElementById('appContainer');
+        const pinSidebarBtn = document.getElementById('pinSidebarBtn');
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        
+        // Restore pinned state from localStorage
+        const isPinned = localStorage.getItem('r2d2_sidebar_pinned') === 'true';
+        if (isPinned) {
+            appContainer.classList.add('sidebar-pinned');
+        }
+
+        // Pin Button Logic
+        if(pinSidebarBtn) {
+            pinSidebarBtn.addEventListener('click', () => {
+                const willPin = !appContainer.classList.contains('sidebar-pinned');
+                appContainer.classList.toggle('sidebar-pinned', willPin);
+                localStorage.setItem('r2d2_sidebar_pinned', willPin);
+                if(sidebarToggle) sidebarToggle.checked = false;
+            });
+        }
+        
+        // Active Nav Item Sync (Instant Feedback)
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function(e) {
+                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Replier la sidebar après sélection (Pure CSS disable via checkbox)
+                if(sidebarToggle) sidebarToggle.checked = false;
+            });
+        });
+        
+        // Re-init icons after htmx swap
+        document.body.addEventListener('htmx:afterSwap', function(evt) {
+            lucide.createIcons();
+            
+            // Auto scroll to bottom of chat
+            const chatHistory = document.getElementById('chat-history');
+            if (chatHistory) {
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -357,7 +357,7 @@ impl CognitiveAgent for AudioAgent {
         );
 
         let api =
-            hf_hub::api::tokio::Api::new().map_err(|e| AgentError::LoadError(e.to_string()))?;
+            hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,
@@ -391,6 +391,7 @@ impl CognitiveAgent for AudioAgent {
         } else {
             "melfilters.bytes"
         };
+
         info!(
             "   [CORTEX] Téléchargement des Filtres Spatiaux ({})...",
             melfilters_filename
@@ -401,15 +402,21 @@ impl CognitiveAgent for AudioAgent {
         // Le dépôt de référence `lmz/candle-whisper` fournit officiellement les
         // filtres spatiaux dynamiques (80 ou 128 pour Large-v3).
         // -----------------------------------------------------------------------------------
+        let repo_id = if config.num_mel_bins == 128 {
+            "FL33TW00D-HF/distil-whisper-large-v3"
+        } else {
+            "FL33TW00D-HF/whisper-base"
+        };
+
         let mel_repo = api.repo(Repo::with_revision(
-            "lmz/candle-whisper".to_string(),
+            repo_id.to_string(),
             RepoType::Model,
             "main".to_string(),
         ));
         let mel_bytes_file = mel_repo.get(melfilters_filename).await.map_err(|e| {
             AgentError::LoadError(format!(
-                "Échec téléchargement filtres mel (lmz/candle-whisper): {}",
-                e
+                "Échec téléchargement filtres mel ({}): {}",
+                repo_id, e
             ))
         })?;
         let mel_bytes =
@@ -517,3 +524,4 @@ impl CognitiveAgent for AudioAgent {
         Ok(jsonai)
     }
 }
+

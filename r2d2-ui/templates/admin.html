@@ -1,0 +1,185 @@
+<div class="dashboard-grid">
+    <div class="glass-card col-span-2">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <i data-lucide="shield-alert" style="color: var(--accent-color); width: 32px; height: 32px;"></i>
+                <h2 style="margin: 0; font-size: 1.8rem;">Administration Centralisée</h2>
+            </div>
+            <div class="status-badge" style="background: rgba(46, 204, 113, 0.1); color: #2ecc71; padding: 6px 12px; border-radius: 20px; border: 1px solid rgba(46, 204, 113, 0.2); font-size: 0.85rem; display: flex; align-items: center; gap: 6px;">
+                <span class="pulse-dot" style="background: #2ecc71;"></span> Souveraineté Totale Actrice
+            </div>
+        </div>
+        <p style="color: #a0a0a0; margin-bottom: 32px;">Contrôle le pipeline de distillation et la spécialisation multimodale des agents locaux.</p>
+
+        <!-- Grille de Configuration Agents -->
+        <h3 style="color: white; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+            <i data-lucide="users-2" style="display: inline-block; vertical-align: middle; margin-right: 8px; width: 18px; height: 18px;"></i>
+            Spécialisation des Agents
+        </h3>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 40px;">
+            <div class="glass-card" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i data-lucide="eye" style="color: #3498db;"></i>
+                        <strong style="color: white;">Vision Agent</strong>
+                    </div>
+                    <span style="font-size: 0.75rem; background: rgba(52, 152, 219, 0.2); color: #3498db; padding: 2px 8px; border-radius: 4px;">Actif</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Provider</label>
+                        <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                            <option value="gemini">Gemini 1.5 Flash (Cloud)</option>
+                            <option value="llava">Moondream / LLaVA (Local - Bientôt)</option>
+                            <optgroup label="Modèles Hébergés (Local CLI)">
+                                {% for model in local_models %}
+                                <option value="{{ model }}">{{ model }}</option>
+                                {% endfor %}
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i data-lucide="mic" style="color: #e74c3c;"></i>
+                        <strong style="color: white;">Audio Agent</strong>
+                    </div>
+                    <span style="font-size: 0.75rem; background: rgba(231, 76, 60, 0.2); color: #e74c3c; padding: 2px 8px; border-radius: 4px;">Actif</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Backend Whisper</label>
+                        <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                            <option value="whisper-cpp">Whisper.cpp (C++ Natif)</option>
+                            <option value="candle">Candle Whisper (Expérimental)</option>
+                            <optgroup label="Modèles Hébergés (Local CLI)">
+                                {% for model in local_models %}
+                                <option value="{{ model }}">{{ model }}</option>
+                                {% endfor %}
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div class="glass-card" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i data-lucide="network" style="color: #f1c40f;"></i>
+                        <strong style="color: white;">RAG & Vector</strong>
+                    </div>
+                    <span style="font-size: 0.75rem; background: rgba(241, 196, 15, 0.2); color: #f1c40f; padding: 2px 8px; border-radius: 4px;">En Ligne</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <div>
+                        <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Embedder Model</label>
+                        <select style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                            <option value="e5">Multilingual-E5-Small</option>
+                            <option value="bge">BGE-M3 (Lourd)</option>
+                            <optgroup label="Modèles Hébergés (Local CLI)">
+                                {% for model in local_models %}
+                                <option value="{{ model }}">{{ model }}</option>
+                                {% endfor %}
+                            </optgroup>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gouvernance des Clés API (Vault R2D2) -->
+        <h3 style="color: white; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+            <i data-lucide="key" style="display: inline-block; vertical-align: middle; margin-right: 8px; width: 18px; height: 18px; color: var(--accent-color);"></i>
+            Security Vault (Fournisseurs Externes)
+        </h3>
+        
+        <div class="glass-card" style="margin-bottom: 40px;">
+            <p style="color: #a0a0a0; font-size: 0.85rem; margin-bottom: 16px;">
+                Le système R2D2 stocke vos identifiants asymétriques dans la matrice chiffrée locale <code>.secrets.json</code> (non visible sur les dépots git). L'injection en RAM n'aura lieu qu'au moment strict de l'inférence.
+            </p>
+            
+            <div hx-get="/api/admin/keys" hx-trigger="load" id="vault-keys-container">
+                <div style="color: #888; font-style: italic;"><i data-lucide="loader-2" class="spin"></i> Déchiffrement du Vault...</div>
+            </div>
+
+            <form hx-post="/api/admin/keys" hx-target="#vault-keys-container" onsubmit="setTimeout(() => this.reset(), 500)" style="display: flex; gap: 12px; align-items: flex-end; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Fournisseur</label>
+                    <select name="provider" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                        <option value="GITHUB_PERSONAL_ACCESS_TOKEN">GITHUB_PERSONAL_ACCESS_TOKEN (GitHub MCP)</option>
+                        <option value="GEMINI_API_KEY">GEMINI_API_KEY (Gemma 3)</option>
+                        <option value="MISTRAL_API_KEY">MISTRAL_API_KEY (Mistral Large)</option>
+                        <option value="HF_TOKEN">HF_TOKEN (HuggingFace Hub)</option>
+                    </select>
+                </div>
+                <div style="flex: 2;">
+                    <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Nouvelle Clé Secrète (Vide pour supprimer)</label>
+                    <input type="password" name="api_key" placeholder="AIzaSyB..." style="width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none; font-family: monospace;">
+                </div>
+                <button type="submit" class="btn-primary" style="padding: 8px 16px; height: 38px;">
+                    <i data-lucide="shield-check" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"></i> Injecter au Vault
+                </button>
+            </form>
+        </div>
+
+
+        <!-- Projet Vampire Télémétrie -->
+        <h3 style="color: white; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <i data-lucide="droplet" style="display: inline-block; vertical-align: middle; margin-right: 8px; width: 18px; height: 18px; color: #e74c3c;"></i>
+                Usine d'Apprentissage (Vampire Queue)
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <button class="btn-primary" hx-post="/api/admin/assimilate" style="background: rgba(46, 204, 113, 0.2); color: #2ecc71; border: 1px solid #2ecc71; padding: 6px 12px; font-size: 0.8rem;">
+                    <i data-lucide="database" style="width: 14px; height: 14px;"></i> Assimiler (RAG)
+                </button>
+                <button class="btn-primary" hx-post="/api/admin/vampire/start" style="padding: 6px 12px; font-size: 0.8rem;" onclick="setTimeout(()=>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh')), 500)">
+                    <i data-lucide="play" style="width: 14px; height: 14px;"></i> Lancer l'Ascension
+                </button>
+            </div>
+        </h3>
+        
+        <div style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.05); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+            <form hx-post="/api/admin/vampire/queue/add" hx-target="#queue-list-container" onsubmit="setTimeout(() => this.reset(), 100)" style="display: flex; gap: 12px; align-items: flex-end;">
+                <div style="flex: 1;">
+                    <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Sujet / Thème de Fiche d'Apprentissage</label>
+                    <input type="text" name="theme" placeholder="ex: L'Ownership en Rust et ses subtilités" required style="width: 100%; padding: 8px 12px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                </div>
+                <div style="width: 160px;">
+                    <label style="display: block; font-size: 0.8rem; color: #888; margin-bottom: 4px;">Notebook Cible</label>
+                    <select name="notebook" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); color: white; border-radius: 6px; outline: none;">
+                        <option value="rustymaster">RustyMaster</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn-primary" style="padding: 8px 16px; height: 38px;">
+                    <i data-lucide="plus" style="width: 16px; height: 16px; margin-right: 6px; display: inline-block; vertical-align: text-bottom;"></i> Ajouter à la Liste
+                </button>
+            </form>
+        </div>
+
+        <div id="queue-list-container" hx-get="/api/admin/vampire/queue/list" hx-trigger="load, refresh from:self, every 3s" hx-swap="innerHTML" style="background: rgba(0,0,0,0.5); border: 1px solid var(--border-color); border-radius: 8px; min-height: 80px; margin-bottom: 40px;">
+            <div style="text-align: center; color: #888; font-style: italic; padding: 20px;">
+                <i data-lucide="loader-2" class="spin" style="margin-bottom: 8px;"></i><br>
+                Chargement de la File d'Attente...
+            </div>
+        </div>
+
+        <!-- Terminal Système (SSE) -->
+        <h3 style="color: white; margin-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+            <i data-lucide="terminal-square" style="display: inline-block; vertical-align: middle; margin-right: 8px; width: 18px; height: 18px;"></i>
+            Console Système (Temps Réel)
+        </h3>
+        <div style="background: rgba(0,0,0,0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85rem;" hx-ext="sse" sse-connect="/api/admin/system/logs">
+            <div id="system-logs-container" sse-swap="message" hx-swap="beforeend">
+                <div style="color: #666; font-style: italic; margin-bottom: 8px;">[+] Connexion au bus asynchrone R2D2 établie...</div>
+                <!-- SSE injects here (hx-swap on Sse payload contains the hx-swap logic directly or we can use the default SSE extension behavior) -->
+                <!-- Note: The server sends HTML blocks directly, and the wrapper catches them with sse-swap -->
+            </div>
+        </div>
+
+    </div>
+</div>
+<script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>
