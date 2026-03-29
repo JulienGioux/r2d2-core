@@ -121,7 +121,7 @@ impl VisionAgentLlava {
             }
             */
 
-             // Mock industriel pour l'intégration de la Gateway :
+            // Mock industriel pour l'intégration de la Gateway :
             std::thread::sleep(Duration::from_millis(1500));
             Ok("Le pipeline architectural LlavaEngine VRAM-Isolated est connecté.".to_string())
         })
@@ -155,9 +155,15 @@ impl CognitiveAgent for VisionAgentLlava {
             desc.repo_id.split('/').next_back().unwrap_or("Fallback")
         );
 
-        info!("🔌 [CORTEX] Téléchargement / Résolution HuggingFace pour '{}'", self.name);
+        info!(
+            "🔌 [CORTEX] Téléchargement / Résolution HuggingFace pour '{}'",
+            self.name
+        );
 
-        let api = hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api = hf_hub::api::tokio::ApiBuilder::new()
+            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
+            .build()
+            .map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(hf_hub::Repo::with_revision(
             desc.repo_id.to_string(),
             hf_hub::RepoType::Model,
@@ -184,12 +190,18 @@ impl CognitiveAgent for VisionAgentLlava {
 
         self.circuit_breaker.record_success();
         self.active = true;
-        info!("🛡️ [CORTEX] Agent '{}' Chargé & Structurellement Prêt.", self.name);
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Structurellement Prêt.",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
-        info!("   [CORTEX] Drop de l'Engine et Tenseurs VRAM pour '{}'.", self.name);
+        info!(
+            "   [CORTEX] Drop de l'Engine et Tenseurs VRAM pour '{}'.",
+            self.name
+        );
         self.active = false;
         self.engine = None;
         Ok(())

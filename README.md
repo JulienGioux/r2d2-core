@@ -130,6 +130,9 @@ cargo test -p r2d2-bitnet
 ```
 *Le backend télécharge de façon atomique les SafeTensors "1bitLLM/bitnet_b1_58-3B", les convertit en masques d'états `{-1, 0, 1}` via hard-thresholding strict, et exécute la boucle autorégressive sans toucher aux FPU !*
 
+**Architecture d'Entraînement "Air-Gapped"** :
+L'entraînement du modèle 1.58b évolue dans `r2d2-cortex`. Le pipeline d'ingestion (Dataloader) est par design garanti **Zero-Allocation (Object Pool MPSC)** post-démarrage. Le streaming asynchrone est protégé contre les vecteurs d'attaque OOM et les corruptions d'apprentissage liées aux chevauchements de frontières UTF-8 du dictionnaire (LLaMA-3 / 128k).
+
 ---
 
 ## 🧠 Doctrine d'Ingénierie (Staff-Level Requirement)

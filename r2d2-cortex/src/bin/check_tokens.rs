@@ -47,4 +47,3 @@ fn main() {
     let eot = tokenizer.decode(&[50257], false).unwrap();
     println!("Token 50257 désigne -> '{}'", eot);
 }
-

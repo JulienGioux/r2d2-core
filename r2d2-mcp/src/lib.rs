@@ -4,6 +4,7 @@
 //! Accepte des signaux bruts, les propulse dans le Kernel (Validation), puis
 //! les sauvegarde dans le Blackboard PostgreSQL si acceptés.
 
+pub mod actuator;
 pub mod client;
 pub mod hitl;
 pub mod proxy;
@@ -21,6 +22,7 @@ use r2d2_paradox::ParadoxSolver;
 use std::sync::Arc;
 use tracing::{info, instrument};
 
+use actuator::PhysicalExecutorAdapter;
 use proxy::SemanticProxy;
 use registry::ToolRegistry;
 
@@ -31,6 +33,7 @@ pub struct McpGateway {
     cortex: Arc<CortexRegistry>,
     pub proxy: SemanticProxy,
     pub registry: ToolRegistry,
+    executor: PhysicalExecutorAdapter,
 }
 
 impl McpGateway {
@@ -60,6 +63,7 @@ impl McpGateway {
             cortex,
             proxy: SemanticProxy::new(),
             registry: ToolRegistry::new(),
+            executor: PhysicalExecutorAdapter::new("docker", 5), // Sandbox Docker avec Timeout de 5s
         })
     }
 
@@ -91,6 +95,27 @@ impl McpGateway {
 
         // 4. Finaliser en SecureMemGuard pour transiter sans fuite RAM (Typestate 4)
         let guard = validated_fragment.finalize();
+
+        // 4.5. ROUTAGE ET EXÉCUTION RÉFLEXE (SYSTÈME 1)
+        {
+            let payload_str = &guard.expose_payload().payload;
+            if let Some(start) = payload_str.find("[REFLEX_ACTION: ") {
+                if let Some(end) = payload_str[start..].find("]") {
+                    let action_payload = &payload_str[start + 16..start + end];
+                    tracing::warn!(
+                        "⚡ [ORCHESTRATEUR] Directive Système 1 reçue ! Déploiement immédiat de l'Actuateur Physique Sandboxé."
+                    );
+
+                    // Exécution formelle du réflexe (Bloque virtuellement mais protégé par le Timeout de 5s interne)
+                    if let Err(e) = self.executor.execute_reflex(action_payload).await {
+                        tracing::error!(
+                            "❌ [ORCHESTRATEUR] Échec critique du Bras Physique: {}",
+                            e
+                        );
+                    }
+                }
+            }
+        }
 
         // 5. Ancrer définitivement la mémoire dans la Brique 7 (Base de données Vectorielle)
         // Le guard sera consommé et effacé de la RAM par le PostgresBlackboard.

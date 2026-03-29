@@ -6,10 +6,10 @@ authors = ["Architect Rusty <rusty@r2d2.network>"]
 description = "Brique 5 : Bibliothèque Plug&Play des Agents IA Locaux via Candle"
 
 [dependencies]
-anyhow = "1.0"
-thiserror = "2.0"
+anyhow = { workspace = true }
+thiserror = { workspace = true }
 tracing = "0.1"
-tokio = { version = "1.0", features = ["sync", "rt", "macros", "time"] }
+tokio = { version = "1.0", features = ["sync", "rt", "macros", "time", "process", "io-util"] }
 async-trait = "0.1"
 
 # Moteur d'Inférence Rust Pur (Candle)
@@ -39,3 +39,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 
 [dev-dependencies]
 r2d2-chunker = { path = "../r2d2-chunker" }
+
+[[bin]]
+name = "benchmark_tokenizers"
+path = "src/bin/benchmark_tokenizers.rs"

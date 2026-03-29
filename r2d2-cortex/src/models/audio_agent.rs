@@ -356,8 +356,10 @@ impl CognitiveAgent for AudioAgent {
             self.name
         );
 
-        let api =
-            hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api = hf_hub::api::tokio::ApiBuilder::new()
+            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
+            .build()
+            .map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,
@@ -524,4 +526,3 @@ impl CognitiveAgent for AudioAgent {
         Ok(jsonai)
     }
 }
-

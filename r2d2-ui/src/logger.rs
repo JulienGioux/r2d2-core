@@ -1,6 +1,6 @@
+use tokio::sync::broadcast;
 use tracing_core::{Event, Subscriber};
 use tracing_subscriber::layer::Context;
-use tokio::sync::broadcast;
 
 pub struct BroadcastLayer {
     pub sender: broadcast::Sender<String>,
@@ -11,13 +11,15 @@ impl<S: Subscriber> tracing_subscriber::Layer<S> for BroadcastLayer {
         if event.metadata().target().contains("hyper") || event.metadata().target().contains("h2") {
             return; // Ignore spammy web server logs
         }
-    
-        let mut visitor = EventVisitor { content: String::new() };
+
+        let mut visitor = EventVisitor {
+            content: String::new(),
+        };
         event.record(&mut visitor);
-        
+
         let level = event.metadata().level().to_string();
         let target = event.metadata().target();
-        
+
         let color = match level.as_str() {
             "INFO" => "#3498db",
             "WARN" => "#f1c40f",
@@ -47,7 +49,7 @@ impl tracing_core::field::Visit for EventVisitor {
         if field.name() == "message" {
             let s = format!("{:?}", value);
             if s.starts_with('"') && s.ends_with('"') {
-                self.content = s[1..s.len()-1].to_string();
+                self.content = s[1..s.len() - 1].to_string();
             } else {
                 self.content = s;
             }

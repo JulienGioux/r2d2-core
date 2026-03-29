@@ -57,7 +57,10 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
 
-        let api = hf_hub::api::tokio::ApiBuilder::new().with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN")).build().map_err(|e| AgentError::LoadError(e.to_string()))?;
+        let api = hf_hub::api::tokio::ApiBuilder::new()
+            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
+            .build()
+            .map_err(|e| AgentError::LoadError(e.to_string()))?;
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
             RepoType::Model,
@@ -133,7 +136,11 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
 impl MiniLmEmbedderAgent {
     /// Méthode spécialisée pour la Brique VIII (RAG Zero-Copy).
     /// Permet de choisir le préfixe ('query: ' ou 'passage: ') selon E5.
-    pub async fn embed_raw(&mut self, prompt: &str, is_query: bool) -> Result<Vec<f32>, AgentError> {
+    pub async fn embed_raw(
+        &mut self,
+        prompt: &str,
+        is_query: bool,
+    ) -> Result<Vec<f32>, AgentError> {
         if !self.is_active() {
             return Err(AgentError::NotActive);
         }
@@ -143,13 +150,13 @@ impl MiniLmEmbedderAgent {
 
         let prefix = if is_query { "query: " } else { "passage: " };
         let e5_prompt = format!("{}{}", prefix, prompt);
-        
+
         let tokens = tokenizer
             .encode(e5_prompt, true)
             .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
         let mut token_ids = tokens.get_ids().to_vec();
-        
+
         // Axiome Frugalité & Sécurité : Les transformers E5 panic si token > 512 (Position Embeddings)
         if token_ids.len() > 512 {
             tracing::warn!("⚠️ Truncature sémantique automatique: le vecteur dépasse 512 tokens ({}). Le focus seul est conservé.", token_ids.len());
@@ -179,11 +186,10 @@ impl MiniLmEmbedderAgent {
             // E5 sort 384 dimensions. Pgvector exige parfois 1024.
             // Mais pour notre RAG binaire, on veut garder le RAW 384 !
             // Donc si on est appelé par embed_raw, on retourne RAW (384).
-            // Le padding à 1024 va se faire dans generate_thought si on veut, 
+            // Le padding à 1024 va se faire dans generate_thought si on veut,
             // mais gardons le RAW réel pour être Bare-Metal et frugal (384).
         }
-        
+
         Ok(vec_f32)
     }
 }
-

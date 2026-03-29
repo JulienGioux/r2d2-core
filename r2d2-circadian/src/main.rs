@@ -5,8 +5,8 @@ use r2d2_cortex::{
     agent::AgentError,
     models::{
         audio_agent::AudioAgent, bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent,
-        vision_agent::VisionAgentLlava, vision_agent_qwen::VisionAgentQwen,
-        reasoning_agent::ReasoningAgent,
+        reasoning_agent::ReasoningAgent, vision_agent::VisionAgentLlava,
+        vision_agent_qwen::VisionAgentQwen,
     },
     CortexRegistry,
 };
@@ -38,8 +38,17 @@ async fn main() -> Result<()> {
     info!("Connexion au Vector Blackboard...");
     let blackboard = Arc::new(PostgresBlackboard::new(&db_url).await?);
 
-    info!("Initialisation du Moteur de Résolution Paradoxale...");
-    let solver = Arc::new(ParadoxSolver::new());
+    info!("Initialisation du Moteur de Résolution Paradoxale (Système 1 & 2)...");
+    let mut reflex_judge =
+        r2d2_paradox::reflex_judge::ReflexJudge::new().with_blackboard(blackboard.clone());
+    if let Err(e) = reflex_judge.initialize().await {
+        tracing::warn!(
+            "Erreur init Système 1 (Réflexe) : {}. On continue en Mode Fallback.",
+            e
+        );
+    }
+    let reflex = Arc::new(tokio::sync::Mutex::new(reflex_judge));
+    let solver = Arc::new(ParadoxSolver::new().with_reflex(reflex));
 
     info!("Chargement du Registre Cortex (Plugins IA)...");
     let cortex = Arc::new(CortexRegistry::new());
@@ -55,9 +64,7 @@ async fn main() -> Result<()> {
     cortex
         .register_agent(Box::new(VisionAgentQwen::new()))
         .await;
-    cortex
-        .register_agent(Box::new(ReasoningAgent::new()))
-        .await;
+    cortex.register_agent(Box::new(ReasoningAgent::new())).await;
 
     // Activation à chaud de l'agent de Raisonnement
     cortex
@@ -66,11 +73,21 @@ async fn main() -> Result<()> {
         .map_err(|e: AgentError| anyhow::anyhow!(e))?;
 
     // 4. Instanciation du Métabolisme (Polling = 60 secondes pour les tests)
-    // Seuil de tolérance à l'entropie = 0.8
-    let mut daemon = CircadianDaemon::new(0.8, 60, blackboard, cortex, solver);
+    // Seuil de tolérance à l'entropie = 0.85 (Demande User)
+    let (mut daemon, _rx) = CircadianDaemon::new(0.85, 60, blackboard, cortex, solver);
 
     // 5. Lancement de la boucle asynchrone infinie
-    daemon.start_homeostasis_loop().await?;
+    // (Pour le binaire standalone, on crée un canal de shutdown factice qui n'est jamais trigger)
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // Possibilité d'attacher le tokio::signal::ctrl_c ici dans le futur
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.unwrap();
+        tracing::warn!("SIGINT détecté par le standalone. Lancement du Shutdown...");
+        let _ = _shutdown_tx.send(true);
+    });
+
+    daemon.start_homeostasis_loop(shutdown_rx).await?;
 
     Ok(())
 }

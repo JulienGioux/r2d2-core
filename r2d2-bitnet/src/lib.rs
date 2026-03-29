@@ -5,6 +5,7 @@ pub mod model;
 pub mod quantization;
 pub mod rmsnorm;
 pub mod ternary;
+pub mod training;
 pub mod transformer;
 
 pub use attention::BitSelfAttention;

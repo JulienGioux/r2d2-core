@@ -1,11 +1,11 @@
+use anyhow::{anyhow, Context, Result};
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
-use serde_json::{json, Value};
-use anyhow::{Result, Context, anyhow};
 
 #[derive(Debug)]
 pub enum McpCommand {
@@ -83,7 +83,7 @@ impl McpClient {
                             if res.get("error").is_some() {
                                 return Err(anyhow!("MCP Initialization Error: {}", res));
                             }
-                            
+
                             // Send initialized notification
                             let initialized_req = json!({
                                 "jsonrpc": "2.0",
@@ -93,7 +93,9 @@ impl McpClient {
                             initd_str.push('\n');
                             stdin.write_all(initd_str.as_bytes()).await?;
                             stdin.flush().await?;
-                            tracing::info!("🔌 [McpClient] Handshake 'initialize' completed with Daemon.");
+                            tracing::info!(
+                                "🔌 [McpClient] Handshake 'initialize' completed with Daemon."
+                            );
                             break;
                         }
                     } else {
@@ -198,12 +200,17 @@ impl McpClient {
 
     pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
         let (reply_tx, reply_rx) = oneshot::channel();
-        self.tx.send(McpCommand::CallTool {
-            name: name.to_string(),
-            arguments,
-            reply: reply_tx,
-        }).await.map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
+        self.tx
+            .send(McpCommand::CallTool {
+                name: name.to_string(),
+                arguments,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
 
-        reply_rx.await.map_err(|_| anyhow::anyhow!("McpDaemon dropped the response"))?
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("McpDaemon dropped the response"))?
     }
 }

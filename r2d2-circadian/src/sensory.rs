@@ -66,24 +66,45 @@ impl VibeVector {
 pub struct SensorySynthesisEngine {
     current_vibe: VibeVector,
     entropy_threshold: f32,
+    hardware_monitor: crate::sys_monitor::HardwareMonitor,
+    broadcaster: Option<tokio::sync::watch::Sender<std::sync::Arc<VibeVector>>>,
 }
 
 impl SensorySynthesisEngine {
     pub fn new(threshold: f32) -> Self {
+        Self::with_monitor(threshold, crate::sys_monitor::HardwareMonitor::start())
+    }
+
+    /// Injection de dépendance pour tester le moteur avec un faux système.
+    pub fn with_monitor(threshold: f32, monitor: crate::sys_monitor::HardwareMonitor) -> Self {
         Self {
             current_vibe: VibeVector::default(),
             entropy_threshold: threshold,
+            hardware_monitor: monitor,
+            broadcaster: None,
         }
+    }
+
+    /// Connecte un canal de diffusion asynchrone pour le monitoring externe.
+    pub fn set_broadcaster(&mut self, tx: tokio::sync::watch::Sender<std::sync::Arc<VibeVector>>) {
+        self.broadcaster = Some(tx);
     }
 
     /// Extrait les métriques brutes de la Ruche (Kernel, Blackboard, Paradox)
     /// pour mettre à jour la perception interne.
     pub async fn perceive_swarm_state(&mut self) -> &VibeVector {
-        // TODO: Extraire les KPIs depuis r2d2-kernel et r2d2-blackboard.
-        // Pour l'instant, posons une perception simulée (mock) du système nerveux.
-        self.current_vibe.dissonance += 0.01; // S'accumule naturellement
-        self.current_vibe.tension += 0.05; // Fragmentation mémoire
-        self.current_vibe.harmonie -= 0.02; // Dégradation lente des preuves
+        let metrics = *self.hardware_monitor.receiver.borrow();
+        let ram_ratio = metrics.ram_usage_ratio;
+
+        // Mesure "physique" de la Tension liée à la RAM
+        self.current_vibe.tension = ram_ratio;
+
+        // Dissipation douce de la dissonance sauf si un pic est reçu
+        self.current_vibe.dissonance *= 0.90;
+
+        // Harmonie corrélée au système sain
+        let espace_libre = 1.0 - ram_ratio;
+        self.current_vibe.harmonie = 0.5 + (espace_libre * 0.5);
 
         // Clamp values
         self.current_vibe.dissonance = self.current_vibe.dissonance.clamp(0.0, 1.0);
@@ -92,13 +113,30 @@ impl SensorySynthesisEngine {
 
         info!(
             entropy = self.current_vibe.compute_entropy(),
-            "🧠 Synthèse Sensorielle mise à jour."
+            tension = self.current_vibe.tension,
+            "🧠 Synthèse Sensorielle liée à l'hôte mise à jour."
         );
+
+        if let Some(tx) = &self.broadcaster {
+            // Zéro-Copie par Arc. Si aucun Receiver n'écoute (UI débranchée), on s'en moque.
+            let _ = tx.send(std::sync::Arc::new(self.current_vibe.clone()));
+        }
+
         &self.current_vibe
     }
 
     /// Indique au démon Circadien si le sommeil s'impose.
     pub fn is_sleep_required(&self) -> bool {
+        let metrics = *self.hardware_monitor.receiver.borrow();
+        if metrics.ram_usage_ratio > 0.85 || metrics.cpu_usage_ratio > 0.85 {
+            warn!(
+                ram = metrics.ram_usage_ratio,
+                cpu = metrics.cpu_usage_ratio,
+                "🚨 Surcharge Matérielle Critique > 85%. Déclenchement Réflexe Panique."
+            );
+            return true;
+        }
+
         self.current_vibe
             .requires_deep_sleep(self.entropy_threshold)
     }
@@ -107,6 +145,10 @@ impl SensorySynthesisEngine {
     pub fn reset_homeostasis(&mut self) {
         self.current_vibe = VibeVector::default();
         info!("🌙 Réveil: L'Homéostasie Cognitive est restaurée (VibeVector = Optimal).");
+
+        if let Some(tx) = &self.broadcaster {
+            let _ = tx.send(std::sync::Arc::new(self.current_vibe.clone()));
+        }
     }
 }
 
@@ -140,5 +182,19 @@ mod tests {
         // (1.0 + 1.0) / 2 = 1.0
         assert_eq!(entropy, 1.0);
         assert!(vibe.requires_deep_sleep(0.8)); // 1.0 > 0.8 => True
+    }
+
+    #[tokio::test]
+    async fn test_deep_sleep_on_hardware_overload() {
+        // Cible 85% simulée => RAM à 90%
+        let mock_monitor = crate::sys_monitor::HardwareMonitor::dummy(0.90, 0.40);
+        let mut engine = SensorySynthesisEngine::with_monitor(0.85, mock_monitor);
+
+        // Simule un appel de routine par le daemon
+        engine.perceive_swarm_state().await;
+
+        // Le seuil matériel > 85% doit forcer is_sleep_required à true,
+        // même si l'entropie sémantique seule n'a pas dépassé le seuil (car on a tout mis à défaut).
+        assert!(engine.is_sleep_required());
     }
 }

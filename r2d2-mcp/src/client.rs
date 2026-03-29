@@ -19,20 +19,25 @@ impl McpUniversalClient {
     /// Lance un binaire externe (ex: `python -m mcp_server`, `npx ...`) et
     /// Attache les flux standard pour la communication JSON-RPC avec une carte d'environnement.
     #[instrument(skip_all, name = "McpUniversalClient::spawn")]
-    pub async fn spawn(command: &str, args: &[&str], env_vars: Option<std::collections::HashMap<String, String>>) -> Result<Self> {
+    pub async fn spawn(
+        command: &str,
+        args: &[&str],
+        env_vars: Option<std::collections::HashMap<String, String>>,
+    ) -> Result<Self> {
         info!("Lancement du serveur MCP externe : {} {:?}", command, args);
 
         let mut cmd = Command::new(command);
         cmd.args(args)
-           .stdin(std::process::Stdio::piped())
-           .stdout(std::process::Stdio::piped())
-           .stderr(std::process::Stdio::piped()); // Capture asynchrone pour filtrage
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()); // Capture asynchrone pour filtrage
 
         if let Some(envs) = env_vars {
             cmd.envs(envs);
         }
 
-        let mut child = cmd.spawn()
+        let mut child = cmd
+            .spawn()
             .with_context(|| format!("Impossible de démarrer le processus : {}", command))?;
 
         let stdin = child
@@ -51,7 +56,7 @@ impl McpUniversalClient {
             .ok_or_else(|| anyhow::anyhow!("Échec capture Stderr"))?;
 
         let (tx, rx) = tokio::sync::oneshot::channel();
-        
+
         let mut tx_opt = Some(tx);
         tokio::spawn(async move {
             let stderr_reader = BufReader::new(stderr);
@@ -68,7 +73,7 @@ impl McpUniversalClient {
                     }
                     continue; // Skip printing third-party brand logs
                 }
-                
+
                 // Repipe the clean standard outputs to R2D2's tracing system
                 tracing::info!("[MCP LOG] {}", line);
             }
@@ -148,22 +153,23 @@ impl McpUniversalClient {
         }
 
         info!("Envoi de l'Init MCP [2024-11-05]...");
-        let result = self.send_request(
-            "initialize",
-            json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {
-                        "listChanged": false
+        let result = self
+            .send_request(
+                "initialize",
+                json!({
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {
+                            "listChanged": false
+                        }
+                    },
+                    "clientInfo": {
+                        "name": "r2d2-universal-client",
+                        "version": "1.0.0"
                     }
-                },
-                "clientInfo": {
-                    "name": "r2d2-universal-client",
-                    "version": "1.0.0"
-                }
-            }),
-        )
-        .await?;
+                }),
+            )
+            .await?;
 
         // L'implémentation standard MCP impose un client de notifier 'initialized' juste après le handshake
         let notif = json!({

@@ -78,8 +78,9 @@ impl Fragment<Signal> {
 
     /// Tente de parser le signal brut vers une structure `Unverified`.
     pub fn parse(self) -> Result<Fragment<Unverified>, KernelError> {
-        let _: r2d2_jsonai::JsonAiV3 = serde_json::from_str(&self.state.raw_data)
-            .map_err(|e| KernelError::ValidationFailed(format!("Signal non conforme JSONAI V3.1: {}", e)))?;
+        let _: r2d2_jsonai::JsonAiV3 = serde_json::from_str(&self.state.raw_data).map_err(|e| {
+            KernelError::ValidationFailed(format!("Signal non conforme JSONAI V3.1: {}", e))
+        })?;
 
         Ok(Fragment {
             state: Unverified {
@@ -93,8 +94,8 @@ impl Fragment<Signal> {
 pub trait TruthValidator: Send + Sync {
     /// Prend en entrée un payload brut et retourne (Payload_Validé, Preuve_Inférence)
     fn validate_payload(
-        &self, 
-        payload: &str
+        &self,
+        payload: &str,
     ) -> impl std::future::Future<Output = Result<(String, String), KernelError>> + Send;
 }
 

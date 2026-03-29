@@ -1,10 +1,10 @@
-use r2d2_cortex::models::reasoning_agent::ReasoningAgent;
 use r2d2_cortex::agent::CognitiveAgent;
-use tracing::{info, Level};
-use tracing_subscriber::FmtSubscriber;
+use r2d2_cortex::models::reasoning_agent::ReasoningAgent;
+use serde_json::json;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use serde_json::json;
+use tracing::{info, Level};
+use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -21,11 +21,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Lecture dynamique des Seed Prompts "Militaro-Industriels"
     let seed_content = fs::read_to_string("data/seed_prompts.txt")
         .expect("⚠️ Le fichier data/seed_prompts.txt est introuvable. Créez-le !");
-    
+
     let args: Vec<String> = std::env::args().collect();
     let start_index = if args.len() > 1 {
         let job = args[1].parse::<usize>().unwrap_or(1);
-        if job > 0 { job - 1 } else { 0 }
+        if job > 0 {
+            job - 1
+        } else {
+            0
+        }
     } else {
         0
     };
@@ -42,11 +46,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if start_index >= prompts.len() {
-        tracing::error!("❌ Job de départ ({}) est supérieur au nombre de prompts ({}).", start_index + 1, prompts.len());
+        tracing::error!(
+            "❌ Job de départ ({}) est supérieur au nombre de prompts ({}).",
+            start_index + 1,
+            prompts.len()
+        );
         return Ok(());
     }
 
-    info!("📚 Matrice chargée : {} Sujets Stratégiques identifiés. Démarrage au Job {}.", prompts.len(), start_index + 1);
+    info!(
+        "📚 Matrice chargée : {} Sujets Stratégiques identifiés. Démarrage au Job {}.",
+        prompts.len(),
+        start_index + 1
+    );
 
     let mut agent = ReasoningAgent::new();
     agent.load().await?;
@@ -61,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (i, prompt) in prompts.iter().enumerate().skip(start_index) {
         info!("=======================================================");
         info!("🧪 CRUCIBLE JOB {}/{} : {}", i + 1, prompts.len(), prompt);
-        
+
         match agent.run_crucible_distillation(prompt).await {
             Ok(synthesis) => {
                 let entry = json!({
@@ -78,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 failed_jobs.push((i, *prompt));
             }
         }
-        
+
         info!("⏳ Repos thermique du Crucible (30s) avant le prochain Job...");
         tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
     }
@@ -86,12 +98,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // --- PHASE 4 : RETRY ENGINE ---
     if !failed_jobs.is_empty() {
         info!("=======================================================");
-        info!("⚠️ DEUXIÈME PASSAGE (RETRY ENGINE) : Relance de {} jobs échoués...", failed_jobs.len());
-        
+        info!(
+            "⚠️ DEUXIÈME PASSAGE (RETRY ENGINE) : Relance de {} jobs échoués...",
+            failed_jobs.len()
+        );
+
         for (i, prompt) in failed_jobs {
             info!("=======================================================");
             info!("♻️ RELANCE CRUCIBLE JOB {} : {}", i + 1, prompt);
-            
+
             match agent.run_crucible_distillation(prompt).await {
                 Ok(synthesis) => {
                     let entry = json!({

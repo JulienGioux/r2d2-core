@@ -63,9 +63,17 @@ impl SensoryGateway {
             let mut debates = Vec::new();
             for (i, res) in moes_results.iter().enumerate() {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(res) {
-                    let expert_name = parsed.get("source").map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string());
+                    let expert_name = parsed
+                        .get("source")
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "Unknown".to_string());
                     let content = parsed.get("content").and_then(|c| c.as_str()).unwrap_or("");
-                    debates.push(format!("[Expert {} - {}] : {}", i + 1, expert_name, content));
+                    debates.push(format!(
+                        "[Expert {} - {}] : {}",
+                        i + 1,
+                        expert_name,
+                        content
+                    ));
                 } else {
                     debates.push(format!("[Expert {}] : {}", i + 1, res));
                 }
@@ -90,7 +98,10 @@ impl SensoryGateway {
             "dependencies": []
         }}"#,
                 timestamp,
-                synthesis_content.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+                synthesis_content
+                    .replace("\\", "\\\\")
+                    .replace("\"", "\\\"")
+                    .replace("\n", "\\n")
             );
 
             Ok(Fragment::<Signal>::new(final_jsonai))

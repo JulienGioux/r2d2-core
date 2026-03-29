@@ -10,7 +10,7 @@ r2d2-kernel = { version = "8.2.0", path = "../r2d2-kernel" }
 r2d2-secure-mem = { version = "8.2.0", path = "../r2d2-secure-mem" }
 
 # Erreurs et Sécurité Mémoire
-thiserror = "2.0.18"
+thiserror = { workspace = true }
 zeroize = { version = "1.8", features = ["derive"] }
 
 # Log et Observabilité (Tracing)

@@ -15,7 +15,10 @@ fn main() {
         .args(&["/C", "wmic path win32_VideoController get name, adapterram"])
         .output()
         .expect("Failed to execute cmd");
-    println!("GPU / VRAM:\n{}", String::from_utf8_lossy(&vram_output.stdout));
+    println!(
+        "GPU / VRAM:\n{}",
+        String::from_utf8_lossy(&vram_output.stdout)
+    );
 
     // CPU
     let cpu_output = Command::new("cmd")

@@ -6,11 +6,12 @@
 
 pub mod agent;
 pub mod catalog;
+pub mod mcp_client;
 pub mod memory;
 pub mod models;
 pub mod registry;
 pub mod security;
-pub mod mcp_client;
+pub mod training;
 
 pub use agent::{AgentError, CognitiveAgent};
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};

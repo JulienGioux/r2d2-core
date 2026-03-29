@@ -1,9 +1,9 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn, error};
 use std::sync::{Mutex, OnceLock};
+use tracing::{error, info, warn};
 
 fn in_memory_vault() -> &'static Mutex<HashMap<String, String>> {
     static IN_MEMORY_VAULT: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
@@ -34,14 +34,13 @@ impl Vault {
             }
         }
 
-        
         let vault = Self::load_vault();
         for id in &actual_identifiers {
             if let Some(val) = vault.keys.get(*id) {
                 return Some(val.clone());
             }
         }
-        
+
         // Fallback transparent (rétrocompatibilité)
         for id in &actual_identifiers {
             if let Ok(val) = std::env::var(id) {
@@ -70,7 +69,10 @@ impl Vault {
             info!("Clé {} révoquée de la RAM (Mode Paranoïaque).", identifier);
         } else {
             mem.insert(identifier.to_string(), value.to_string());
-            info!("Clé {} injectée en RAM uniquement (Mode Paranoïaque activé).", identifier);
+            info!(
+                "Clé {} injectée en RAM uniquement (Mode Paranoïaque activé).",
+                identifier
+            );
         }
     }
 
@@ -79,11 +81,11 @@ impl Vault {
         let vault = Self::load_vault();
         let mem = in_memory_vault().lock().unwrap();
         let mut masked = HashMap::new();
-        
+
         // Keys in disk
         for (k, v) in vault.keys {
             if v.len() > 8 {
-                let mask = format!("{}****{}", &v[..4], &v[v.len()-4..]);
+                let mask = format!("{}****{}", &v[..4], &v[v.len() - 4..]);
                 masked.insert(k, mask);
             } else if v.is_empty() {
                 masked.insert(k, "NON DÉFINIE".to_string());
@@ -91,11 +93,11 @@ impl Vault {
                 masked.insert(k, "****".to_string());
             }
         }
-        
+
         // Override with RAM keys
         for (k, v) in mem.iter() {
             if v.len() > 8 {
-                let mask = format!("{}****{} (IN-RAM)", &v[..4], &v[v.len()-4..]);
+                let mask = format!("{}****{} (IN-RAM)", &v[..4], &v[v.len() - 4..]);
                 masked.insert(k.clone(), mask);
             } else if v.is_empty() {
                 masked.insert(k.clone(), "NON DÉFINIE (IN-RAM)".to_string());
@@ -111,7 +113,7 @@ impl Vault {
         let vault = Self::load_vault();
         let mem = in_memory_vault().lock().unwrap();
         let mut env = HashMap::new();
-        
+
         match provider {
             "github" | "@modelcontextprotocol/server-github" => {
                 if let Some(token) = mem.get("GITHUB_PERSONAL_ACCESS_TOKEN") {
@@ -121,7 +123,7 @@ impl Vault {
                 } else if let Ok(val) = std::env::var("GITHUB_PERSONAL_ACCESS_TOKEN") {
                     env.insert("GITHUB_PERSONAL_ACCESS_TOKEN".to_string(), val);
                 }
-            },
+            }
             "gemini" => {
                 if let Some(token) = mem.get("GEMINI_API_KEY") {
                     env.insert("GEMINI_API_KEY".to_string(), token.clone());
@@ -130,40 +132,68 @@ impl Vault {
                 } else if let Ok(val) = std::env::var("GEMINI_API_KEY") {
                     env.insert("GEMINI_API_KEY".to_string(), val);
                 }
-            },
+            }
             "huggingface" | "hf" | "mistral" => {
                 // Mistral utilise parfois le token pour les bases HF, ou on peut juste fournir HF_TOKEN partout où on demande l'un ou l'autre.
                 if let Some(token) = mem.get("HUGGINGFACE_TOKEN").or_else(|| mem.get("HF_TOKEN")) {
                     env.insert("HUGGINGFACE_TOKEN".to_string(), token.clone());
                     env.insert("HF_TOKEN".to_string(), token.clone());
-                } else if let Some(token) = vault.keys.get("HUGGINGFACE_TOKEN").or_else(|| vault.keys.get("HF_TOKEN")) {
+                } else if let Some(token) = vault
+                    .keys
+                    .get("HUGGINGFACE_TOKEN")
+                    .or_else(|| vault.keys.get("HF_TOKEN"))
+                {
                     env.insert("HUGGINGFACE_TOKEN".to_string(), token.clone());
                     env.insert("HF_TOKEN".to_string(), token.clone());
-                } else if let Ok(val) = std::env::var("HUGGINGFACE_TOKEN").or_else(|_| std::env::var("HF_TOKEN")) {
+                } else if let Ok(val) =
+                    std::env::var("HUGGINGFACE_TOKEN").or_else(|_| std::env::var("HF_TOKEN"))
+                {
                     env.insert("HUGGINGFACE_TOKEN".to_string(), val.clone());
                     env.insert("HF_TOKEN".to_string(), val);
                 }
-            },
+            }
             _ => {}
         }
-        
+
         env
     }
 
     fn load_vault() -> SecretsVault {
         let vault_path = Path::new(VAULT_PATH_STR);
         if !vault_path.exists() {
-            return SecretsVault::default();
+            let default_vault = SecretsVault::default();
+            Self::save_vault(&default_vault);
+            return default_vault;
         }
 
         match fs::read_to_string(vault_path) {
-            Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
-                error!("Format Vault Corrompu : {:?}", e);
-                SecretsVault::default()
-            }),
+            Ok(content) => {
+                if content.trim().is_empty() {
+                    warn!(
+                        "Vault {:?} vide, auto-génération de la structure de base...",
+                        vault_path
+                    );
+                    let default_vault = SecretsVault::default();
+                    Self::save_vault(&default_vault);
+                    return default_vault;
+                }
+                match serde_json::from_str(&content) {
+                    Ok(vault) => vault,
+                    Err(e) => {
+                        error!(
+                            "🔥 CRITICAL SECURITY FAILURE: Format du Vault ({:?}) corrompu ou invalide : {:?}",
+                            vault_path, e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            }
             Err(e) => {
-                warn!("Impossible de lire le Vault {:?} : {:?}", vault_path, e);
-                SecretsVault::default()
+                error!(
+                    "🔥 CRITICAL SECURITY FAILURE: Impossible de lire le fichier Vault {:?} : {:?}",
+                    vault_path, e
+                );
+                std::process::exit(1);
             }
         }
     }
@@ -194,7 +224,10 @@ impl Vault {
                         let _ = fs::set_permissions(vault_path, perms);
                     }
                 }
-                info!("Vault {} statique mis à jour avec succès.", vault_path.display());
+                info!(
+                    "Vault {} statique mis à jour avec succès.",
+                    vault_path.display()
+                );
                 true
             }
             Err(e) => {

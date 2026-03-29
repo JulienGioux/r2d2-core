@@ -1,3 +1,26 @@
+<style>
+@keyframes pulse-danger {
+    0% { box-shadow: 0 0 10px rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.5); }
+    50% { box-shadow: 0 0 25px rgba(231,76,60,0.6); border-color: rgba(231,76,60,1); }
+    100% { box-shadow: 0 0 10px rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.5); }
+}
+@keyframes pulse-icon {
+    0% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(231,76,60,0.5)); }
+    50% { transform: scale(1.15); filter: drop-shadow(0 0 8px rgba(231,76,60,0.8)); }
+    100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(231,76,60,0.5)); }
+}
+.danger-state {
+    animation: pulse-danger 2s infinite ease-in-out;
+}
+.danger-icon {
+    animation: pulse-icon 2s infinite ease-in-out;
+    color: #e74c3c;
+}
+.gauge-bar {
+    transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.5s ease;
+}
+</style>
+
 <div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr); gap: 24px; animation: slideIn 0.3s ease-out;">
     
     <!-- Hero / Welcome Card -->
@@ -26,8 +49,8 @@
             <i data-lucide="cpu" style="width: 20px; {% if alert_threshold %}color: #e74c3c;{% endif %}"></i>
         </div>
         <div style="font-size: 2em; font-weight: 600; {% if alert_threshold %}color: #e74c3c;{% endif %}">{{ used_ram_gb }} <span style="font-size: 0.5em; color: #666;">GB / {{ total_ram_gb }} GB</span></div>
-        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px;">
-            <div style="width: {{ ram_percent }}%; height: 100%; background: {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %}; border-radius: 2px; box-shadow: 0 0 8px {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %};"></div>
+        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+            <div class="gauge-bar" style="width: {{ ram_percent }}%; height: 100%; background: {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %}; border-radius: 2px; box-shadow: 0 0 8px {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %};"></div>
         </div>
     </div>
 
@@ -42,25 +65,29 @@
         </div>
     </div>
 
-    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
+    <div class="glass-card stat-card {% if entropy > 0.85 %}danger-state{% endif %}" style="display: flex; flex-direction: column; gap: 12px; transition: all 0.5s ease;">
         <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>Agents Actifs</span>
-            <i data-lucide="bot" style="width: 20px;"></i>
+            <span>Entropie Sémantique</span>
+            <i data-lucide="brain-circuit" class="{% if entropy > 0.85 %}danger-icon{% endif %}" style="width: 20px; transition: color 0.5s ease;"></i>
         </div>
-        <div style="font-size: 2em; font-weight: 600;">{{ active_agents_count }} <span style="font-size: 0.5em; color: #666;">/ 4</span></div>
-        <div style="font-size: 0.85em; color: #fff;">
-            Raisonnement Parallèle
+        <div style="font-size: 2em; font-weight: 600; transition: color 0.5s ease; {% if entropy > 0.85 %}color: #e74c3c;{% endif %}">{{ entropy }}</div>
+        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+            <div class="gauge-bar" style="width: calc({{ entropy }} * 100%); height: 100%; background: {% if entropy > 0.85 %}#e74c3c{% else %}#9b59b6{% endif %}; border-radius: 2px;"></div>
         </div>
     </div>
 
-    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
+    <div class="glass-card stat-card {% if tension > 0.85 %}danger-state{% endif %}" style="display: flex; flex-direction: column; gap: 12px; transition: all 0.5s ease;">
         <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>Architecture Core</span>
-            <i data-lucide="cpu" style="width: 20px;"></i>
+            <span>Dissonance / Tension</span>
+            <i data-lucide="activity" class="{% if tension > 0.85 %}danger-icon{% endif %}" style="width: 20px;"></i>
         </div>
-        <div style="font-size: 1.5em; font-weight: 600;">{{ core_count }} <span style="font-size: 0.5em; color: #666;">Cores</span></div>
-        <div style="font-size: 0.85em; color: #2ecc71;">
-            Optimisé Localement
+        <div style="display: flex; align-items: baseline; gap: 8px;">
+            <div style="font-size: 1.8em; font-weight: 600; color: #f39c12; transition: all 0.5s ease;">{{ dissonance }}</div>
+            <div style="font-size: 1em; color: #888;">/</div>
+            <div style="font-size: 1.8em; font-weight: 600; color: #e74c3c; transition: all 0.5s ease;">{{ tension }}</div>
+        </div>
+        <div style="font-size: 0.85em; color: #bbb;">
+            Pression Système (VibeVector)
         </div>
     </div>
 

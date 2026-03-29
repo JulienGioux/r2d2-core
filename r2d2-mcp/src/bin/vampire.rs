@@ -1,10 +1,10 @@
-use std::fs::{self};
-use std::io::Write;
+use r2d2_mcp::client::McpUniversalClient;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use tracing::{info, error, warn, Level};
+use std::fs::{self};
+use std::io::Write;
+use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
-use r2d2_mcp::client::McpUniversalClient;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct VampireJob {
@@ -51,14 +51,20 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let queue: Vec<VampireJob> = serde_json::from_str(&queue_content).unwrap_or_default();
-    let pending_jobs: Vec<VampireJob> = queue.into_iter().filter(|j| j.vampire_status == "EN ATTENTE").collect();
+    let pending_jobs: Vec<VampireJob> = queue
+        .into_iter()
+        .filter(|j| j.vampire_status == "EN ATTENTE")
+        .collect();
 
     if pending_jobs.is_empty() {
         info!("💤 Aucun Job en attente. Retour au sommeil intersidéral.");
         return Ok(());
     }
 
-    info!("📋 {} Fiche(s) d'Apprentissage planifiée(s).", pending_jobs.len());
+    info!(
+        "📋 {} Fiche(s) d'Apprentissage planifiée(s).",
+        pending_jobs.len()
+    );
 
     let mut dataset_file = std::fs::OpenOptions::new()
         .create(true)
@@ -67,12 +73,22 @@ async fn main() -> anyhow::Result<()> {
 
     for (i, job) in pending_jobs.iter().enumerate() {
         info!("=======================================================");
-        info!("🩸 MISSION [{}/{}] : Scrapping '{}' via [{}]", i + 1, pending_jobs.len(), job.theme, job.provider);
-        
+        info!(
+            "🩸 MISSION [{}/{}] : Scrapping '{}' via [{}]",
+            i + 1,
+            pending_jobs.len(),
+            job.theme,
+            job.provider
+        );
+
         // Spawn le MCP correct selon le provider
-        let mcp_name = if job.provider == "github" { "@modelcontextprotocol/server-github" } else { "notebooklm-mcp" };
+        let mcp_name = if job.provider == "github" {
+            "@modelcontextprotocol/server-github"
+        } else {
+            "notebooklm-mcp"
+        };
         let cmd_string = format!("npx -y {}", mcp_name);
-        
+
         let (cmd, args) = if cfg!(target_os = "windows") {
             ("bash", vec!["-c", cmd_string.as_str()])
         } else {
@@ -89,18 +105,21 @@ async fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
-        
+
         let _ = match mcp_client.initialize().await {
             Ok(init_res) => {
                 info!("✅ MCP Initialisé : {:?}", init_res);
-            },
+            }
             Err(e) => {
-                error!("❌ Impossible d'initialiser MCP {} (Problème de token ou crash serveur): {}", mcp_name, e);
+                error!(
+                    "❌ Impossible d'initialiser MCP {} (Problème de token ou crash serveur): {}",
+                    mcp_name, e
+                );
                 atomic_update_job_status(&job.id, "ERREUR");
                 continue;
             }
         };
-        
+
         let (tool_name, mcp_args, system_prompt) = if job.provider == "github" {
             let repo = &job.notebook; // UI stores repo link in notebook field
             (
@@ -148,15 +167,21 @@ async fn main() -> anyhow::Result<()> {
                         { "role": "assistant", "content": synthesis.trim() }
                     ]
                 });
-                
+
                 writeln!(dataset_file, "{}", serde_json::to_string(&entry)?)?;
                 dataset_file.flush()?;
 
-                info!("💾 Connaissance extraite et stockée (Taille: {} bytes) !", synthesis.len());
+                info!(
+                    "💾 Connaissance extraite et stockée (Taille: {} bytes) !",
+                    synthesis.len()
+                );
                 atomic_update_job_status(&job.id, "VAMPIRISÉ");
             }
             Err(e) => {
-                error!("❌ Erreur d'Extraction MCP pour le job {} : {:?}", job.theme, e);
+                error!(
+                    "❌ Erreur d'Extraction MCP pour le job {} : {:?}",
+                    job.theme, e
+                );
                 atomic_update_job_status(&job.id, "ERREUR");
             }
         }

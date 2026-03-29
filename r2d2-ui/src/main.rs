@@ -1,27 +1,33 @@
+use askama::Template;
 use axum::{
     extract::State,
-    routing::{get, post, delete},
-    Router, Form,
     response::{Html, IntoResponse},
+    routing::{delete, get, post},
+    Form, Router,
 };
-use askama::Template;
 use serde::Deserialize;
-use tower_http::services::ServeDir;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tower_http::services::ServeDir;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use r2d2_cortex::agent::CognitiveAgent;
-use r2d2_cortex::models::reasoning_agent::ReasoningAgent;
+use async_stream::stream;
 use axum::response::sse::{Event, Sse};
+use r2d2_blackboard::PostgresBlackboard;
+use r2d2_circadian::sensory::VibeVector;
+use r2d2_circadian::CircadianDaemon;
+use r2d2_cortex::agent::CognitiveAgent;
+use r2d2_cortex::models::reasoning_agent::DebateEvent;
+use r2d2_cortex::models::reasoning_agent::ReasoningAgent;
+use r2d2_cortex::CortexRegistry;
+use r2d2_paradox::ParadoxSolver;
+use std::convert::Infallible;
+use std::time::Duration;
+use std::time::Instant;
+use sysinfo::System;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
-use std::convert::Infallible;
-use r2d2_cortex::models::reasoning_agent::DebateEvent;
-use async_stream::stream;
-use sysinfo::System;
-use std::time::Instant;
 
 mod chat_history;
 mod logger;
@@ -34,6 +40,7 @@ struct AppState {
     log_tx: tokio::sync::broadcast::Sender<String>,
     sys: Arc<Mutex<System>>,
     start_time: Instant,
+    circadian_rx: tokio::sync::watch::Receiver<Arc<VibeVector>>,
 }
 
 #[derive(Template)]
@@ -48,11 +55,16 @@ struct DashboardTemplate {
     pub total_ram_gb: String,
     pub used_ram_gb: String,
     pub ram_percent: i32,
+    #[allow(dead_code)]
     pub active_agents_count: usize,
     pub memory_vectors_count: usize,
     pub alert_threshold: bool,
     pub uptime_formatted: String,
+    #[allow(dead_code)]
     pub core_count: usize,
+    pub entropy: f32,
+    pub dissonance: f32,
+    pub tension: f32,
 }
 
 #[derive(Template)]
@@ -101,7 +113,8 @@ pub fn list_local_hf_models() -> Vec<String> {
 }
 
 #[derive(Template)]
-#[template(source = r#"
+#[template(
+    source = r#"
 <div class="message user">
     <i data-lucide="user"></i>
     <div class="message-content">
@@ -138,7 +151,9 @@ pub fn list_local_hf_models() -> Vec<String> {
     </div>
 </div>
 <script>if (typeof lucide !== 'undefined') { lucide.createIcons(); }</script>
-"#, ext = "html")]
+"#,
+    ext = "html"
+)]
 struct ChatResponseTemplate {
     mcp_feedback: String,
     prompt: String,
@@ -160,7 +175,9 @@ struct ChatInput {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (log_tx, _) = tokio::sync::broadcast::channel::<String>(250);
-    let broadcast_layer = logger::BroadcastLayer { sender: log_tx.clone() };
+    let broadcast_layer = logger::BroadcastLayer {
+        sender: log_tx.clone(),
+    };
 
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
@@ -172,20 +189,90 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("🚀 Booting R2D2-UI (Axum/HTMX Administration Console)...");
 
-    // 1. Initialisation Physique du Cortex
-    let mut cortex = ReasoningAgent::new();
-    cortex.load().await.expect("Erreur Fatale lors de l'allocation Tensorielle du Cortex");
-    
+    // 1. Initialisation Physique du Cortex pour le Chat
+    let mut reasoning_agent = ReasoningAgent::new();
+    reasoning_agent
+        .load()
+        .await
+        .expect("Erreur Fatale lors de l'allocation Tensorielle du Cortex Local");
+
+    // 2. Initialisation du Démon Circadien (L'Hyperviseur Background)
+    tracing::info!("Démarrage de l'Hyperviseur R2D2 en arrière-plan...");
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard"
+            .to_string()
+    });
+    let blackboard = Arc::new(PostgresBlackboard::new(&db_url).await?);
+
+    // On réutilise ParadoxSolver et CortexRegistry global pour le Démon
+    let mut reflex_judge =
+        r2d2_paradox::reflex_judge::ReflexJudge::new().with_blackboard(blackboard.clone());
+    let _ = reflex_judge.initialize().await;
+    let reflex = Arc::new(tokio::sync::Mutex::new(reflex_judge));
+    let solver = Arc::new(ParadoxSolver::new().with_reflex(reflex));
+    let global_cortex = Arc::new(CortexRegistry::new());
+
+    // Le Démon Circadien (Seuil = 0.85, 30sec = interval)
+    let (mut daemon, circadian_rx) = CircadianDaemon::new(
+        0.85,
+        30,
+        blackboard.clone(),
+        global_cortex.clone(),
+        solver.clone(),
+    );
+    let (_shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // L'Orchestration Résiliente "Industrial-Grade" avec Exponential Backoff
+    let daemon_blackboard = blackboard.clone();
+    let daemon_cortex = global_cortex.clone();
+    let daemon_solver = solver.clone();
+
+    tokio::spawn(async move {
+        let mut backoff = Duration::from_secs(1);
+        loop {
+            // Un canal fresh par daemon s'il crash
+            let (fresh_daemon, _) = CircadianDaemon::new(
+                0.85,
+                30,
+                daemon_blackboard.clone(),
+                daemon_cortex.clone(),
+                daemon_solver.clone(),
+            );
+
+            let handle = tokio::spawn({
+                let rx = shutdown_rx.clone();
+                async move { daemon.start_homeostasis_loop(rx).await }
+            });
+
+            match handle.await {
+                Ok(Ok(_)) => break, // Normal Shutdown
+                Ok(Err(e)) => tracing::error!("Le Démon Circadien a échoué: {}", e),
+                Err(e) if e.is_panic() => {
+                    tracing::error!(
+                        "🚨 LE DÉMON CIRCADIEN A PANIQUÉ ! Auto-Réanimation en cours..."
+                    );
+                }
+                Err(_) => tracing::error!("Tâche de supervision annulée brutalement."),
+            }
+
+            // On a paniqué, on reset le daemon principal et on backoff
+            daemon = fresh_daemon;
+            tokio::time::sleep(backoff).await;
+            backoff = std::cmp::min(backoff * 2, Duration::from_secs(60));
+        }
+    });
+
     let mut sys = System::new_all();
     sys.refresh_all();
-    
+
     let shared_state = AppState {
-        agent: Arc::new(Mutex::new(cortex)),
+        agent: Arc::new(Mutex::new(reasoning_agent)),
         pending_debate_prompt: Arc::new(Mutex::new(None)),
         current_chat_session: Arc::new(Mutex::new(uuid::Uuid::new_v4().to_string())),
         log_tx: log_tx.clone(),
         sys: Arc::new(Mutex::new(sys)),
         start_time: Instant::now(),
+        circadian_rx,
     };
 
     let api_routes = Router::new()
@@ -245,31 +332,49 @@ async fn render_index() -> impl IntoResponse {
 async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
     let mut sys = state.sys.lock().await;
     sys.refresh_memory();
-    
+
     let total_ram = sys.total_memory() as f64 / 1_073_741_824.0;
     let used_ram = sys.used_memory() as f64 / 1_073_741_824.0;
-    let ram_percent = if total_ram > 0.0 { (used_ram / total_ram * 100.0) as i32 } else { 0 };
+    let ram_percent = if total_ram > 0.0 {
+        (used_ram / total_ram * 100.0) as i32
+    } else {
+        0
+    };
     let alert_threshold = ram_percent > 85;
-    
+
     let core_count = sys.physical_core_count().unwrap_or(4);
-    
+
     let uptime_secs = state.start_time.elapsed().as_secs();
-    let uptime_formatted = format!("{:02}:{:02}:{:02}", uptime_secs / 3600, (uptime_secs % 3600) / 60, uptime_secs % 60);
-    
+    let uptime_formatted = format!(
+        "{:02}:{:02}:{:02}",
+        uptime_secs / 3600,
+        (uptime_secs % 3600) / 60,
+        uptime_secs % 60
+    );
+
     let agent = state.agent.lock().await;
     let memory_vectors_count = agent.memory_vectors_count();
     let active_agents_count = if agent.is_active() { 3 } else { 0 };
 
-    Html(DashboardTemplate {
-        total_ram_gb: format!("{:.1}", total_ram),
-        used_ram_gb: format!("{:.1}", used_ram),
-        ram_percent,
-        active_agents_count,
-        memory_vectors_count,
-        alert_threshold,
-        uptime_formatted,
-        core_count,
-    }.render().unwrap())
+    let vibe = state.circadian_rx.borrow().clone();
+
+    Html(
+        DashboardTemplate {
+            total_ram_gb: format!("{:.1}", total_ram),
+            used_ram_gb: format!("{:.1}", used_ram),
+            ram_percent,
+            active_agents_count,
+            memory_vectors_count,
+            alert_threshold,
+            uptime_formatted,
+            core_count,
+            entropy: vibe.compute_entropy(),
+            dissonance: vibe.dissonance,
+            tension: vibe.tension,
+        }
+        .render()
+        .unwrap(),
+    )
 }
 
 async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
@@ -281,9 +386,9 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
         // Generate existing attachment pills
         for repo in &session.github_sources {
             if repo.starts_with("github-async://") {
-                 let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
-                 let r = repo.replace("github-async://", "");
-                 active_sources_html.push_str(&format!(
+                let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
+                let r = repo.replace("github-async://", "");
+                active_sources_html.push_str(&format!(
                     "<div id=\"{}\" class=\"context-pill context-pill-async\">\
                         <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
                         <span>{} (Async Queued)</span>\
@@ -293,8 +398,8 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                         <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
                     </div>", id_val, r, repo, id_val, repo));
             } else {
-                 let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
-                 active_sources_html.push_str(&format!(
+                let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
+                active_sources_html.push_str(&format!(
                     "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
                         <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
                         <span>{} (Cognitive Tool)</span>\
@@ -313,44 +418,77 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                 let assistant_turn = &session.turns[i + 1];
                 let prompt = user_turn.content.clone();
                 let json_resp = assistant_turn.content.clone();
-                
+
                 let parsed: serde_json::Value = serde_json::from_str(&json_resp).unwrap_or(serde_json::json!({ "content": json_resp, "source": {"ParadoxEngine": "Unknown"} }));
                 let raw_text = parsed["content"].as_str().unwrap_or(&json_resp).to_string();
-                let model_name = parsed["source"]["ParadoxEngine"].as_str().unwrap_or("Paradox Local").to_string();
-                let consensus = parsed["consensus"].as_str().unwrap_or("Unknown").to_string();
-                let latency = parsed["id"].as_str().unwrap_or("").replace("paradox-multiapi-", "");
-                
+                let model_name = parsed["source"]["ParadoxEngine"]
+                    .as_str()
+                    .unwrap_or("Paradox Local")
+                    .to_string();
+                let consensus = parsed["consensus"]
+                    .as_str()
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let latency = parsed["id"]
+                    .as_str()
+                    .unwrap_or("")
+                    .replace("paradox-multiapi-", "");
+
                 let parser = pulldown_cmark::Parser::new(&raw_text);
                 let mut html_output = String::new();
                 pulldown_cmark::html::push_html(&mut html_output, parser);
-                
-                history_html.push_str(&ChatResponseTemplate {
-                    mcp_feedback: String::new(), prompt, model_name, response_md: html_output, jsonai: json_resp, latency, consensus,
-                }.render().unwrap());
+
+                history_html.push_str(
+                    &ChatResponseTemplate {
+                        mcp_feedback: String::new(),
+                        prompt,
+                        model_name,
+                        response_md: html_output,
+                        jsonai: json_resp,
+                        latency,
+                        consensus,
+                    }
+                    .render()
+                    .unwrap(),
+                );
                 i += 2;
-            } else { i += 1; }
+            } else {
+                i += 1;
+            }
         }
     }
     if history_html.is_empty() {
         history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p></div></div>".into();
     }
-    let github_configured = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
+    let github_configured =
+        r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
     let queue = read_queue();
     let mut final_library_repos: Vec<String> = queue
-       .into_iter()
-       .map(|v| v.notebook)
-       .filter(|n| n.contains("/"))
-       .collect();
-       
+        .into_iter()
+        .map(|v| v.notebook)
+        .filter(|n| n.contains("/"))
+        .collect();
+
     // Hardcoded permanent repository for the project core architecture
     final_library_repos.push("JulienGioux/r2d2-core".to_string());
-    
+
     final_library_repos.sort();
     final_library_repos.dedup();
 
-    Html(ChatTemplate { history_html, github_configured, active_sources_html, library_repos: final_library_repos }.render().unwrap())
+    Html(
+        ChatTemplate {
+            history_html,
+            github_configured,
+            active_sources_html,
+            library_repos: final_library_repos,
+        }
+        .render()
+        .unwrap(),
+    )
 }
-async fn render_cortex() -> impl IntoResponse { Html(CortexTemplate {}.render().unwrap()) }
+async fn render_cortex() -> impl IntoResponse {
+    Html(CortexTemplate {}.render().unwrap())
+}
 
 async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
     let agent = state.agent.lock().await;
@@ -360,13 +498,25 @@ async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
         (0, vec![])
     };
 
-    Html(MemoryTemplate {
-        total_vectors,
-        sample_axioms,
-    }.render().unwrap())
+    Html(
+        MemoryTemplate {
+            total_vectors,
+            sample_axioms,
+        }
+        .render()
+        .unwrap(),
+    )
 }
 
-async fn render_admin() -> impl IntoResponse { Html(AdminTemplate { local_models: list_local_hf_models() }.render().unwrap()) }
+async fn render_admin() -> impl IntoResponse {
+    Html(
+        AdminTemplate {
+            local_models: list_local_hf_models(),
+        }
+        .render()
+        .unwrap(),
+    )
+}
 
 async fn system_purge() -> impl IntoResponse {
     Html(r#"<div style='color: #2ecc71; padding: 12px; border: 1px solid #2ecc71; border-radius: 4px; background: rgba(46, 204, 113, 0.1);'><i data-lucide='check' style='display:inline-block; vertical-align:middle;'></i> VRAM Purgée (Mock). Cache nettoyé.</div><script>lucide.createIcons(); setTimeout(()=>document.querySelector(".dashboard-grid").innerHTML="", 3000);</script>"#.to_string())
@@ -374,9 +524,13 @@ async fn system_purge() -> impl IntoResponse {
 
 async fn handle_chat(
     State(state): State<AppState>,
-    Form(input): Form<ChatInput>
+    Form(input): Form<ChatInput>,
 ) -> impl IntoResponse {
-    tracing::info!("📥 [handle_chat] Received prompt: '{}', github_sources: '{}'", input.prompt, input.github_sources);
+    tracing::info!(
+        "📥 [handle_chat] Received prompt: '{}', github_sources: '{}'",
+        input.prompt,
+        input.github_sources
+    );
     // Handling the Consensus Stream Request locally
     if input.provider == "consensus" {
         *state.pending_debate_prompt.lock().await = Some(input.prompt.clone());
@@ -397,12 +551,13 @@ async fn handle_chat(
             user_msg_html
         );
         let mut resp = Html(html).into_response();
-        resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
+        resp.headers_mut()
+            .insert("HX-Trigger", "chat-updated".parse().unwrap());
         return resp;
     }
 
     let session_id = state.current_chat_session.lock().await.clone();
-    
+
     let mut cortex = state.agent.lock().await;
 
     // Isoler le contexte : on s'assure que le Cortex a bien chargé l'historique de cette session spécifique
@@ -410,10 +565,10 @@ async fn handle_chat(
         let mut history = Vec::new();
         for turn in session.turns {
             history.push(r2d2_cortex::models::reasoning_agent::ChatMessage {
-                role: if turn.role == "user" { 
-                    r2d2_cortex::models::reasoning_agent::MessageRole::User 
-                } else { 
-                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant 
+                role: if turn.role == "user" {
+                    r2d2_cortex::models::reasoning_agent::MessageRole::User
+                } else {
+                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant
                 },
                 text: turn.content,
                 function_name: None,
@@ -448,20 +603,41 @@ async fn handle_chat(
     let mut last_function_name = String::new();
 
     loop {
-        let thought_future = cortex.generate_thought_agentic(&current_prompt, &otf_repos, is_function_result, &last_function_name);
+        let thought_future = cortex.generate_thought_agentic(
+            &current_prompt,
+            &otf_repos,
+            is_function_result,
+            &last_function_name,
+        );
         let timeout_duration = if otf_repos.is_empty() { 15 } else { 120 }; // Timeout étendu pour appel agentique potentiels via MCP
-        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_duration), thought_future).await;
-        
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_duration),
+            thought_future,
+        )
+        .await;
+
         match result {
             Ok(Ok(r2d2_cortex::models::reasoning_agent::AgenticControlFlow::Completed(resp))) => {
                 json_resp = resp;
                 break;
-            },
-            Ok(Ok(r2d2_cortex::models::reasoning_agent::AgenticControlFlow::FunctionCallRequest { name, args })) => {
-                tracing::info!("Agent initiated MCP tool call: {} with args {:?}", name, args);
-                
+            }
+            Ok(Ok(
+                r2d2_cortex::models::reasoning_agent::AgenticControlFlow::FunctionCallRequest {
+                    name,
+                    args,
+                },
+            )) => {
+                tracing::info!(
+                    "Agent initiated MCP tool call: {} with args {:?}",
+                    name,
+                    args
+                );
+
                 // Lazy initialization du Daemon MCP (Actor Pattern)
-                let github_token = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").unwrap_or_default();
+                let github_token = r2d2_cortex::security::vault::Vault::get_api_key(
+                    "GITHUB_PERSONAL_ACCESS_TOKEN",
+                )
+                .unwrap_or_default();
                 let mut mcp_lock = cortex.mcp_client.lock().await;
                 let mut init_failed = false;
                 if mcp_lock.is_none() {
@@ -469,7 +645,7 @@ async fn handle_chat(
                     match r2d2_cortex::mcp_client::McpClient::new(&github_token).await {
                         Ok(client) => {
                             *mcp_lock = Some(client);
-                        },
+                        }
                         Err(e) => {
                             tracing::error!("Failed to instantiate MCP Daemon: {}", e);
                             current_prompt = format!("Erreur système interne: impossible d'instancier le démon MCP. L'appel 'npx' a échoué (Timeout ou Proxy). Raison : {}", e);
@@ -500,7 +676,7 @@ async fn handle_chat(
                                     "<div style='font-size:0.8rem; color:#888; border-left:2px solid #3b82f6; padding-left:8px; margin-bottom:8px;'><i data-lucide='cpu' style='width:14px;'></i> Outil `github-mcp::{}` exécuté.</div>",
                                     name
                                 ));
-                            },
+                            }
                             Err(e) => {
                                 current_prompt = format!("Tool {} execution failed: {}", name, e);
                                 is_function_result = true;
@@ -512,24 +688,28 @@ async fn handle_chat(
                             }
                         }
                     } else {
-                        current_prompt = format!("System Error: MCP Daemon unavailable. Tool {} aborted.", name);
+                        current_prompt = format!(
+                            "System Error: MCP Daemon unavailable. Tool {} aborted.",
+                            name
+                        );
                         is_function_result = true;
                         last_function_name = name.clone();
                     }
                 }
-                
+
                 drop(mcp_lock);
                 continue;
-            },
+            }
             Ok(Err(e)) => {
                 json_resp = serde_json::to_string(&serde_json::json!({
                     "content": format!("Erreur Cortex: {}", e),
                     "source": {"ParadoxEngine": "Error"},
                     "consensus": "Error",
                     "id": "paradox-multiapi-error"
-                })).unwrap();
+                }))
+                .unwrap();
                 break;
-            },
+            }
             Err(_) => {
                 json_resp = serde_json::to_string(&serde_json::json!({
                     "content": "Défaillance de l'hyperviseur: Délai d'attente Cloud API expiré (> 15s). Cloud ou Proxy injoignable.",
@@ -541,14 +721,25 @@ async fn handle_chat(
             }
         };
     }
-    
+
     // 3. Parsing du V3 JSONAI pour extraction du discours et des Traces
-    let parsed: serde_json::Value = serde_json::from_str(&json_resp).unwrap_or(serde_json::json!({ "content": json_resp, "source": {"ParadoxEngine": "Unknown"} }));
+    let parsed: serde_json::Value = serde_json::from_str(&json_resp).unwrap_or(
+        serde_json::json!({ "content": json_resp, "source": {"ParadoxEngine": "Unknown"} }),
+    );
     let raw_text = parsed["content"].as_str().unwrap_or(&json_resp).to_string();
 
-    let model_name = parsed["source"]["ParadoxEngine"].as_str().unwrap_or("Paradox Local").to_string();
-    let consensus = parsed["consensus"].as_str().unwrap_or("Unknown").to_string();
-    let latency = parsed["id"].as_str().unwrap_or("paradox-multiapi-0").replace("paradox-multiapi-", "");
+    let model_name = parsed["source"]["ParadoxEngine"]
+        .as_str()
+        .unwrap_or("Paradox Local")
+        .to_string();
+    let consensus = parsed["consensus"]
+        .as_str()
+        .unwrap_or("Unknown")
+        .to_string();
+    let latency = parsed["id"]
+        .as_str()
+        .unwrap_or("paradox-multiapi-0")
+        .replace("paradox-multiapi-", "");
 
     // 4. Compilation Markdown vers HTML "Premium" Zero-Dependency (pulldown-cmark)
     let parser = pulldown_cmark::Parser::new(&raw_text);
@@ -564,12 +755,13 @@ async fn handle_chat(
         latency,
         consensus,
     };
-    
+
     let session_id = state.current_chat_session.lock().await.clone();
     chat_history::save_turn(&session_id, &input.prompt, &json_resp, otf_repos.clone());
 
     let mut resp = Html(tmpl.render().unwrap()).into_response();
-    resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
+    resp.headers_mut()
+        .insert("HX-Trigger", "chat-updated".parse().unwrap());
     resp
 }
 
@@ -613,31 +805,40 @@ struct RenamePayload {
     new_title: String,
 }
 
-async fn delete_chat_session(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn delete_chat_session(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     chat_history::delete_session(&id);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
+    resp.headers_mut()
+        .insert("HX-Trigger", "chat-updated".parse().unwrap());
     resp
 }
 
 async fn rename_chat_session(
     axum::extract::Path(id): axum::extract::Path<String>,
-    Form(payload): Form<RenamePayload>
+    Form(payload): Form<RenamePayload>,
 ) -> impl IntoResponse {
     chat_history::rename_session(&id, &payload.new_title);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
+    resp.headers_mut()
+        .insert("HX-Trigger", "chat-updated".parse().unwrap());
     resp
 }
 
-async fn pin_chat_session(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn pin_chat_session(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     chat_history::toggle_pin_session(&id);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut().insert("HX-Trigger", "chat-updated".parse().unwrap());
+    resp.headers_mut()
+        .insert("HX-Trigger", "chat-updated".parse().unwrap());
     resp
 }
 
-async fn info_chat_session(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn info_chat_session(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     let session = chat_history::load_session(&id);
     let html = if let Some(sess) = session {
         let date = chrono::DateTime::from_timestamp(sess.updated_at as i64, 0)
@@ -670,27 +871,32 @@ async fn new_chat_session(State(state): State<AppState>) -> impl IntoResponse {
     *state.current_chat_session.lock().await = uuid::Uuid::new_v4().to_string();
     state.agent.lock().await.clear_history();
     let history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p></div></div>".into();
-    let github_configured = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
-    
+    let github_configured =
+        r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
+
     let queue = read_queue();
     let mut final_library_repos: Vec<String> = queue
-       .into_iter()
-       .map(|v| v.notebook)
-       .filter(|n| n.contains("/"))
-       .collect();
-       
+        .into_iter()
+        .map(|v| v.notebook)
+        .filter(|n| n.contains("/"))
+        .collect();
+
     // Hardcoded permanent repository for the project core architecture
     final_library_repos.push("JulienGioux/r2d2-core".to_string());
-    
+
     final_library_repos.sort();
     final_library_repos.dedup();
 
-    axum::response::Html(ChatTemplate { 
-        history_html, 
-        github_configured, 
-        active_sources_html: String::new(),
-        library_repos: final_library_repos
-    }.render().unwrap())
+    axum::response::Html(
+        ChatTemplate {
+            history_html,
+            github_configured,
+            active_sources_html: String::new(),
+            library_repos: final_library_repos,
+        }
+        .render()
+        .unwrap(),
+    )
 }
 
 async fn load_chat_history(
@@ -702,10 +908,10 @@ async fn load_chat_history(
         let mut history = Vec::new();
         for turn in session.turns {
             history.push(r2d2_cortex::models::reasoning_agent::ChatMessage {
-                role: if turn.role == "user" { 
-                    r2d2_cortex::models::reasoning_agent::MessageRole::User 
-                } else { 
-                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant 
+                role: if turn.role == "user" {
+                    r2d2_cortex::models::reasoning_agent::MessageRole::User
+                } else {
+                    r2d2_cortex::models::reasoning_agent::MessageRole::Assistant
                 },
                 text: turn.content,
                 function_name: None,
@@ -723,21 +929,28 @@ async fn get_status_widget() -> impl IntoResponse {
     Html("<div class='status-indicator' style='display: flex; align-items: center; gap: 8px;'><span class='pulse-dot' style='width: 8px; height: 8px; background-color: #2ecc71; border-radius: 50%; box-shadow: 0 0 8px #2ecc71;'></span><span class='status-text' style='color: #2ecc71; font-weight: 500;'>Cortex: Online (Synced)</span></div>".to_string())
 }
 
-async fn handle_sse_stream(State(state): State<AppState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+async fn handle_sse_stream(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let prompt_opt = state.pending_debate_prompt.lock().await.take();
     let prompt = prompt_opt.unwrap_or_else(|| "Erreur : Aucun prompt en attente.".to_string());
-    
+
     let session_id = state.current_chat_session.lock().await.clone();
     let prompt_for_save = prompt.clone();
 
     let (tx, rx) = tokio::sync::mpsc::channel(10);
     let agent_arc = state.agent.clone();
-    
+
     tokio::spawn(async move {
         let mut agent = agent_arc.lock().await;
         agent.set_provider("consensus");
         if let Err(e) = agent.run_debate(&prompt, tx.clone()).await {
-            let _ = tx.send(DebateEvent::SystemEvent(format!("[ERREUR CASTRATHROPHIC CORTEX]: {}", e))).await;
+            let _ = tx
+                .send(DebateEvent::SystemEvent(format!(
+                    "[ERREUR CASTRATHROPHIC CORTEX]: {}",
+                    e
+                )))
+                .await;
         }
     });
 
@@ -748,9 +961,9 @@ async fn handle_sse_stream(State(state): State<AppState>) -> Sse<impl tokio_stre
                 let parser = pulldown_cmark::Parser::new(&content);
                 let mut md_html = String::new();
                 pulldown_cmark::html::push_html(&mut md_html, parser);
-                
+
                 let (border_color, icon) = if author.contains("Gemini") { ("#10a37f", "🟢") } else { ("#f39c12", "🔵") };
-                
+
                 format!("<div style='border-left: 3px solid {}; padding-left: 12px; margin: 12px 0;'>\
                            <strong style='color: {};'>{} {} (Passe {}) :</strong>\
                            <div class='markdown-body' style='margin-top: 8px;'>{}</div>\
@@ -763,7 +976,7 @@ async fn handle_sse_stream(State(state): State<AppState>) -> Sse<impl tokio_stre
                     "consensus": "Debated & Verified",
                     "id": format!("paradox-multiapi-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis())
                 });
-                
+
                 // Dans le stream SSE (débat final), on recharge github_sources depuis la db s'ils existaient, ou on passe vide.
                 // Au moment du get initial, l'historique a ete charge.
                 let mut current_sources = Vec::new();
@@ -788,7 +1001,9 @@ async fn handle_sse_stream(State(state): State<AppState>) -> Sse<impl tokio_stre
     Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
 }
 
-async fn stream_system_logs(State(state): State<AppState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+async fn stream_system_logs(
+    State(state): State<AppState>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
     let mut rx = state.log_tx.subscribe();
     let s = stream! {
         while let Ok(msg) = rx.recv().await {
@@ -858,17 +1073,19 @@ async fn list_vampire_jobs() -> impl IntoResponse {
             "EN ATTENTE" => "#f39c12",
             "VAMPIRISÉ" => "#2ecc71",
             "ERREUR" => "#e74c3c",
-            _ => "#3498db"
+            _ => "#3498db",
         };
         let a_color = match job.assimilation_status.as_str() {
             "NON ASSIMILÉ" => "#888",
             "EN COURS" => "#f39c12",
             "ASSIMILÉ" => "#9b59b6",
             "ERREUR" => "#e74c3c",
-            _ => "#3498db"
+            _ => "#3498db",
         };
-        
-        let assimilate_btn = if job.vampire_status == "VAMPIRISÉ" && job.assimilation_status != "ASSIMILÉ" {
+
+        let assimilate_btn = if job.vampire_status == "VAMPIRISÉ"
+            && job.assimilation_status != "ASSIMILÉ"
+        {
             format!("<button id='btn-assimilate-{}' class='btn-sm' hx-post='/api/admin/assimilate/{}' hx-swap='outerHTML' style='background: rgba(155,89,182,0.1); color: #9b59b6; border: 1px solid rgba(155,89,182,0.3); padding: 4px 8px; border-radius: 4px; cursor: pointer; transition: 0.2s;' onclick=\"this.innerHTML='<span class=\\'pulse-dot\\' style=\\'display:inline-block;width:6px;height:6px;background:#9b59b6;border-radius:50%;margin-right:6px;\\'></span> Forgeant...'; this.style.opacity='0.7';\">⚡ Forger (RAG)</button>", job.id, job.id)
         } else {
             String::new()
@@ -912,7 +1129,9 @@ async fn add_vampire_job(Form(payload): Form<AddJobPayload>) -> impl IntoRespons
     list_vampire_jobs().await
 }
 
-async fn delete_vampire_job(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn delete_vampire_job(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     let mut queue = read_queue();
     queue.retain(|j| j.id != id);
     write_queue(&queue);
@@ -920,8 +1139,8 @@ async fn delete_vampire_job(axum::extract::Path(id): axum::extract::Path<String>
 }
 
 async fn start_vampire() -> impl IntoResponse {
-    use tokio::process::Command;
     use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
 
     tokio::spawn(async {
         let mut child = Command::new("cargo")
@@ -952,16 +1171,25 @@ async fn start_vampire() -> impl IntoResponse {
         let _ = tokio::join!(out_task, err_task);
         let _ = child.wait().await;
     });
-    
-    axum::response::Html("<div style='color: #2ecc71;'>🩸 Éveil du Vampire initié ! Télémétrie en attente...</div>")
+
+    axum::response::Html(
+        "<div style='color: #2ecc71;'>🩸 Éveil du Vampire initié ! Télémétrie en attente...</div>",
+    )
 }
 
 async fn execute_assimilation(mission_id_arg: Option<String>) -> bool {
-    use tokio::process::Command;
     use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
 
     let mut cmd = Command::new("cargo");
-    cmd.args(["run", "--release", "-p", "r2d2-cortex", "--bin", "assimilate_knowledge"]);
+    cmd.args([
+        "run",
+        "--release",
+        "-p",
+        "r2d2-cortex",
+        "--bin",
+        "assimilate_knowledge",
+    ]);
     if let Some(id) = &mission_id_arg {
         cmd.args(["--", "--mission", id]);
     }
@@ -1002,7 +1230,9 @@ async fn start_assimilation_all() -> impl IntoResponse {
     axum::response::Html("<div style='color: #2ecc71;'>🧠 Auto-Assimilation globale initiée ! Surveillance via console...</div>")
 }
 
-async fn start_assimilation_id(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn start_assimilation_id(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     // Marque en cours (optionnel, on attend la fin direct de tte facon)
     {
         let mut queue = read_queue();
@@ -1011,7 +1241,7 @@ async fn start_assimilation_id(axum::extract::Path(id): axum::extract::Path<Stri
             write_queue(&queue);
         }
     }
-    
+
     // Attente Synchrone du binaire (environ 5-15s en mode release deja packagé)
     let success = execute_assimilation(Some(id.clone())).await;
 
@@ -1021,7 +1251,7 @@ async fn start_assimilation_id(axum::extract::Path(id): axum::extract::Path<Stri
             job.assimilation_status = "ASSIMILÉ".to_string();
             write_queue(&queue);
         }
-        
+
         let success_html = format!("<button class='btn-sm' disabled style='background: rgba(46, 204, 113, 0.1); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); padding: 4px 8px; border-radius: 4px; cursor: default;'>✅ Forgé</button><script>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh'));</script>");
         axum::response::Html(success_html)
     } else {
@@ -1038,12 +1268,25 @@ struct KeyUpdateParams {
 
 async fn get_admin_keys() -> axum::response::Response {
     let keys = r2d2_cortex::security::vault::Vault::get_masked_keys();
-    let gemini_key = keys.get("GEMINI_API_KEY").map(|k| k.as_str()).unwrap_or("NON DÉFINIE");
-    let mistral_key = keys.get("MISTRAL_API_KEY").map(|k| k.as_str()).unwrap_or("NON DÉFINIE");
-    let github_key = keys.get("GITHUB_PERSONAL_ACCESS_TOKEN").map(|k| k.as_str()).unwrap_or("NON DÉFINIE");
-    let hf_key = keys.get("HF_TOKEN").map(|k| k.as_str()).unwrap_or("NON DÉFINIE");
-    
-    let keys_html = format!(r#"
+    let gemini_key = keys
+        .get("GEMINI_API_KEY")
+        .map(|k| k.as_str())
+        .unwrap_or("NON DÉFINIE");
+    let mistral_key = keys
+        .get("MISTRAL_API_KEY")
+        .map(|k| k.as_str())
+        .unwrap_or("NON DÉFINIE");
+    let github_key = keys
+        .get("GITHUB_PERSONAL_ACCESS_TOKEN")
+        .map(|k| k.as_str())
+        .unwrap_or("NON DÉFINIE");
+    let hf_key = keys
+        .get("HF_TOKEN")
+        .map(|k| k.as_str())
+        .unwrap_or("NON DÉFINIE");
+
+    let keys_html = format!(
+        r#"
         <div class="vault-keys" style="margin-bottom: 20px;">
             <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 8px;">
                 <strong style="color: #2ecc71;">GITHUB_PERSONAL_ACCESS_TOKEN</strong>
@@ -1062,8 +1305,10 @@ async fn get_admin_keys() -> axum::response::Response {
                 <span style="font-family: monospace; color: #888;">{}</span>
             </div>
         </div>
-    "#, github_key, gemini_key, mistral_key, hf_key);
-    
+    "#,
+        github_key, gemini_key, mistral_key, hf_key
+    );
+
     axum::response::Html(keys_html).into_response()
 }
 
@@ -1080,7 +1325,7 @@ struct AttachContextPayload {
 
 async fn attach_context(
     State(state): State<AppState>,
-    Form(payload): Form<AttachContextPayload>
+    Form(payload): Form<AttachContextPayload>,
 ) -> impl IntoResponse {
     let mode = payload.analyze_mode.as_str();
     let repo = payload.repo_url.trim();
@@ -1098,7 +1343,7 @@ async fn attach_context(
             provider: "github".to_string(),
         });
         write_queue(&queue);
-        
+
         // Persist local session Context
         let prefixed_repo = format!("github-async://{}", repo);
         chat_history::append_github_source(&session_id, &prefixed_repo);
@@ -1116,11 +1361,10 @@ async fn attach_context(
             id_val, repo, prefixed_repo, id_val, prefixed_repo
         );
         axum::response::Html(html_snippet)
-        
     } else {
         chat_history::append_github_source(&session_id, repo);
         let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
-        
+
         let html_snippet = format!(
             "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
                 <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
@@ -1143,7 +1387,7 @@ struct RemoveContextPayload {
 
 async fn remove_context(
     State(state): State<AppState>,
-    Form(payload): Form<RemoveContextPayload>
+    Form(payload): Form<RemoveContextPayload>,
 ) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
     chat_history::remove_github_source(&session_id, &payload.repo);

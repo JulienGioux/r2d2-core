@@ -1,11 +1,10 @@
-
 use async_trait::async_trait;
-use tracing::{info, warn, instrument};
 use std::time::Instant;
+use tracing::{info, instrument, warn};
 
 use crate::agent::{AgentError, CognitiveAgent};
-use crate::models::minilm_embedder::MiniLmEmbedderAgent;
 use crate::memory::SemanticMemory;
+use crate::models::minilm_embedder::MiniLmEmbedderAgent;
 use crate::security::vault::Vault;
 use reqwest::Client;
 use serde_json::json;
@@ -13,13 +12,19 @@ use serde_json::json;
 #[derive(Debug, Clone)]
 pub enum GeminiResponse {
     Text(String),
-    FunctionCall { name: String, args: serde_json::Value },
+    FunctionCall {
+        name: String,
+        args: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum AgenticControlFlow {
     Completed(String),
-    FunctionCallRequest { name: String, args: serde_json::Value },
+    FunctionCallRequest {
+        name: String,
+        args: serde_json::Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,7 +38,11 @@ pub enum ModelProvider {
 #[derive(Clone, Debug)]
 pub enum DebateEvent {
     SystemEvent(String),
-    Turn { iteration: u32, author: String, content: String },
+    Turn {
+        iteration: u32,
+        author: String,
+        content: String,
+    },
     FinalSynthesis(String),
 }
 
@@ -83,7 +92,7 @@ impl ReasoningAgent {
             mcp_client: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
-    
+
     pub fn memory_vectors_count(&self) -> usize {
         self.memory.as_ref().map(|m| m.len()).unwrap_or(0)
     }
@@ -105,24 +114,33 @@ impl ReasoningAgent {
         };
     }
 
-    pub async fn call_gemini(&self, system_prompt: &str, history: &[ChatMessage], inject_tools: bool) -> Result<GeminiResponse, AgentError> {
-        let api_key = Vault::get_api_key("GEMINI_API_KEY")
-            .ok_or_else(|| AgentError::InferenceError("Clef GEMINI_API_KEY non definie dans le Vault !".to_string()))?;
+    pub async fn call_gemini(
+        &self,
+        system_prompt: &str,
+        history: &[ChatMessage],
+        inject_tools: bool,
+    ) -> Result<GeminiResponse, AgentError> {
+        let api_key = Vault::get_api_key("GEMINI_API_KEY").ok_or_else(|| {
+            AgentError::InferenceError(
+                "Clef GEMINI_API_KEY non definie dans le Vault !".to_string(),
+            )
+        })?;
         let url = format!("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={}", api_key);
-        
+
         let mut contents = Vec::new();
         // Le system_prompt DOIT être géré via `system_instruction` dans l'API Gemini 1.5+
-        
+
         for msg in history.iter() {
             let role_str = match msg.role {
                 MessageRole::User | MessageRole::FunctionResult => "user",
                 MessageRole::Assistant | MessageRole::FunctionCall => "model",
             };
-            
+
             match msg.role {
                 MessageRole::FunctionCall => {
                     let fname = msg.function_name.as_deref().unwrap_or("unknown");
-                    let args_json: serde_json::Value = serde_json::from_str(&msg.text).unwrap_or(serde_json::json!({}));
+                    let args_json: serde_json::Value =
+                        serde_json::from_str(&msg.text).unwrap_or(serde_json::json!({}));
                     contents.push(json!({
                         "role": "model",
                         "parts": [{
@@ -132,33 +150,33 @@ impl ReasoningAgent {
                             }
                         }]
                     }));
-                },
+                }
                 MessageRole::FunctionResult => {
-                     let fname = msg.function_name.as_deref().unwrap_or("unknown");
-                     // Gemini can be picky, ensure response is an object.
-                     let mut response_obj = serde_json::json!({"result": &msg.text});
-                     // if msg.text is already json, try to parse it to object
-                     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg.text) {
-                         if parsed.is_object() {
-                             response_obj = parsed;
-                         }
-                     }
-                     contents.push(json!({ 
-                        "role": "user",
-                        "parts": [{
-                            "functionResponse": {
-                               "name": fname,
-                               "response": response_obj
-                            }
-                        }] 
-                     }));
-                },
+                    let fname = msg.function_name.as_deref().unwrap_or("unknown");
+                    // Gemini can be picky, ensure response is an object.
+                    let mut response_obj = serde_json::json!({"result": &msg.text});
+                    // if msg.text is already json, try to parse it to object
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&msg.text) {
+                        if parsed.is_object() {
+                            response_obj = parsed;
+                        }
+                    }
+                    contents.push(json!({
+                       "role": "user",
+                       "parts": [{
+                           "functionResponse": {
+                              "name": fname,
+                              "response": response_obj
+                           }
+                       }]
+                    }));
+                }
                 _ => {
-                     contents.push(json!({ "role": role_str, "parts": [{ "text": &msg.text }] }));
+                    contents.push(json!({ "role": role_str, "parts": [{ "text": &msg.text }] }));
                 }
             }
         }
-        
+
         let mut payload = json!({
             "systemInstruction": {
                 "parts": [{ "text": system_prompt }]
@@ -203,68 +221,124 @@ impl ReasoningAgent {
                 }
             ]);
         }
-        
+
         let client = self.http_client.as_ref().unwrap();
-        let res = client.post(&url).header("Content-Type", "application/json").json(&payload).send().await
-            .map_err(|e| AgentError::InferenceError(format!("Erreur HTTP: {}", e)))?;
-        if !res.status().is_success() {
-            return Err(AgentError::InferenceError(format!("Cloud API Reject: {}", res.text().await.unwrap_or_default())));
-        }
-        let json_body: serde_json::Value = res.json().await.unwrap();
-        
-        // Parsing Function Call OR Text
-        let parts = json_body["candidates"][0]["content"]["parts"]
-            .as_array()
-            .ok_or_else(|| AgentError::InferenceError("Format invalide: 'parts' est introuvable".to_string()))?;
-        
-        let mut full_text = String::new();
-        for part in parts {
-            // Un appel d'outil prioritaire
-            if let Some(fc) = part.get("functionCall") {
-                 if let Some(name) = fc["name"].as_str() {
-                     return Ok(GeminiResponse::FunctionCall {
-                         name: name.to_string(),
-                         args: fc["args"].clone()
-                     });
-                 }
-            }
-            if let Some(text_val) = part.get("text") {
-                if let Some(s) = text_val.as_str() {
-                    full_text.push_str(s);
+        let req_builder = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&payload);
+
+        let mut retries = 0;
+        let mut delay = std::time::Duration::from_millis(500);
+
+        loop {
+            // Pattern 'Zero-Dependency': On clone la requête reqwest non-consommée
+            let req_clone = req_builder.try_clone().ok_or_else(|| {
+                AgentError::InferenceError("Impossible de cloner la requête Gemini".into())
+            })?;
+
+            match req_clone.send().await {
+                Ok(res) => {
+                    let status = res.status();
+
+                    // Gestion "Zero-Dependency" : Retry sur Rate Limit (429) ou Erreur Serveur (5xx)
+                    if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    {
+                        if retries >= 4 {
+                            return Err(AgentError::InferenceError(format!(
+                                "Gemini API Timeout/RateLimit exhaust: {}",
+                                res.text().await.unwrap_or_default()
+                            )));
+                        }
+                    } else if !status.is_success() {
+                        return Err(AgentError::InferenceError(format!(
+                            "Cloud API Reject: {}",
+                            res.text().await.unwrap_or_default()
+                        )));
+                    } else {
+                        // Success parsing
+                        let json_body: serde_json::Value = res.json().await.unwrap();
+
+                        let parts = json_body["candidates"][0]["content"]["parts"]
+                            .as_array()
+                            .ok_or_else(|| {
+                                AgentError::InferenceError(
+                                    "Format invalide: 'parts' est introuvable".to_string(),
+                                )
+                            })?;
+
+                        let mut full_text = String::new();
+                        for part in parts {
+                            if let Some(fc) = part.get("functionCall") {
+                                if let Some(name) = fc["name"].as_str() {
+                                    return Ok(GeminiResponse::FunctionCall {
+                                        name: name.to_string(),
+                                        args: fc["args"].clone(),
+                                    });
+                                }
+                            }
+                            if let Some(text_val) = part.get("text") {
+                                if let Some(s) = text_val.as_str() {
+                                    full_text.push_str(s);
+                                }
+                            }
+                        }
+
+                        let clean_json = full_text
+                            .trim()
+                            .strip_prefix("```json")
+                            .unwrap_or(&full_text)
+                            .strip_suffix("```")
+                            .unwrap_or(&full_text)
+                            .trim();
+                        return Ok(GeminiResponse::Text(clean_json.to_string()));
+                    }
+                }
+                Err(e) => {
+                    let is_ephemeral = e.is_timeout() || e.is_connect();
+                    if !is_ephemeral || retries >= 4 {
+                        return Err(AgentError::InferenceError(format!("Erreur HTTP: {}", e)));
+                    }
+                    warn!("Réseau Gemini éphémère ({}). Retry {}/4", e, retries + 1);
                 }
             }
+
+            tokio::time::sleep(delay).await;
+            retries += 1;
+            delay *= 2;
         }
-        
-        let clean_json = full_text.trim().strip_prefix("```json").unwrap_or(&full_text).strip_suffix("```").unwrap_or(&full_text).trim();
-        Ok(GeminiResponse::Text(clean_json.to_string()))
     }
 
-    pub async fn call_openai_compatible(&self, system_prompt: &str, history: &[ChatMessage]) -> Result<String, AgentError> {
+    pub async fn call_openai_compatible(
+        &self,
+        system_prompt: &str,
+        history: &[ChatMessage],
+    ) -> Result<String, AgentError> {
         let api_key = Vault::get_api_key("UNIVERSAL_API_KEY").unwrap_or_else(|| "".to_string());
         let mut url = Vault::get_api_key("UNIVERSAL_API_BASE")
             .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
-        
+
         // Ensure /chat/completions suffix
         if !url.ends_with("/chat/completions") {
-             if url.ends_with("/") {
-                 url.push_str("chat/completions");
-             } else {
-                 url.push_str("/chat/completions");
-             }
+            if url.ends_with("/") {
+                url.push_str("chat/completions");
+            } else {
+                url.push_str("/chat/completions");
+            }
         }
-        
+
         let mut openai_msgs = vec![json!({ "role": "system", "content": system_prompt })];
         for msg in history {
             match msg.role {
                 MessageRole::User => {
                     openai_msgs.push(json!({ "role": "user", "content": &msg.text }));
-                },
+                }
                 MessageRole::Assistant => {
                     openai_msgs.push(json!({ "role": "assistant", "content": &msg.text }));
-                },
+                }
                 MessageRole::FunctionResult => {
                     openai_msgs.push(json!({ "role": "user", "content": format!("Function result for {}: {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
-                },
+                }
                 MessageRole::FunctionCall => {
                     openai_msgs.push(json!({ "role": "assistant", "content": format!("Called function {} with {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
                 }
@@ -279,46 +353,111 @@ impl ReasoningAgent {
             "messages": openai_msgs,
             "temperature": 0.4
         });
-        
+
         let client = self.http_client.as_ref().unwrap();
-        let mut req = client.post(&url).header("Content-Type", "application/json");
-        
+        let mut req_builder = client.post(&url).header("Content-Type", "application/json");
+
         if !api_key.is_empty() && api_key != "NO_KEY" {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", api_key));
         }
-        
-        let res = req.json(&payload).send().await
-            .map_err(|e| AgentError::InferenceError(format!("Erreur HTTP OpenAI-Compatible: {}", e)))?;
-            
-        if !res.status().is_success() {
-            return Err(AgentError::InferenceError(format!("OpenAI-Compatible API Reject: {} (URL: {})", res.text().await.unwrap_or_default(), url)));
+        req_builder = req_builder.json(&payload);
+
+        let mut retries = 0;
+        let mut delay = std::time::Duration::from_millis(500);
+
+        loop {
+            let req_clone = req_builder.try_clone().ok_or_else(|| {
+                AgentError::InferenceError("Impossible de cloner la requete OpenAI".into())
+            })?;
+
+            match req_clone.send().await {
+                Ok(res) => {
+                    let status = res.status();
+                    if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                    {
+                        if retries >= 4 {
+                            return Err(AgentError::InferenceError(format!(
+                                "OpenAI-Compatible API Timeouts/Rate Limits exhausted: {} (URL: {})",
+                                res.text().await.unwrap_or_default(),
+                                url
+                            )));
+                        }
+                    } else if !status.is_success() {
+                        return Err(AgentError::InferenceError(format!(
+                            "OpenAI-Compatible API Reject: {} (URL: {})",
+                            res.text().await.unwrap_or_default(),
+                            url
+                        )));
+                    } else {
+                        let json_body: serde_json::Value = res.json().await.unwrap();
+                        let text = json_body["choices"][0]["message"]["content"]
+                            .as_str()
+                            .unwrap_or("")
+                            .to_string();
+
+                        let clean_json = text
+                            .trim()
+                            .strip_prefix("```json")
+                            .unwrap_or(&text)
+                            .strip_suffix("```")
+                            .unwrap_or(&text)
+                            .trim();
+                        return Ok(clean_json.to_string());
+                    }
+                }
+                Err(e) => {
+                    let is_ephemeral = e.is_timeout() || e.is_connect();
+                    if !is_ephemeral || retries >= 4 {
+                        return Err(AgentError::InferenceError(format!(
+                            "Erreur HTTP OpenAI-Compatible: {}",
+                            e
+                        )));
+                    }
+                    warn!("Réseau Universal éphémère ({}). Retry {}/4", e, retries + 1);
+                }
+            }
+
+            tokio::time::sleep(delay).await;
+            retries += 1;
+            delay *= 2;
         }
-        
-        let json_body: serde_json::Value = res.json().await.unwrap();
-        let text = json_body["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string();
-        
-        let clean_json = text.trim().strip_prefix("```json").unwrap_or(&text).strip_suffix("```").unwrap_or(&text).trim();
-        Ok(clean_json.to_string())
     }
 
     pub async fn run_crucible_distillation(&mut self, prompt: &str) -> Result<String, AgentError> {
         let system_prompt = "Tu es R2D2, l'Architecte de rang mondial. Raisonne de manière critique, exhaustive, avec un Chain-of-Thought explicite.";
         info!("🔥 [CRUCIBLE] Ingestion de la seed: {}", prompt);
-        
+
         let mut iteration = 1;
-        let mut gemini_history = vec![ChatMessage { role: MessageRole::User, text: format!("Résous ce problème fondamental, étape par étape avec explication détaillée :\n{}", prompt), function_name: None }];
-        
+        let mut gemini_history = vec![ChatMessage {
+            role: MessageRole::User,
+            text: format!(
+                "Résous ce problème fondamental, étape par étape avec explication détaillée :\n{}",
+                prompt
+            ),
+            function_name: None,
+        }];
+
         info!("🔥 [CRUCIBLE] Passe 1 : Génération initiale par Gemma 3 27B...");
-        let v1_text_res = self.call_gemini(system_prompt, &gemini_history, false).await?;
+        let v1_text_res = self
+            .call_gemini(system_prompt, &gemini_history, false)
+            .await?;
         let v1_text = match v1_text_res {
             GeminiResponse::Text(t) => t,
-            _ => return Err(AgentError::InferenceError("Crucible doesn't support tools".to_string())),
+            _ => {
+                return Err(AgentError::InferenceError(
+                    "Crucible doesn't support tools".to_string(),
+                ))
+            }
         };
-        gemini_history.push(ChatMessage { role: MessageRole::Assistant, text: v1_text.clone(), function_name: None });
+        gemini_history.push(ChatMessage {
+            role: MessageRole::Assistant,
+            text: v1_text.clone(),
+            function_name: None,
+        });
         let mut current_version = v1_text;
-        
-        let mut mistral_history = vec![ChatMessage { 
-            role: MessageRole::User, 
+
+        let mut mistral_history = vec![ChatMessage {
+            role: MessageRole::User,
             text: format!("L'utilisateur a demandé : {}\nLe Modèle A a proposé ceci :\n{}\n\nTu es l'Avocat du Diable (Red Teamer). Ton unique but est de déconstruire cette argumentation et de trouver la faille ou le manque d'exhaustivité industrielle. Si tu trouves une faille, démontre-la implacablement. Si la réponse est LITTÉRALEMENT un état de l'art mondial insurpassable, réponds strictement 'ACCORD_ATTEINT'.", prompt, current_version),
             function_name: None
         }];
@@ -327,17 +466,32 @@ impl ReasoningAgent {
             info!("⏳ [CRUCIBLE] Waiting 15s (Mistral Quota)...");
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
-            info!("🔥 [CRUCIBLE] Passe {} : Avocat du Diable Red Teaming en cours...", iteration);
-            let mistral_critique = self.call_openai_compatible(system_prompt, &mistral_history).await?;
-            
+            info!(
+                "🔥 [CRUCIBLE] Passe {} : Avocat du Diable Red Teaming en cours...",
+                iteration
+            );
+            let mistral_critique = self
+                .call_openai_compatible(system_prompt, &mistral_history)
+                .await?;
+
             if mistral_critique.contains("ACCORD_ATTEINT") {
-                info!("✅ [CRUCIBLE] Consensus Parfait atteint à l'itération {} !", iteration);
+                info!(
+                    "✅ [CRUCIBLE] Consensus Parfait atteint à l'itération {} !",
+                    iteration
+                );
                 break;
             }
 
-            info!("⚔️ [CRUCIBLE] Critique : {}...", &mistral_critique.chars().take(150).collect::<String>());
-            mistral_history.push(ChatMessage { role: MessageRole::Assistant, text: mistral_critique.clone(), function_name: None });
-            
+            info!(
+                "⚔️ [CRUCIBLE] Critique : {}...",
+                &mistral_critique.chars().take(150).collect::<String>()
+            );
+            mistral_history.push(ChatMessage {
+                role: MessageRole::Assistant,
+                text: mistral_critique.clone(),
+                function_name: None,
+            });
+
             info!("⏳ [CRUCIBLE] Waiting 15s (Gemma Quota)...");
             tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
 
@@ -347,19 +501,35 @@ impl ReasoningAgent {
                 function_name: None
             });
 
-            info!("🔥 [CRUCIBLE] Passe {} : Gemma 3 27B révise et consolide...", iteration + 1);
-            let gemini_defense_res = self.call_gemini(system_prompt, &gemini_history, false).await?;
+            info!(
+                "🔥 [CRUCIBLE] Passe {} : Gemma 3 27B révise et consolide...",
+                iteration + 1
+            );
+            let gemini_defense_res = self
+                .call_gemini(system_prompt, &gemini_history, false)
+                .await?;
             let gemini_defense = match gemini_defense_res {
                 GeminiResponse::Text(t) => t,
-                _ => return Err(AgentError::InferenceError("Crucible doesn't support tools".to_string())),
+                _ => {
+                    return Err(AgentError::InferenceError(
+                        "Crucible doesn't support tools".to_string(),
+                    ))
+                }
             };
-            
+
             if gemini_defense.contains("ACCORD_ATTEINT") {
-                info!("✅ [CRUCIBLE] Gemma confirme l'état de l'art à l'itération {} !", iteration);
+                info!(
+                    "✅ [CRUCIBLE] Gemma confirme l'état de l'art à l'itération {} !",
+                    iteration
+                );
                 break;
             }
 
-            gemini_history.push(ChatMessage { role: MessageRole::Assistant, text: gemini_defense.clone(), function_name: None });
+            gemini_history.push(ChatMessage {
+                role: MessageRole::Assistant,
+                text: gemini_defense.clone(),
+                function_name: None,
+            });
             current_version = gemini_defense;
 
             mistral_history.push(ChatMessage {
@@ -374,12 +544,24 @@ impl ReasoningAgent {
         Ok(current_version)
     }
 
-    pub async fn run_debate(&mut self, prompt: &str, tx: tokio::sync::mpsc::Sender<DebateEvent>) -> Result<(), AgentError> {
-        let _ = tx.send(DebateEvent::SystemEvent("Démarrage du processus de Débat (Consensus Itératif)...".to_string())).await;
-        
+    pub async fn run_debate(
+        &mut self,
+        prompt: &str,
+        tx: tokio::sync::mpsc::Sender<DebateEvent>,
+    ) -> Result<(), AgentError> {
+        let _ = tx
+            .send(DebateEvent::SystemEvent(
+                "Démarrage du processus de Débat (Consensus Itératif)...".to_string(),
+            ))
+            .await;
+
         let mut context_blocks = Vec::new();
         if let (Some(embedder), Some(mem)) = (&mut self.embedder, &self.memory) {
-            let _ = tx.send(DebateEvent::SystemEvent("Extraction de la mémoire vectorielle interne (RAG)...".to_string())).await;
+            let _ = tx
+                .send(DebateEvent::SystemEvent(
+                    "Extraction de la mémoire vectorielle interne (RAG)...".to_string(),
+                ))
+                .await;
             if let Ok(vec_f32) = embedder.embed_raw(prompt, true).await {
                 if let Ok(results) = mem.search(&vec_f32, 3) {
                     for res in results.iter() {
@@ -412,19 +594,40 @@ impl ReasoningAgent {
 
         let mut iteration = 1;
         let mut gemini_history = vec![ChatMessage { role: MessageRole::User, text: format!("L'utilisateur demande : {}\nRésous ce problème de manière exhaustive, avec du code Rust/Architecture si nécessaire.", prompt), function_name: None }];
-        
-        let _ = tx.send(DebateEvent::SystemEvent("Passe 1 : L'Architecte Principal formule la solution...".to_string())).await;
-        
-        let v1_text = match self.call_gemini(&system_prompt, &gemini_history, false).await? {
+
+        let _ = tx
+            .send(DebateEvent::SystemEvent(
+                "Passe 1 : L'Architecte Principal formule la solution...".to_string(),
+            ))
+            .await;
+
+        let v1_text = match self
+            .call_gemini(&system_prompt, &gemini_history, false)
+            .await?
+        {
             GeminiResponse::Text(t) => t,
-            _ => return Err(AgentError::InferenceError("Debate Mode doesn't support tools yet".to_string())),
+            _ => {
+                return Err(AgentError::InferenceError(
+                    "Debate Mode doesn't support tools yet".to_string(),
+                ))
+            }
         };
-        
-        let _ = tx.send(DebateEvent::Turn { iteration, author: "Gemini 2.5 Pro".to_string(), content: v1_text.clone() }).await;
-        
-        gemini_history.push(ChatMessage { role: MessageRole::Assistant, text: v1_text.clone(), function_name: None });
+
+        let _ = tx
+            .send(DebateEvent::Turn {
+                iteration,
+                author: "Gemini 2.5 Pro".to_string(),
+                content: v1_text.clone(),
+            })
+            .await;
+
+        gemini_history.push(ChatMessage {
+            role: MessageRole::Assistant,
+            text: v1_text.clone(),
+            function_name: None,
+        });
         let mut current_version = v1_text;
-        
+
         let mut mistral_history = vec![];
 
         while iteration <= 4 {
@@ -449,23 +652,57 @@ impl ReasoningAgent {
                     current_version, iteration
                 )
             };
-            mistral_history.push(ChatMessage { role: MessageRole::User, text: mistral_instruction, function_name: None });
+            mistral_history.push(ChatMessage {
+                role: MessageRole::User,
+                text: mistral_instruction,
+                function_name: None,
+            });
 
-            let _ = tx.send(DebateEvent::SystemEvent("Throttling API : 12s d'attente imposée pour préserver le quota Mistral...".to_string())).await;
+            let _ = tx
+                .send(DebateEvent::SystemEvent(
+                    "Throttling API : 12s d'attente imposée pour préserver le quota Mistral..."
+                        .to_string(),
+                ))
+                .await;
             tokio::time::sleep(tokio::time::Duration::from_secs(12)).await;
 
-            let _ = tx.send(DebateEvent::SystemEvent(format!("Passe {} : L'Avocat Critique structure son propos...", iteration))).await;
-            let mistral_critique = self.call_openai_compatible(&system_prompt, &mistral_history).await?;
-            
+            let _ = tx
+                .send(DebateEvent::SystemEvent(format!(
+                    "Passe {} : L'Avocat Critique structure son propos...",
+                    iteration
+                )))
+                .await;
+            let mistral_critique = self
+                .call_openai_compatible(&system_prompt, &mistral_history)
+                .await?;
+
             if iteration >= 3 && mistral_critique.contains("ACCORD_ATTEINT") {
-                let _ = tx.send(DebateEvent::SystemEvent("✅ Consensus Actif validé par l'Avocat Critique !".to_string())).await;
+                let _ = tx
+                    .send(DebateEvent::SystemEvent(
+                        "✅ Consensus Actif validé par l'Avocat Critique !".to_string(),
+                    ))
+                    .await;
                 break;
             }
 
-            let _ = tx.send(DebateEvent::Turn { iteration, author: "Agent Critique (Universal Gateway)".to_string(), content: mistral_critique.clone() }).await;
-            mistral_history.push(ChatMessage { role: MessageRole::Assistant, text: mistral_critique.clone(), function_name: None });
-            
-            let _ = tx.send(DebateEvent::SystemEvent("Throttling API : 12s d'attente imposée avant inférence Gemma...".to_string())).await;
+            let _ = tx
+                .send(DebateEvent::Turn {
+                    iteration,
+                    author: "Agent Critique (Universal Gateway)".to_string(),
+                    content: mistral_critique.clone(),
+                })
+                .await;
+            mistral_history.push(ChatMessage {
+                role: MessageRole::Assistant,
+                text: mistral_critique.clone(),
+                function_name: None,
+            });
+
+            let _ = tx
+                .send(DebateEvent::SystemEvent(
+                    "Throttling API : 12s d'attente imposée avant inférence Gemma...".to_string(),
+                ))
+                .await;
             tokio::time::sleep(tokio::time::Duration::from_secs(12)).await;
 
             let gemini_instruction = if iteration < 3 {
@@ -481,21 +718,51 @@ impl ReasoningAgent {
                     mistral_critique, iteration + 1
                 )
             };
-            gemini_history.push(ChatMessage { role: MessageRole::User, text: gemini_instruction, function_name: None });
+            gemini_history.push(ChatMessage {
+                role: MessageRole::User,
+                text: gemini_instruction,
+                function_name: None,
+            });
 
-            let _ = tx.send(DebateEvent::SystemEvent(format!("Passe {} : Gemma 3 27B corrige l'architecture...", iteration + 1))).await;
-            let gemini_defense = match self.call_gemini(&system_prompt, &gemini_history, false).await? {
-                 GeminiResponse::Text(t) => t,
-                 _ => return Err(AgentError::InferenceError("Debate doesn't support tools".to_string())),
+            let _ = tx
+                .send(DebateEvent::SystemEvent(format!(
+                    "Passe {} : Gemma 3 27B corrige l'architecture...",
+                    iteration + 1
+                )))
+                .await;
+            let gemini_defense = match self
+                .call_gemini(&system_prompt, &gemini_history, false)
+                .await?
+            {
+                GeminiResponse::Text(t) => t,
+                _ => {
+                    return Err(AgentError::InferenceError(
+                        "Debate doesn't support tools".to_string(),
+                    ))
+                }
             };
-            
+
             if iteration >= 3 && gemini_defense.contains("ACCORD_ATTEINT") {
-                let _ = tx.send(DebateEvent::SystemEvent("✅ Consensus Actif validé par Gemma !".to_string())).await;
+                let _ = tx
+                    .send(DebateEvent::SystemEvent(
+                        "✅ Consensus Actif validé par Gemma !".to_string(),
+                    ))
+                    .await;
                 break;
             }
 
-            let _ = tx.send(DebateEvent::Turn { iteration: iteration + 1, author: "Gemma 3 27B (V2)".to_string(), content: gemini_defense.clone() }).await;
-            gemini_history.push(ChatMessage { role: MessageRole::Assistant, text: gemini_defense.clone(), function_name: None });
+            let _ = tx
+                .send(DebateEvent::Turn {
+                    iteration: iteration + 1,
+                    author: "Gemma 3 27B (V2)".to_string(),
+                    content: gemini_defense.clone(),
+                })
+                .await;
+            gemini_history.push(ChatMessage {
+                role: MessageRole::Assistant,
+                text: gemini_defense.clone(),
+                function_name: None,
+            });
             current_version = gemini_defense;
 
             iteration += 1;
@@ -505,7 +772,13 @@ impl ReasoningAgent {
         Ok(())
     }
 
-    pub async fn generate_thought_agentic(&mut self, prompt: &str, github_sources: &[String], is_tool_response: bool, tool_name: &str) -> Result<AgenticControlFlow, AgentError> {
+    pub async fn generate_thought_agentic(
+        &mut self,
+        prompt: &str,
+        github_sources: &[String],
+        is_tool_response: bool,
+        tool_name: &str,
+    ) -> Result<AgenticControlFlow, AgentError> {
         if !self.is_active() || self.http_client.is_none() {
             return Err(AgentError::NotActive);
         }
@@ -520,7 +793,11 @@ impl ReasoningAgent {
             if let Ok(vec_f32) = embedder.embed_raw(prompt, true).await {
                 if let Ok(results) = mem.search(&vec_f32, 3) {
                     for (i, res) in results.iter().enumerate() {
-                        info!("   [RAG] Recall Match {}: {}...", i, &res.chars().take(60).collect::<String>());
+                        info!(
+                            "   [RAG] Recall Match {}: {}...",
+                            i,
+                            &res.chars().take(60).collect::<String>()
+                        );
                         context_blocks.push(res.clone());
                     }
                 }
@@ -559,36 +836,62 @@ impl ReasoningAgent {
         );
 
         if !prompt.trim().is_empty() {
-             if is_tool_response {
-                 self.history.push(ChatMessage { role: MessageRole::FunctionResult, text: prompt.to_string(), function_name: Some(tool_name.to_string()) });
-             } else {
-                 self.history.push(ChatMessage { role: MessageRole::User, text: prompt.to_string(), function_name: None });
-             }
+            if is_tool_response {
+                self.history.push(ChatMessage {
+                    role: MessageRole::FunctionResult,
+                    text: prompt.to_string(),
+                    function_name: Some(tool_name.to_string()),
+                });
+            } else {
+                self.history.push(ChatMessage {
+                    role: MessageRole::User,
+                    text: prompt.to_string(),
+                    function_name: None,
+                });
+            }
         }
 
         // 3. Routage API Multi-Provider Intégrant l'Historique
         let (node_name, consensus_type, final_text) = match self.provider {
             ModelProvider::GeminiFlash => {
                 let has_tools = !github_sources.is_empty();
-                match self.call_gemini(&system_prompt, &self.history, has_tools).await? {
+                match self
+                    .call_gemini(&system_prompt, &self.history, has_tools)
+                    .await?
+                {
                     GeminiResponse::FunctionCall { name, args } => {
-                       self.history.push(ChatMessage { role: MessageRole::FunctionCall, text: serde_json::to_string(&args).unwrap_or_default(), function_name: Some(name.clone()) });
-                       // Delegation à Maint
-                       return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
-                    },
-                    GeminiResponse::Text(t) => {
-                        ("Gemini 2.5 Flash Cloud Node".to_string(), "CloudDistillation", t)
+                        self.history.push(ChatMessage {
+                            role: MessageRole::FunctionCall,
+                            text: serde_json::to_string(&args).unwrap_or_default(),
+                            function_name: Some(name.clone()),
+                        });
+                        // Delegation à Maint
+                        return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
                     }
+                    GeminiResponse::Text(t) => (
+                        "Gemini 2.5 Flash Cloud Node".to_string(),
+                        "CloudDistillation",
+                        t,
+                    ),
                 }
-            },
+            }
             ModelProvider::OpenAICompatible => {
-                let text = self.call_openai_compatible(&system_prompt, &self.history).await?;
-                let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME").unwrap_or_else(|| "Unknown".to_string());
-                (format!("Universal Node ({})", model_name), "UniversalSynthesis", text)
-            },
-            ModelProvider::Consensus => {
-                ("Consensus Loop".to_string(), "Debate SSE", "Ceci est un signal SSE, cette trace ne devrait pas apparaitre.".to_string())
-            },
+                let text = self
+                    .call_openai_compatible(&system_prompt, &self.history)
+                    .await?;
+                let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (
+                    format!("Universal Node ({})", model_name),
+                    "UniversalSynthesis",
+                    text,
+                )
+            }
+            ModelProvider::Consensus => (
+                "Consensus Loop".to_string(),
+                "Debate SSE",
+                "Ceci est un signal SSE, cette trace ne devrait pas apparaitre.".to_string(),
+            ),
             ModelProvider::ParadoxLocal => {
                 let text = format!("**[MOCK LOCAL]** Chef, la Brique VII 'ParadoxEngine 1.58b' Bare-Metal nécessite des poids GGUF pour inférer. Pour l'heure, ceci est un échafaudage d'attente zero-dependency.\n\nMemoire Recall: {} ...", context);
                 ("ParadoxLocal (Mock)".to_string(), "MockSynthesis", text)
@@ -596,7 +899,11 @@ impl ReasoningAgent {
         };
 
         // Ajout du retour modèle à l'historique
-        self.history.push(ChatMessage { role: MessageRole::Assistant, text: final_text.clone(), function_name: None });
+        self.history.push(ChatMessage {
+            role: MessageRole::Assistant,
+            text: final_text.clone(),
+            function_name: None,
+        });
 
         // Capping de l'historique contextuel à 20 messages (10 itérations) pour éviter le Flood VRAM
         if self.history.len() > 30 {
@@ -640,12 +947,12 @@ impl CognitiveAgent for ReasoningAgent {
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
         info!("🔌 [ReasoningAgent] Booting ParadoxEngine (Cloud API Router Mode)...");
-        
+
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()
             .map_err(|e| AgentError::LoadError(format!("Reqwest build failed: {}", e)))?;
-            
+
         self.http_client = Some(client);
 
         // Brique VIII : Chargement de la Mémoire Sémantique Zéro-Copy et de son Embedder
@@ -663,12 +970,15 @@ impl CognitiveAgent for ReasoningAgent {
                 self.memory = Some(mem);
             }
             Err(e) => {
-                warn!("   [CORTEX] No local knowledge base found ({}). Proceeding with empty memory.", e);
+                warn!(
+                    "   [CORTEX] No local knowledge base found ({}). Proceeding with empty memory.",
+                    e
+                );
             }
         }
 
         self.active = true;
-        
+
         info!("✅ [ReasoningAgent] ParadoxEngine is UP and Air-Gapped.");
         Ok(())
     }
@@ -686,10 +996,14 @@ impl CognitiveAgent for ReasoningAgent {
 
     #[instrument(skip_all, name = "ReasoningAgent::generate_thought")]
     async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
-        let flow = self.generate_thought_agentic(prompt, &[], false, "").await?;
+        let flow = self
+            .generate_thought_agentic(prompt, &[], false, "")
+            .await?;
         match flow {
             crate::models::reasoning_agent::AgenticControlFlow::Completed(jsonai) => Ok(jsonai),
-            _ => Err(AgentError::InferenceError("Function calls not supported in synchronous interface".into())),
+            _ => Err(AgentError::InferenceError(
+                "Function calls not supported in synchronous interface".into(),
+            )),
         }
     }
 }

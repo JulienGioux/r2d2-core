@@ -22,8 +22,9 @@ tokio = { version = "1.0", features = ["full", "time"] }
 # Observation & Error Handling
 tracing = "0.1"
 tracing-subscriber = "0.3"
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+sysinfo = "0.33"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

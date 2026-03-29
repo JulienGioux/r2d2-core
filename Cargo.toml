@@ -30,3 +30,7 @@ lto = "fat"         # Enable Link-Time Optimization (Fat for max perf)
 codegen-units = 1   # Reduce parallel code generation units to increase optimization
 panic = "abort"     # Abort on panic to reduce binary size and avoid stack unwinding leaks
 strip = true        # Strip symbols from binary to reduce size
+
+[workspace.dependencies]
+thiserror = "2.0.18"
+anyhow = "1.0.102"
