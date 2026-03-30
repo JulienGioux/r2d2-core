@@ -11,7 +11,7 @@ members = [
     "r2d2-inference-cpu",
     "r2d2-circadian",
     "r2d2-sensory",
-    "r2d2-chunker", "r2d2-ui",
+    "r2d2-chunker", "r2d2-ui", "r2d2-tokenizer",
 ]
 resolver = "2"
 
