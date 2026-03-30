@@ -1,4 +1,5 @@
 use crate::bitlinear::BitLinear;
+use crate::weights::WeightProvider;
 use candle_core::{Module, Result, Tensor};
 use tracing::instrument;
 
@@ -6,14 +7,14 @@ use tracing::instrument;
 ///
 /// Topologie SwiGLU (type Llama 2/3) propulsée intégralement par la
 /// couche `BitLinear` ternaire `{-1, 0, 1}`.
-pub struct BitFFN {
-    gate_proj: BitLinear,
-    up_proj: BitLinear,
-    down_proj: BitLinear,
+pub struct BitFFN<W: WeightProvider> {
+    gate_proj: BitLinear<W>,
+    up_proj: BitLinear<W>,
+    down_proj: BitLinear<W>,
 }
 
-impl BitFFN {
-    pub fn new(gate_proj: BitLinear, up_proj: BitLinear, down_proj: BitLinear) -> Self {
+impl<W: WeightProvider> BitFFN<W> {
+    pub fn new(gate_proj: BitLinear<W>, up_proj: BitLinear<W>, down_proj: BitLinear<W>) -> Self {
         Self {
             gate_proj,
             up_proj,
@@ -22,7 +23,11 @@ impl BitFFN {
     }
 }
 
-impl Module for BitFFN {
+impl<W> Module for BitFFN<W>
+where
+    W: WeightProvider,
+    BitLinear<W>: Module,
+{
     /// Pipelining de la propagation Llama SwiGLU
     #[instrument(skip_all, name = "BitFFN::forward")]
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {

@@ -1,4 +1,5 @@
 use crate::bitlinear::BitLinear;
+use crate::weights::WeightProvider;
 use candle_core::{Module, Result, Tensor};
 use tracing::instrument;
 
@@ -7,23 +8,23 @@ use tracing::instrument;
 /// Implémente le mécanisme d'Attention Multi-Tête de R2D2.
 /// L'innovation de Phase 5 : toutes les projections (Query, Key, Value, et Output)
 /// sont assurées par des couches `BitLinear` (Ternaires).
-pub struct BitSelfAttention {
+pub struct BitSelfAttention<W: WeightProvider> {
     pub num_heads: usize,
     pub head_dim: usize,
-    pub q_proj: BitLinear,
-    pub k_proj: BitLinear,
-    pub v_proj: BitLinear,
-    pub o_proj: BitLinear,
+    pub q_proj: BitLinear<W>,
+    pub k_proj: BitLinear<W>,
+    pub v_proj: BitLinear<W>,
+    pub o_proj: BitLinear<W>,
 }
 
-impl BitSelfAttention {
+impl<W: WeightProvider> BitSelfAttention<W> {
     pub fn new(
         num_heads: usize,
         head_dim: usize,
-        q_proj: BitLinear,
-        k_proj: BitLinear,
-        v_proj: BitLinear,
-        o_proj: BitLinear,
+        q_proj: BitLinear<W>,
+        k_proj: BitLinear<W>,
+        v_proj: BitLinear<W>,
+        o_proj: BitLinear<W>,
     ) -> Self {
         Self {
             num_heads,
@@ -36,7 +37,11 @@ impl BitSelfAttention {
     }
 }
 
-impl Module for BitSelfAttention {
+impl<W> Module for BitSelfAttention<W>
+where
+    W: WeightProvider,
+    BitLinear<W>: Module,
+{
     #[instrument(skip_all, name = "BitSelfAttention::forward")]
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         let (batch, seq_len, in_dim) = xs.dims3()?;
@@ -57,9 +62,6 @@ impl Module for BitSelfAttention {
         let v = v
             .reshape((batch, seq_len, self.num_heads, self.head_dim))?
             .transpose(1, 2)?;
-
-        // Note: L'intégration des Rotary Position Embeddings (RoPE)
-        // s'intercalera ici avant le calcul du scaling.
 
         let scale = 1f64 / f64::sqrt(self.head_dim as f64);
 

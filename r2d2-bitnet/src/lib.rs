@@ -7,9 +7,11 @@ pub mod rmsnorm;
 pub mod ternary;
 pub mod training;
 pub mod transformer;
+pub mod weights;
 
 pub use attention::BitSelfAttention;
 pub use bitlinear::BitLinear;
+pub use weights::{InferenceWeights, TrainingWeights, WeightProvider};
 pub use ffn::BitFFN;
 pub use model::{BitNetConfig, BitNetModel};
 pub use quantization::{absmax_quantize_activations, absmean_quantize_weights};

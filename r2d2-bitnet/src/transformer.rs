@@ -1,6 +1,8 @@
 use crate::attention::BitSelfAttention;
 use crate::ffn::BitFFN;
 use crate::rmsnorm::RmsNorm;
+use crate::weights::WeightProvider;
+use crate::bitlinear::BitLinear;
 use candle_core::{Module, Result, Tensor};
 use tracing::instrument;
 
@@ -9,19 +11,19 @@ use tracing::instrument;
 /// Le bloc de construction unitaire du modèle R2D2-BitNet.
 /// Il orchestre Pre-Norm -> BitAttention -> Pre-Norm -> BitFFN
 /// avec connexions résiduelles (Residual Connections).
-pub struct BitTransformerBlock {
+pub struct BitTransformerBlock<W: WeightProvider> {
     pub attention_norm: RmsNorm,
-    pub attention: BitSelfAttention,
+    pub attention: BitSelfAttention<W>,
     pub ffn_norm: RmsNorm,
-    pub ffn: BitFFN,
+    pub ffn: BitFFN<W>,
 }
 
-impl BitTransformerBlock {
+impl<W: WeightProvider> BitTransformerBlock<W> {
     pub fn new(
         attention_norm: RmsNorm,
-        attention: BitSelfAttention,
+        attention: BitSelfAttention<W>,
         ffn_norm: RmsNorm,
-        ffn: BitFFN,
+        ffn: BitFFN<W>,
     ) -> Self {
         Self {
             attention_norm,
@@ -32,7 +34,11 @@ impl BitTransformerBlock {
     }
 }
 
-impl Module for BitTransformerBlock {
+impl<W> Module for BitTransformerBlock<W>
+where
+    W: WeightProvider,
+    BitLinear<W>: Module,
+{
     #[instrument(skip_all, name = "BitTransformerBlock::forward")]
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         // Chemin 1: Self-Attention
