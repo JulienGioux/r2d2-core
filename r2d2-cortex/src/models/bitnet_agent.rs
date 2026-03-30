@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
 use r2d2_bitnet::model::{BitNetConfig, BitNetModel};
+use r2d2_bitnet::InferenceWeights;
 use tracing::{info, instrument};
 
 /// Agent IA Natif : R2D2-BitNet (1.58-bit)
@@ -13,7 +14,7 @@ use tracing::{info, instrument};
 pub struct BitNetAgent {
     name: String,
     device: Device,
-    model: Option<BitNetModel>,
+    model: Option<BitNetModel<InferenceWeights>>,
 }
 
 impl BitNetAgent {
@@ -83,7 +84,7 @@ impl CognitiveAgent for BitNetAgent {
             }
         };
 
-        let model = BitNetModel::new(vb, &config)
+        let model = BitNetModel::<InferenceWeights>::load_inference(vb, &config)
             .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage BitNet: {}", e)))?;
 
         self.model = Some(model);
