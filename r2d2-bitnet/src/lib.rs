@@ -3,12 +3,14 @@ pub mod bitlinear;
 pub mod ffn;
 pub mod model;
 pub mod quantization;
+pub mod packer;
 pub mod rmsnorm;
 pub mod ternary;
 pub mod training;
 pub mod transformer;
 pub mod weights;
 
+pub use packer::BitNetPacker;
 pub use attention::BitSelfAttention;
 pub use bitlinear::BitLinear;
 pub use weights::{InferenceWeights, TrainingWeights, WeightProvider};
