@@ -27,3 +27,4 @@ anyhow = { workspace = true }
 async-trait = "0.1.89"
 pgvector = "0.4.1"
 serde = { version = "1.0.228", features = ["derive"] }
+git2 = "0.19.0"

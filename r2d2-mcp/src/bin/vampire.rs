@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
         let cmd_string = format!("npx -y {}", mcp_name);
 
         let (cmd, args) = if cfg!(target_os = "windows") {
-            ("bash", vec!["-c", cmd_string.as_str()])
+            ("cmd", vec!["/c", cmd_string.as_str()])
         } else {
             ("bash", vec!["-c", cmd_string.as_str()])
         };
@@ -106,7 +106,7 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
-        let _ = match mcp_client.initialize().await {
+        match mcp_client.initialize().await {
             Ok(init_res) => {
                 info!("✅ MCP Initialisé : {:?}", init_res);
             }
@@ -145,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
                     for item in content_array {
                         if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
                             synthesis.push_str(text);
-                            synthesis.push_str("\n");
+                            synthesis.push('\n');
                         }
                     }
                 } else if let Some(text) = response.as_str() {

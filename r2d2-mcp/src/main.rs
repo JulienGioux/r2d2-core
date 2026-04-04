@@ -192,6 +192,81 @@ pub async fn run_native_mcp_loop(gateway: Arc<Mutex<McpGateway>>) -> Result<()> 
                                     }
                                 }
                             }
+                            "read_git_status" => {
+                                match tokio::task::spawn_blocking(|| -> Result<String, String> {
+                                    let repo = git2::Repository::discover(".")
+                                        .map_err(|e| e.to_string())?;
+                                    let mut opts = git2::StatusOptions::new();
+                                    opts.include_untracked(true).recurse_untracked_dirs(true);
+                                    let statuses = repo
+                                        .statuses(Some(&mut opts))
+                                        .map_err(|e| e.to_string())?;
+
+                                    let mut output = String::new();
+                                    for entry in statuses.iter() {
+                                        let path = entry.path().unwrap_or("?");
+                                        let status = entry.status();
+                                        output.push_str(&format!("{:?} {}\n", status, path));
+                                    }
+                                    if output.is_empty() {
+                                        Ok("Arbre de travail propre.".to_string())
+                                    } else {
+                                        Ok(output)
+                                    }
+                                })
+                                .await
+                                {
+                                    Ok(Ok(status)) => {
+                                        json!({ "content": [{ "type": "text", "text": status }] })
+                                    }
+                                    Ok(Err(e)) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur Git Status: {}", e) }], "isError": true })
+                                    }
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur Task: {}", e) }], "isError": true })
+                                    }
+                                }
+                            }
+                            "read_git_log" => {
+                                let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(5);
+                                match tokio::task::spawn_blocking(
+                                    move || -> Result<String, String> {
+                                        let repo = git2::Repository::discover(".")
+                                            .map_err(|e| e.to_string())?;
+                                        let mut revwalk =
+                                            repo.revwalk().map_err(|e| e.to_string())?;
+                                        revwalk.push_head().map_err(|e| e.to_string())?;
+
+                                        let mut output = String::new();
+                                        for oid in revwalk.take(limit as usize) {
+                                            let oid = oid.map_err(|e| e.to_string())?;
+                                            let commit =
+                                                repo.find_commit(oid).map_err(|e| e.to_string())?;
+                                            let message =
+                                                commit.summary().unwrap_or("Pas de message");
+                                            let author =
+                                                commit.author().name().unwrap_or("?").to_string();
+                                            output.push_str(&format!(
+                                                "{} - {} ({})\n",
+                                                oid, message, author
+                                            ));
+                                        }
+                                        Ok(output)
+                                    },
+                                )
+                                .await
+                                {
+                                    Ok(Ok(log)) => {
+                                        json!({ "content": [{ "type": "text", "text": log }] })
+                                    }
+                                    Ok(Err(e)) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur Git Log: {}", e) }], "isError": true })
+                                    }
+                                    Err(e) => {
+                                        json!({ "content": [{ "type": "text", "text": format!("Erreur Task: {}", e) }], "isError": true })
+                                    }
+                                }
+                            }
                             _ => {
                                 json!({ "content": [{ "type": "text", "text": "Tool inconnu ou non-mappé." }], "isError": true })
                             }

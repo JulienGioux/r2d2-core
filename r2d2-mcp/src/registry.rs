@@ -118,6 +118,29 @@ impl ToolRegistry {
             }),
             requires_hitl: false,
         });
+        self.register(McpToolDef {
+            name: "read_git_status".to_string(),
+            description:
+                "Analyse l'état actuel du dépôt Git (fichiers non-suivis, modifiés, stagés)."
+                    .to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {},
+            }),
+            requires_hitl: false,
+        });
+
+        self.register(McpToolDef {
+            name: "read_git_log".to_string(),
+            description: "Lit les derniers commits du dépôt Git.".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "number", "description": "Nombre de commits à lire (défaut: 5)" }
+                }
+            }),
+            requires_hitl: false,
+        });
     }
 
     pub fn register(&mut self, tool: McpToolDef) {

@@ -1,120 +1,169 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="fr" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>R2D2 Sovereign Console</title>
+    <title>R2D2 Console</title>
     <!-- HTMX -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
-    <!-- Google Fonts: Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Custom Premium Vanilla CSS -->
-    <link rel="stylesheet" href="/static/style.css?v=3.1">
+    <!-- Highlight.js for Markdown -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/style.css?v=8.0">
+    <!-- Theme Logic (in head to prevent flash of wrong theme) -->
+    <script>
+        (function() {
+            const savedTheme = localStorage.getItem('r2d2-theme');
+            if (savedTheme) {
+                document.documentElement.setAttribute('data-theme', savedTheme);
+            } else {
+                if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                } else {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                }
+            }
+        })();
+    </script>
 </head>
-<body class="dark-theme">
-    <div class="app-container" id="appContainer">
-        <!-- Hack Pure CSS pour bascule -->
-        <input type="checkbox" id="sidebarToggle" style="display:none;">
-
-        <!-- Hover Zone to auto-expand sidebar -->
-        <div class="sidebar-hover-zone"></div>
+<body>
+    <div class="app-layout">
         
-        <!-- Floating Hamburger Menu -->
-        <label for="sidebarToggle" class="sidebar-floating-btn" aria-label="Ouvrir le menu">
-            <i data-lucide="menu"></i>
-        </label>
+        <!-- Top Navigation Bar -->
+        <header class="topbar">
+            <div class="topbar-left">
+                <button id="leftSidebarToggle" class="icon-toggle" aria-label="Toggle Navigation">
+                    <i data-lucide="menu"></i>
+                </button>
+                <div class="logo-text">
+                    <i data-lucide="cpu" style="width: 18px; color: var(--accent-brand);"></i>
+                    R2D2 Sovereign OS
+                </div>
+            </div>
+            
+            <div class="topbar-right">
+                <button id="themeToggle" class="icon-toggle" title="Toggle Light/Dark Theme">
+                    <i data-lucide="moon" id="themeIcon"></i>
+                </button>
+                <div class="status-indicator" title="System Status: Online">
+                    <span class="pulse-dot"></span>
+                    <span>{{ status }}</span>
+                </div>
+                <button id="rightSidebarToggle" class="icon-toggle" aria-label="Toggle Context">
+                    <i data-lucide="panel-right"></i>
+                </button>
+            </div>
+        </header>
 
-        <!-- Sidebar -->
-        <aside class="sidebar glass-panel" id="mainSidebar">
-            <div class="sidebar-header">
-                <i data-lucide="cpu" class="logo-icon"></i>
-                <h1>R2D2 OS</h1>
-                <div class="sidebar-controls">
-                    <button class="pin-btn" id="pinSidebarBtn" aria-label="Epingler le menu" title="Épingler/Désépingler">
-                        <i data-lucide="pin"></i>
+        <div class="main-layout">
+            <!-- Left Navigation Sidebar -->
+            <aside class="sidebar sidebar-left" id="mainSidebar">
+                <div class="sidebar-header">
+                    <span>Navigation</span>
+                </div>
+                <nav class="sidebar-nav">
+                    <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="layout-dashboard"></i> <span>Dashboard</span>
+                    </a>
+                    <a href="#" class="nav-item" hx-get="/ui/chat" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="message-square"></i> <span>Workspace</span>
+                    </a>
+                    <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="activity"></i> <span>Cortex Live</span>
+                    </a>
+                    <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="database"></i> <span>Memory</span>
+                    </a>
+                    <a href="#" class="nav-item" hx-get="/ui/store" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="box"></i> <span>Sovereign Store</span>
+                    </a>
+                    <a href="#" class="nav-item" hx-get="/ui/admin" hx-target="#main-content" onclick="setActiveNav(this)">
+                        <i data-lucide="lock"></i> <span>Vault</span>
+                    </a>
+                </nav>
+            </aside>
+
+            <!-- Main Dynamic Content Area -->
+            <main id="main-content" class="content-area" hx-get="/ui/dashboard" hx-trigger="load">
+                <div style="display:flex; justify-content:center; align-items:center; height:100%;">
+                    <i data-lucide="loader-2" style="color: var(--text-tertiary); animation: spin 1.5s linear infinite; width: 32px; height: 32px;"></i>
+                </div>
+            </main>
+
+            <!-- Right Context Sidebar -->
+            <aside class="sidebar sidebar-right" id="contextSidebar">
+                <div class="sidebar-header">
+                    <span>Contextual Feed</span>
+                    <button class="icon-toggle" onclick="document.getElementById('contextSidebar').classList.add('collapsed')" style="width: 28px; height: 28px;">
+                        <i data-lucide="x" style="width: 14px; height: 14px;"></i>
                     </button>
                 </div>
-            </div>
-            <nav class="sidebar-nav">
-                <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content">
-                    <i data-lucide="layout-dashboard"></i> Dashboard
-                </a>
-                <a href="#" class="nav-item" hx-get="/ui/chat" hx-target="#main-content">
-                    <i data-lucide="message-square"></i> Conversations
-                </a>
-                <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content">
-                    <i data-lucide="brain-circuit"></i> Cortex Live
-                </a>
-                <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content">
-                    <i data-lucide="database"></i> Memory Audit
-                </a>
-                <a href="#" class="nav-item" hx-get="/ui/admin" hx-target="#main-content">
-                    <i data-lucide="shield-alert"></i> Admin & Spéc.
-                </a>
-            </nav>
-            <div class="sidebar-footer">
-                <div class="status-indicator">
-                    <span class="pulse-dot"></span>
-                    <span class="status-text">{{ status }}</span>
+                <div id="context-content" style="flex: 1; overflow-y: auto;">
+                    <div style="padding: 40px 32px; text-align: center; color: var(--text-tertiary);">
+                        <i data-lucide="workflow" style="margin-bottom: 12px; width: 32px; height: 32px; opacity: 0.3;"></i>
+                        <p style="font-size: 13px; font-weight: 500; color: var(--text-secondary);">No active context.</p>
+                        <p style="font-size: 12px; margin-top: 6px; opacity: 0.8;">Select a module to load contextual actions.</p>
+                    </div>
                 </div>
-            </div>
-        </aside>
-
-        <!-- Main Content (Dynamic via HTMX) -->
-        <main id="main-content" class="main-content" hx-get="/ui/dashboard" hx-trigger="load">
-            <div style="display:flex; justify-content:center; align-items:center; height:100%;">
-                <i data-lucide="loader-2" class="spin" style="color: #4a90e2; width: 32px; height: 32px;"></i>
-            </div>
-        </main>
+            </aside>
+        </div>
     </div>
+
     <script>
-        // Init Lucide icons
         lucide.createIcons();
+
+        // Left Sidebar Toggle
+        document.getElementById('leftSidebarToggle').addEventListener('click', function() {
+            document.getElementById('mainSidebar').classList.toggle('collapsed');
+            this.classList.toggle('active');
+        });
+
+        // Right Sidebar Toggle
+        document.getElementById('rightSidebarToggle').addEventListener('click', function() {
+            document.getElementById('contextSidebar').classList.toggle('collapsed');
+            this.classList.toggle('active');
+        });
+
+        // Theme Toggle Logic
+        const themeToggle = document.getElementById('themeToggle');
+        const themeIcon = document.getElementById('themeIcon');
         
-        // Pin State Logic (LocalStorage)
-        const appContainer = document.getElementById('appContainer');
-        const pinSidebarBtn = document.getElementById('pinSidebarBtn');
-        const sidebarToggle = document.getElementById('sidebarToggle');
+        function updateThemeIcon() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            if (currentTheme === 'dark') {
+                themeIcon.setAttribute('data-lucide', 'sun');
+            } else {
+                themeIcon.setAttribute('data-lucide', 'moon');
+            }
+            lucide.createIcons();
+        }
         
-        // Restore pinned state from localStorage
-        const isPinned = localStorage.getItem('r2d2_sidebar_pinned') === 'true';
-        if (isPinned) {
-            appContainer.classList.add('sidebar-pinned');
+        updateThemeIcon();
+
+        themeToggle.addEventListener('click', () => {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            localStorage.setItem('r2d2-theme', newTheme);
+            updateThemeIcon();
+        });
+
+        // Active Nav
+        function setActiveNav(element) {
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            element.classList.add('active');
         }
 
-        // Pin Button Logic
-        if(pinSidebarBtn) {
-            pinSidebarBtn.addEventListener('click', () => {
-                const willPin = !appContainer.classList.contains('sidebar-pinned');
-                appContainer.classList.toggle('sidebar-pinned', willPin);
-                localStorage.setItem('r2d2_sidebar_pinned', willPin);
-                if(sidebarToggle) sidebarToggle.checked = false;
-            });
-        }
-        
-        // Active Nav Item Sync (Instant Feedback)
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', function(e) {
-                document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-                this.classList.add('active');
-                
-                // Replier la sidebar après sélection (Pure CSS disable via checkbox)
-                if(sidebarToggle) sidebarToggle.checked = false;
-            });
-        });
-        
-        // Re-init icons after htmx swap
-        document.body.addEventListener('htmx:afterSwap', function(evt) {
+        // Auto re-init icons and scroll chat to bottom after HTMX swaps
+        document.body.addEventListener('htmx:afterSwap', function(e) {
             lucide.createIcons();
-            
-            // Auto scroll to bottom of chat
+            if (typeof hljs !== 'undefined') hljs.highlightAll();
             const chatHistory = document.getElementById('chat-history');
-            if (chatHistory) {
+            if (chatHistory && e.detail.target.id === 'chat-history') {
                 chatHistory.scrollTop = chatHistory.scrollHeight;
             }
         });

@@ -1,8 +1,8 @@
 use crate::attention::BitSelfAttention;
+use crate::bitlinear::BitLinear;
 use crate::ffn::BitFFN;
 use crate::rmsnorm::RmsNorm;
 use crate::weights::WeightProvider;
-use crate::bitlinear::BitLinear;
 use candle_core::{Module, Result, Tensor};
 use tracing::instrument;
 

@@ -140,7 +140,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_typestate_pipeline() {
-        let signal = Fragment::new("{\"id\":\"test\",\"source\":\"Vision\",\"content\":\"test\",\"is_fact\":true,\"consensus_level\":\"ConsensusReached\",\"ontological_tags\":[]}".to_string());
+        let mock_json = r2d2_jsonai::JsonAiV3::new(
+            "test".to_string(),
+            r2d2_jsonai::AgentSource::System,
+            "test".to_string(),
+            r2d2_jsonai::BeliefState::Fact,
+        );
+        let signal = Fragment::new(serde_json::to_string(&mock_json).unwrap());
 
         let unverified = signal.parse().expect("Doit parser");
         let validator = MockValidator;

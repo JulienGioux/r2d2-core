@@ -33,7 +33,15 @@ impl ReflexJudge {
             cognitive_threshold: 0.90, // Cosinus > 0.90 => Similarité extrêmement forte
         }
     }
+}
 
+impl Default for ReflexJudge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReflexJudge {
     pub fn with_blackboard(mut self, blackboard: Arc<PostgresBlackboard>) -> Self {
         self.blackboard = Some(blackboard);
         self

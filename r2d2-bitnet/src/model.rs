@@ -70,7 +70,10 @@ where
 impl BitNetModel<InferenceWeights> {
     #[instrument(skip_all)]
     pub fn load_inference(vb: VarBuilder, config: &BitNetConfig) -> Result<Self> {
-        info!("Instanciation de la topologie Inférence BitNetModel [{}]", config.num_hidden_layers);
+        info!(
+            "Instanciation de la topologie Inférence BitNetModel [{}]",
+            config.num_hidden_layers
+        );
 
         let embed_tokens = embedding(config.vocab_size, config.hidden_size, vb.pp("embed_tokens"))?;
 
@@ -78,43 +81,102 @@ impl BitNetModel<InferenceWeights> {
         for layer_idx in 0..config.num_hidden_layers {
             let layer_vb = vb.pp(format!("model.layers.{}", layer_idx));
 
-            let att_norm_w = layer_vb.pp("input_layernorm").get(config.hidden_size, "weight")?;
+            let att_norm_w = layer_vb
+                .pp("input_layernorm")
+                .get(config.hidden_size, "weight")?;
             let attention_norm = RmsNorm::new(att_norm_w, config.rms_norm_eps);
 
-            let ffn_norm_w = layer_vb.pp("post_attention_layernorm").get(config.hidden_size, "weight")?;
+            let ffn_norm_w = layer_vb
+                .pp("post_attention_layernorm")
+                .get(config.hidden_size, "weight")?;
             let ffn_norm = RmsNorm::new(ffn_norm_w, config.rms_norm_eps);
 
             let head_dim = config.hidden_size / config.num_attention_heads;
             let attn_vb = layer_vb.pp("self_attn");
-            
-            let q_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.hidden_size, attn_vb.pp("q_proj"))?;
-            let k_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.hidden_size, attn_vb.pp("k_proj"))?;
-            let v_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.hidden_size, attn_vb.pp("v_proj"))?;
-            let o_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.hidden_size, attn_vb.pp("o_proj"))?;
 
-            let attention = BitSelfAttention::new(config.num_attention_heads, head_dim, q_proj, k_proj, v_proj, o_proj);
+            let q_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("q_proj"),
+            )?;
+            let k_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("k_proj"),
+            )?;
+            let v_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("v_proj"),
+            )?;
+            let o_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("o_proj"),
+            )?;
+
+            let attention = BitSelfAttention::new(
+                config.num_attention_heads,
+                head_dim,
+                q_proj,
+                k_proj,
+                v_proj,
+                o_proj,
+            );
 
             let mlp_vb = layer_vb.pp("mlp");
-            let gate_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.intermediate_size, mlp_vb.pp("gate_proj"))?;
-            let up_proj = BitLinear::<InferenceWeights>::load(config.hidden_size, config.intermediate_size, mlp_vb.pp("up_proj"))?;
-            let down_proj = BitLinear::<InferenceWeights>::load(config.intermediate_size, config.hidden_size, mlp_vb.pp("down_proj"))?;
+            let gate_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.intermediate_size,
+                mlp_vb.pp("gate_proj"),
+            )?;
+            let up_proj = BitLinear::<InferenceWeights>::load(
+                config.hidden_size,
+                config.intermediate_size,
+                mlp_vb.pp("up_proj"),
+            )?;
+            let down_proj = BitLinear::<InferenceWeights>::load(
+                config.intermediate_size,
+                config.hidden_size,
+                mlp_vb.pp("down_proj"),
+            )?;
 
             let ffn = BitFFN::new(gate_proj, up_proj, down_proj);
 
-            layers.push(BitTransformerBlock::new(attention_norm, attention, ffn_norm, ffn));
+            layers.push(BitTransformerBlock::new(
+                attention_norm,
+                attention,
+                ffn_norm,
+                ffn,
+            ));
         }
 
         let norm_weight = vb.pp("model.norm").get(config.hidden_size, "weight")?;
         let norm = RmsNorm::new(norm_weight, config.rms_norm_eps);
-        let lm_head = BitLinear::<InferenceWeights>::load(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?;
+        let lm_head = BitLinear::<InferenceWeights>::load(
+            config.hidden_size,
+            config.vocab_size,
+            vb.pp("lm_head"),
+        )?;
 
-        Ok(Self { config: config.clone(), embed_tokens, layers, norm, lm_head })
+        Ok(Self {
+            config: config.clone(),
+            embed_tokens,
+            layers,
+            norm,
+            lm_head,
+        })
     }
 
     /// 🌀 Boucle de Génération de Texte (Inférence Autorégressive)
     /// Exclusivité de l'état `InferenceWeights` (Isolation par le compilateur).
     #[instrument(skip_all)]
-    pub fn generate(&self, prompt_tokens: &[u32], max_tokens: usize, device: &Device) -> Result<Vec<u32>> {
+    pub fn generate(
+        &self,
+        prompt_tokens: &[u32],
+        max_tokens: usize,
+        device: &Device,
+    ) -> Result<Vec<u32>> {
         info!("🔮 Démarrage de la boucle d'inférence Autorégressive (Greedy Decoding)");
         let mut context = prompt_tokens.to_vec();
 
@@ -130,7 +192,10 @@ impl BitNetModel<InferenceWeights> {
         }
 
         let generated_slice = context[prompt_tokens.len()..].to_vec();
-        info!("✅ Inférence terminée ({} tokens générés)", generated_slice.len());
+        info!(
+            "✅ Inférence terminée ({} tokens générés)",
+            generated_slice.len()
+        );
         Ok(generated_slice)
     }
 }
@@ -141,7 +206,10 @@ impl BitNetModel<InferenceWeights> {
 impl BitNetModel<TrainingWeights> {
     #[instrument(skip_all)]
     pub fn load_train(vb: VarBuilder, config: &BitNetConfig) -> Result<Self> {
-        info!("Instanciation de la topologie Entraînement BitNetModel [{}]", config.num_hidden_layers);
+        info!(
+            "Instanciation de la topologie Entraînement BitNetModel [{}]",
+            config.num_hidden_layers
+        );
 
         let embed_tokens = embedding(config.vocab_size, config.hidden_size, vb.pp("embed_tokens"))?;
 
@@ -149,36 +217,90 @@ impl BitNetModel<TrainingWeights> {
         for layer_idx in 0..config.num_hidden_layers {
             let layer_vb = vb.pp(format!("model.layers.{}", layer_idx));
 
-            let att_norm_w = layer_vb.pp("input_layernorm").get(config.hidden_size, "weight")?;
+            let att_norm_w = layer_vb
+                .pp("input_layernorm")
+                .get(config.hidden_size, "weight")?;
             let attention_norm = RmsNorm::new(att_norm_w, config.rms_norm_eps);
 
-            let ffn_norm_w = layer_vb.pp("post_attention_layernorm").get(config.hidden_size, "weight")?;
+            let ffn_norm_w = layer_vb
+                .pp("post_attention_layernorm")
+                .get(config.hidden_size, "weight")?;
             let ffn_norm = RmsNorm::new(ffn_norm_w, config.rms_norm_eps);
 
             let head_dim = config.hidden_size / config.num_attention_heads;
             let attn_vb = layer_vb.pp("self_attn");
-            
-            let q_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.hidden_size, attn_vb.pp("q_proj"))?;
-            let k_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.hidden_size, attn_vb.pp("k_proj"))?;
-            let v_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.hidden_size, attn_vb.pp("v_proj"))?;
-            let o_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.hidden_size, attn_vb.pp("o_proj"))?;
 
-            let attention = BitSelfAttention::new(config.num_attention_heads, head_dim, q_proj, k_proj, v_proj, o_proj);
+            let q_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("q_proj"),
+            )?;
+            let k_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("k_proj"),
+            )?;
+            let v_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("v_proj"),
+            )?;
+            let o_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.hidden_size,
+                attn_vb.pp("o_proj"),
+            )?;
+
+            let attention = BitSelfAttention::new(
+                config.num_attention_heads,
+                head_dim,
+                q_proj,
+                k_proj,
+                v_proj,
+                o_proj,
+            );
 
             let mlp_vb = layer_vb.pp("mlp");
-            let gate_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.intermediate_size, mlp_vb.pp("gate_proj"))?;
-            let up_proj = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.intermediate_size, mlp_vb.pp("up_proj"))?;
-            let down_proj = BitLinear::<TrainingWeights>::load_train(config.intermediate_size, config.hidden_size, mlp_vb.pp("down_proj"))?;
+            let gate_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.intermediate_size,
+                mlp_vb.pp("gate_proj"),
+            )?;
+            let up_proj = BitLinear::<TrainingWeights>::load_train(
+                config.hidden_size,
+                config.intermediate_size,
+                mlp_vb.pp("up_proj"),
+            )?;
+            let down_proj = BitLinear::<TrainingWeights>::load_train(
+                config.intermediate_size,
+                config.hidden_size,
+                mlp_vb.pp("down_proj"),
+            )?;
 
             let ffn = BitFFN::new(gate_proj, up_proj, down_proj);
 
-            layers.push(BitTransformerBlock::new(attention_norm, attention, ffn_norm, ffn));
+            layers.push(BitTransformerBlock::new(
+                attention_norm,
+                attention,
+                ffn_norm,
+                ffn,
+            ));
         }
 
         let norm_weight = vb.pp("model.norm").get(config.hidden_size, "weight")?;
         let norm = RmsNorm::new(norm_weight, config.rms_norm_eps);
-        let lm_head = BitLinear::<TrainingWeights>::load_train(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?;
+        let lm_head = BitLinear::<TrainingWeights>::load_train(
+            config.hidden_size,
+            config.vocab_size,
+            vb.pp("lm_head"),
+        )?;
 
-        Ok(Self { config: config.clone(), embed_tokens, layers, norm, lm_head })
+        Ok(Self {
+            config: config.clone(),
+            embed_tokens,
+            layers,
+            norm,
+            lm_head,
+        })
     }
 }

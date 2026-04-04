@@ -41,6 +41,10 @@ impl SemanticMemory {
         self.metadata.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.metadata.is_empty()
+    }
+
     pub fn get_sample_axioms(&self, limit: usize) -> Vec<(usize, String)> {
         self.metadata
             .iter()

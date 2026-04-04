@@ -14,6 +14,9 @@ pub enum McpCommand {
         arguments: Value,
         reply: oneshot::Sender<Result<Value>>,
     },
+    ListTools {
+        reply: oneshot::Sender<Result<Value>>,
+    },
 }
 
 #[derive(Clone)]
@@ -22,36 +25,39 @@ pub struct McpClient {
 }
 
 impl McpClient {
-    pub async fn new(github_token: &str) -> Result<Self> {
+    pub async fn new(
+        command: &str,
+        args: &[String],
+        envs: HashMap<String, String>,
+    ) -> Result<Self> {
         let (tx, mut rx) = mpsc::channel::<McpCommand>(32);
 
-        // Détermination dynamique du moteur de conteneur ("podman" prioritaire, sinon "docker")
-        let engine = if Command::new("podman")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false)
-        {
-            "podman"
-        } else {
-            "docker"
-        };
+        let mut actual_command = command.to_string();
+        let mut actual_args = args.to_vec();
 
-        let mut child = Command::new(engine)
-            .arg("run")
-            .arg("-i")
-            .arg("--rm")
-            .arg("-e")
-            .arg(format!("GITHUB_PERSONAL_ACCESS_TOKEN={}", github_token))
-            .arg("ghcr.io/github/github-mcp-server:latest")
+        // [R2D2-Cortex] WSL / Windows Interop Fix for Node/npx pipes
+        if actual_command == "npx" && std::env::var("WSL_DISTRO_NAME").is_ok() {
+            actual_args.insert(0, "npx.cmd".to_string());
+            actual_args.insert(0, "/c".to_string());
+            actual_command = "cmd.exe".to_string();
+        } else if actual_command == "npx" && cfg!(windows) {
+            actual_command = "npx.cmd".to_string();
+        }
+
+        let mut cmd = Command::new(&actual_command);
+        for arg in &actual_args {
+            cmd.arg(arg);
+        }
+        for (k, v) in envs {
+            cmd.env(k, v);
+        }
+
+        let mut child = cmd
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit()) // Route stderr to the main console for tracing
             .spawn()
-            .context("Failed to spawn docker ghcr.io/github/github-mcp-server")?;
+            .context(format!("Failed to spawn MCP Server '{}'", command))?;
 
         let mut stdin = child.stdin.take().ok_or(anyhow!("Missing stdin"))?;
         let stdout = child.stdout.take().ok_or(anyhow!("Missing stdout"))?;
@@ -108,10 +114,10 @@ impl McpClient {
             Ok::<(), anyhow::Error>(())
         };
 
-        match tokio::time::timeout(std::time::Duration::from_secs(10), handshake_future).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(60), handshake_future).await {
             Ok(Ok(_)) => {},
             Ok(Err(e)) => return Err(e),
-            Err(_) => return Err(anyhow!("MCP Daemon Handshake Timeout: Container Engine ({}) failed to route STDIO to ghcr.io/github/github-mcp-server within 10s. Is the daemon running?", engine)),
+            Err(_) => return Err(anyhow!("MCP Daemon Handshake Timeout: The process '{}' failed to answer 'initialize' within 60s. Is the daemon downloading packages or running correctly?", command)),
         }
 
         let next_id = Arc::new(AtomicUsize::new(2));
@@ -134,6 +140,24 @@ impl McpClient {
                                         "name": name,
                                         "arguments": arguments
                                     }
+                                });
+                                let mut req_str = serde_json::to_string(&req).unwrap_or_default();
+                                req_str.push('\n');
+
+                                if let Err(e) = stdin.write_all(req_str.as_bytes()).await {
+                                    tracing::error!("[McpClient] Pipe write error: {}", e);
+                                    let _ = reply.send(Err(anyhow::anyhow!("Pipe broken: {}", e)));
+                                    break;
+                                }
+                                let _ = stdin.flush().await;
+                                pending_calls.insert(id, reply);
+                            }
+                            Some(McpCommand::ListTools { reply }) => {
+                                let id = next_id.fetch_add(1, Ordering::SeqCst);
+                                let req = json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "method": "tools/list"
                                 });
                                 let mut req_str = serde_json::to_string(&req).unwrap_or_default();
                                 req_str.push('\n');
@@ -206,6 +230,18 @@ impl McpClient {
                 arguments,
                 reply: reply_tx,
             })
+            .await
+            .map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
+
+        reply_rx
+            .await
+            .map_err(|_| anyhow::anyhow!("McpDaemon dropped the response"))?
+    }
+
+    pub async fn list_tools(&self) -> Result<Value> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        self.tx
+            .send(McpCommand::ListTools { reply: reply_tx })
             .await
             .map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
 

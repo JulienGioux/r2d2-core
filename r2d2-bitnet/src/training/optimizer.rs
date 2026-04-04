@@ -39,7 +39,7 @@ impl TwoStageAdamW {
             let mut current_params = self.inner.params().clone();
             current_params.weight_decay = 0.0;
             self.inner.set_params(current_params);
-            // Si Candle < 0.9 ne supporte pas set_params ou params_mut, 
+            // Si Candle < 0.9 ne supporte pas set_params ou params_mut,
             // la compilation hurlera et on devra trouver un workaround manuel.
             self.phase_switched = true;
         }

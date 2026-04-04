@@ -25,7 +25,10 @@ impl BitLinear<InferenceWeights> {
         bias: Option<Tensor>,
     ) -> candle_core::Result<Self> {
         if !in_features.is_multiple_of(16) {
-            candle_core::bail!("Architectural Constraint: in_features ({}) doit être un multiple de 16.", in_features);
+            candle_core::bail!(
+                "Architectural Constraint: in_features ({}) doit être un multiple de 16.",
+                in_features
+            );
         }
 
         let expected_len = in_features * out_features;
@@ -71,7 +74,7 @@ impl BitLinear<InferenceWeights> {
         let mut flat_i8 = Vec::with_capacity(flat_f32.len());
 
         let gamma: f32 = flat_f32.iter().map(|v| v.abs()).sum::<f32>() / (flat_f32.len() as f32);
-        let scale = 1.0 / (gamma + 1e-5); 
+        let scale = 1.0 / (gamma + 1e-5);
 
         for &val in &flat_f32 {
             let scaled = (val * scale).round();
@@ -100,7 +103,7 @@ impl BitLinear<TrainingWeights> {
         vb: candle_nn::VarBuilder,
     ) -> candle_core::Result<Self> {
         let weight_tensor = vb.get((out_features, in_features), "weight")?;
-        
+
         // Convert to Var to allow Autograd
         let var = candle_core::Var::from_tensor(&weight_tensor)?;
         let bias = vb.get(out_features, "bias").ok();
@@ -187,14 +190,14 @@ impl Module for BitLinear<TrainingWeights> {
     #[instrument(skip(self, xs), name = "BitLinear::forward_train")]
     fn forward(&self, xs: &Tensor) -> Result<Tensor> {
         // En apprentissage, on applique la quantification STE sur les poids latents
-        let w_q = crate::training::ste::ste_quantize(&self.weights.var.as_tensor())?;
-        
+        let w_q = crate::training::ste::ste_quantize(self.weights.var.as_tensor())?;
+
         let mut out_tensor = xs.broadcast_matmul(&w_q.t()?)?;
-        
+
         if let Some(b) = &self.bias {
             out_tensor = out_tensor.broadcast_add(b)?;
         }
-        
+
         Ok(out_tensor)
     }
 }
@@ -202,6 +205,7 @@ impl Module for BitLinear<TrainingWeights> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use candle_core::Device;
 
     #[test]
     fn test_bitlinear_forward_logic() -> Result<()> {
@@ -209,15 +213,15 @@ mod tests {
         let out_f = 2;
 
         let weights: [i8; 32] = [
-            1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -1, -1, 0, 0, 0, 0, 
-            -1, -1, -1, -1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 
+            1, 1, 1, 1, 0, 0, 0, 0, -1, -1, -1, -1, 0, 0, 0, 0, -1, -1, -1, -1, 0, 0, 0, 0, 1, 1,
+            1, 1, 0, 0, 0, 0,
         ];
 
         let layer = BitLinear::<InferenceWeights>::new(in_f, out_f, &weights, None)?;
 
         let mut xs_data = vec![0.0f32; 16];
-        xs_data[0..4].fill(1.0); 
-        xs_data[8..12].fill(2.0); 
+        xs_data[0..4].fill(1.0);
+        xs_data[8..12].fill(2.0);
 
         let xs = Tensor::from_vec(xs_data, &[1, 16], &Device::Cpu)?;
         let ys = layer.forward(&xs)?;
@@ -238,8 +242,8 @@ mod tests {
         let mut w_data = vec![0.0f32; 32];
         w_data[0] = 100.0;
         w_data[1] = -100.0;
-        w_data[2] = 1.0; 
-        w_data[3] = -1.0; 
+        w_data[2] = 1.0;
+        w_data[3] = -1.0;
 
         let w_tensor = Tensor::from_vec(w_data, &[2, 16], &Device::Cpu)?;
 

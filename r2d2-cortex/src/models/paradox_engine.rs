@@ -12,10 +12,7 @@ impl BitLinear {
     pub fn new(in_features: usize, out_features: usize, vb: VarBuilder) -> Result<Self> {
         // On initialise avec des poids continus aléatoires. (Les poids "latents")
         let weight = vb.get((out_features, in_features), "weight")?;
-        let bias = match vb.get(out_features, "bias") {
-            Ok(b) => Some(b),
-            Err(_) => None,
-        };
+        let bias = vb.get(out_features, "bias").ok();
         Ok(Self { weight, bias })
     }
 

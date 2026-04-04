@@ -4,21 +4,18 @@ use async_trait::async_trait;
 use tracing::{info, instrument};
 
 // Importations Candle et Tokenizer
-use crate::catalog::{CognitiveSense, CortexCatalog};
 use candle_core::{Device, IndexOp, Tensor};
-use candle_nn::VarBuilder;
-use candle_transformers::models::bert::{BertModel, Config, DTYPE};
-use hf_hub::{Repo, RepoType};
-use tokenizers::Tokenizer;
 
+use crate::store::{get_model_store, BertTopology, ModelStore};
+use std::sync::Arc;
 /// Unité d'Extraction Sémantique Multilingue Légère (400 Mo).
 /// Utilisée pour convertir le texte brut en tenseur HNSW (Vecteur).
 /// Modèle: "intfloat/multilingual-e5-small".
 pub struct MiniLmEmbedderAgent {
     name: String,
     device: Device,
-    tokenizer: Option<Tokenizer>,
-    model: Option<BertModel>,
+    store: Arc<ModelStore>,
+    topology: Option<BertTopology>,
 }
 
 impl MiniLmEmbedderAgent {
@@ -30,8 +27,8 @@ impl MiniLmEmbedderAgent {
         Self {
             name: "Multilingual-E5-Small".to_string(),
             device,
-            tokenizer: None,
-            model: None,
+            store: get_model_store(),
+            topology: None,
         }
     }
 }
@@ -51,78 +48,38 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
     #[instrument(skip(self))]
     async fn load(&mut self) -> Result<(), AgentError> {
         info!(
-            "🔌 [CORTEX] Activation du téléchargement Auto/Local pour l'agent '{}'",
+            "🔌 [CORTEX] Extraction des tenseurs inertes depuis le Store pour '{}'",
             self.name
         );
 
-        let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
-
-        let api = hf_hub::api::tokio::ApiBuilder::new()
-            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
-            .build()
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
-        let repo = api.repo(Repo::with_revision(
-            desc.repo_id.to_string(),
-            RepoType::Model,
-            desc.revision.to_string(),
-        ));
-
-        // Téléchargement des 3 artefacts critiques
-        info!("   [CORTEX] Résolution des poids Safetensors...");
-        let model_file = repo
-            .get(desc.weights_file)
+        // Checkout de la topologie partagée via le ModelStore
+        let topo = self
+            .store
+            .checkout_bert(&self.name)
             .await
-            .map_err(|e| AgentError::LoadError(format!("Échec téléchargement weights: {}", e)))?;
-
-        info!("   [CORTEX] Résolution du dictionnaire Tokenizer...");
-        let tokenizer_file = repo
-            .get(desc.tokenizer_file.unwrap())
-            .await
-            .map_err(|e| AgentError::LoadError(format!("Échec téléchargement tokenizer: {}", e)))?;
-
-        let config_file = repo
-            .get(desc.config_file.unwrap())
-            .await
-            .map_err(|e| AgentError::LoadError(format!("Échec téléchargement config: {}", e)))?;
-
-        info!("   [CORTEX] Montage de la structure Tensorielle en RAM...");
-
-        // Parser R2D2 du fichier JSON Tokenizer
-        let tokenizer = Tokenizer::from_file(tokenizer_file)
             .map_err(|e| AgentError::LoadError(e.to_string()))?;
 
-        // Chargement strict des Tenseurs Safetensors (Zero-Trust)
-        let config_str = std::fs::read_to_string(config_file)
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
-        let config: Config = serde_json::from_str(&config_str)
-            .map_err(|e| AgentError::LoadError(format!("JSON Error: {}", e)))?;
+        // Ancrage local (l'Agent devient opérationnel mais n'own plus les tenseurs)
+        self.topology = Some(topo);
 
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], DTYPE, &self.device) }
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
-
-        let model =
-            BertModel::load(vb, &config).map_err(|e| AgentError::LoadError(e.to_string()))?;
-
-        // Ancrage dans la structure (Agent Actif)
-        self.tokenizer = Some(tokenizer);
-        self.model = Some(model);
-
-        info!("🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel.", self.name);
+        info!(
+            "🛡️ [CORTEX] Agent '{}' Chargé & Opérationnel via Store.",
+            self.name
+        );
         Ok(())
     }
 
     async fn unload(&mut self) -> Result<(), AgentError> {
         info!(
-            "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
+            "   [CORTEX] Drop inconditionnel des vues RAM pour '{}'.",
             self.name
         );
-        self.model = None;
-        self.tokenizer = None;
+        self.topology = None;
         Ok(())
     }
 
     fn is_active(&self) -> bool {
-        self.model.is_some() && self.tokenizer.is_some()
+        self.topology.is_some()
     }
 
     async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
@@ -145,8 +102,9 @@ impl MiniLmEmbedderAgent {
             return Err(AgentError::NotActive);
         }
 
-        let tokenizer = self.tokenizer.as_ref().unwrap();
-        let model = self.model.as_ref().unwrap();
+        let topology = self.topology.as_ref().unwrap();
+        let tokenizer = &topology.tokenizer;
+        let model = &topology.model;
 
         let prefix = if is_query { "query: " } else { "passage: " };
         let e5_prompt = format!("{}{}", prefix, prompt);

@@ -50,8 +50,9 @@ fn main() -> Result<()> {
     println!("⏱️ R2D2-TOKENIZER : SEMANTIC COMPRESSION BENCHMARK");
     println!("============================================================\n");
 
-    let api = Api::new().context("Impossible d'initialiser hf-hub API. Vérifiez votre connexion.")?;
-    
+    let api =
+        Api::new().context("Impossible d'initialiser hf-hub API. Vérifiez votre connexion.")?;
+
     // Mesures
     let text_len_json = PAYLOAD_JSONAI.len();
     let text_len_fr = PAYLOAD_FR_HEAVY.len();
@@ -64,9 +65,9 @@ fn main() -> Result<()> {
         println!("------------------------------------------------------------");
         println!("🚀 PULLING/LOADING : {}", model.name);
         let start_load = Instant::now();
-        
+
         let repo = api.model(model.id.to_string());
-        
+
         let tokenizer_filename = match repo.get("tokenizer.json") {
             Ok(file) => file,
             Err(e) => {
@@ -85,15 +86,21 @@ fn main() -> Result<()> {
         let encoding_json = tokenizer.encode(PAYLOAD_JSONAI, true).unwrap();
         let tokens_json = encoding_json.get_ids().len();
         let ratio_json = text_len_json as f64 / tokens_json as f64;
-        
+
         // Evaluation FR
         let encoding_fr = tokenizer.encode(PAYLOAD_FR_HEAVY, true).unwrap();
         let tokens_fr = encoding_fr.get_ids().len();
         let ratio_fr = text_len_fr as f64 / tokens_fr as f64;
 
         println!("📊 Résultats de Compression :");
-        println!("   [JSONAI] Tokens : {} | Compression : {:.2} octets/token", tokens_json, ratio_json);
-        println!("   [FR]     Tokens : {} | Compression : {:.2} octets/token", tokens_fr, ratio_fr);
+        println!(
+            "   [JSONAI] Tokens : {} | Compression : {:.2} octets/token",
+            tokens_json, ratio_json
+        );
+        println!(
+            "   [FR]     Tokens : {} | Compression : {:.2} octets/token",
+            tokens_fr, ratio_fr
+        );
     }
 
     println!("\n============================================================");

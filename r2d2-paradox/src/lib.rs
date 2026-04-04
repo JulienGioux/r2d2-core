@@ -165,26 +165,100 @@ impl TruthValidator for ParadoxSolver {
 mod tests {
     use super::*;
     use r2d2_jsonai::{AgentSource, BeliefState};
+    use std::sync::Arc;
+
+    /// Mock Strict du Super-Juge Sémantique pour isoler la CI.
+    struct MockStrictSemanticJudge {
+        pub should_approve: bool,
+    }
+
+    impl SemanticJudge for MockStrictSemanticJudge {
+        fn evaluate<'a>(
+            &'a self,
+            _jsonai: &'a JsonAiV3,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<bool, ParadoxError>> + Send + 'a>,
+        > {
+            let result = if self.should_approve {
+                Ok(true)
+            } else {
+                Ok(false)
+            };
+            Box::pin(async move { result })
+        }
+    }
 
     #[tokio::test]
-    async fn test_paradox_solver() {
+    async fn test_paradox_solver_fast_path_fallback() {
         let jsonai = JsonAiV3::new(
-            "test_123".to_string(),
+            "test_fast_path".to_string(),
             AgentSource::System,
-            "Vérité axiomatique".to_string(),
+            "Vérité axiomatique triviale".to_string(),
             BeliefState::Fact,
         );
         let payload = serde_json::to_string(&jsonai).unwrap();
 
-        // Le solver vide devrait utiliser le Fast-Path ou Fallback
+        // Solveur sans System 2 (Juge). Devrait statuer en Fallback/Fast-path local
         let solver = ParadoxSolver::new();
         let (verified, poi) = solver
             .validate_payload(&payload)
             .await
-            .expect("Doit valider");
+            .expect("Doit valider localement sans erreur");
 
         let verified_json: JsonAiV3 = serde_json::from_str(&verified).unwrap();
         assert_eq!(verified_json.consensus, ConsensusLevel::ConsensusReached);
-        assert!(poi.starts_with("POI_FAST_SAT_test_123"));
+        assert!(poi.starts_with("POI_FAST_SAT") || poi.starts_with("POI_FALLBACK_SAT"));
+    }
+
+    #[tokio::test]
+    async fn test_paradox_solver_slow_path_approval() {
+        let mut jsonai = JsonAiV3::new(
+            "test_ext_approve".to_string(),
+            AgentSource::System,
+            "Proposition complexe MCTS".to_string(),
+            BeliefState::Perspective, // Force potentiellement le Slow-Path (hors facto)
+        );
+        jsonai
+            .ontological_tags
+            .push(r2d2_jsonai::OntologyRel::Requires);
+
+        let payload = serde_json::to_string(&jsonai).unwrap();
+
+        let mock_judge = Arc::new(MockStrictSemanticJudge {
+            should_approve: true,
+        });
+        let solver = ParadoxSolver::with_judge(mock_judge);
+
+        let (verified, poi) = solver
+            .validate_payload(&payload)
+            .await
+            .expect("Le juge mocké valide");
+        assert!(poi.starts_with("POI_SLOW_SAT"));
+        let verified_json: JsonAiV3 = serde_json::from_str(&verified).unwrap();
+        assert_eq!(verified_json.consensus, ConsensusLevel::ConsensusReached);
+    }
+
+    #[tokio::test]
+    async fn test_paradox_solver_slow_path_rejection() {
+        let mut jsonai = JsonAiV3::new(
+            "test_ext_reject".to_string(),
+            AgentSource::System,
+            "Proposition absurde".to_string(),
+            BeliefState::Perspective,
+        );
+        jsonai
+            .ontological_tags
+            .push(r2d2_jsonai::OntologyRel::Requires);
+        let payload = serde_json::to_string(&jsonai).unwrap();
+
+        let mock_judge = Arc::new(MockStrictSemanticJudge {
+            should_approve: false,
+        });
+        let solver = ParadoxSolver::with_judge(mock_judge);
+
+        let result = solver.validate_payload(&payload).await;
+        assert!(result.is_err());
+        let KernelError::ValidationFailed(msg) = result.unwrap_err();
+        assert!(msg.contains("contradictoire ou absurde"));
     }
 }

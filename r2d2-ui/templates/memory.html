@@ -1,36 +1,92 @@
-<div class="dashboard-grid">
-    <div class="glass-card col-span-2">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <div>
-                <h2>Memory Audit (Bare-Metal RAG)</h2>
-                <p>Inspection de l'Assimilateur Zéro-Copy et des vecteurs structuraux.</p>
+<div class="padded-content">
+    <div class="section-header" style="animation: slideUp 0.3s ease-out;">
+        <div>
+            <h2 class="section-title">Cognitive Memory Audit (Zero-Copy)</h2>
+            <p class="section-subtitle">Inspection de l'Assimilateur et des vecteurs structuraux RAG alloués en Mmap.</p>
+        </div>
+        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+            <div class="status-indicator">
+                <i data-lucide="zap" style="color: var(--status-success); width: 14px;"></i>
+                <span style="color: var(--text-primary);">MMAP ACTIVE</span>
             </div>
-            <div class="status-indicator" style="background: rgba(0, 229, 255, 0.1); border-color: rgba(0, 229, 255, 0.3);">
-                <i data-lucide="zap" style="color: var(--accent-color); width: 16px;"></i>
-                <span class="status-text" style="color: var(--accent-color);">MMAP ACTIVE</span>
+            <div style="font-family: var(--font-mono); color: var(--text-tertiary); font-size: 11px; margin-top: 4px; text-transform: uppercase;">
+                {{ sample_axioms.len() }} Axiomes Mappés
             </div>
         </div>
     </div>
     
-    <div class="glass-card col-span-2">
-        <div class="chat-header" style="padding: 0 0 16px 0; border: none;">
-            <i data-lucide="library"></i>
-            <h3>Axiomes Enregistrés</h3>
+    <div style="animation: slideUp 0.4s ease-out;">
+        <!-- TOOLBAR -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+            <h3 style="font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-secondary); text-transform: uppercase;">
+                <i data-lucide="library" style="width: 16px; display: inline-block; vertical-align: middle; margin-right: 8px;"></i>
+                Registre des Axiomes Actifs
+            </h3>
+            
+            <div style="display: flex; gap: 12px;">
+                <button class="btn-secondary" hx-get="/ui/memory" hx-target="#main-content">
+                    <i data-lucide="refresh-cw"></i> Scanner Mmap
+                </button>
+                <button class="btn-danger" hx-post="/api/system/purge" hx-swap="none" onclick="alert('Mémoire Vectorielle purgée (simulation)')">
+                    <i data-lucide="trash-2"></i> Flusher le Fichier RAW
+                </button>
+            </div>
         </div>
         
-        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px;">
-            {% for axiom in sample_axioms %}
-            <div style="background: rgba(0,0,0,0.2); padding: 16px; border-radius: 8px; border: 1px solid var(--panel-border);">
-                <div style="color: var(--text-secondary); font-size: 0.8rem; font-family: monospace; margin-bottom: 8px;">ID: {{ axiom.0 }} | Dims: 384</div>
-                <p style="font-size: 0.85rem; margin-bottom: 12px; height: 60px; overflow: hidden; text-overflow: ellipsis; color: #ccc;">"{{ axiom.1|truncate(140) }}"</p>
-                <div style="width: 100%; height: 2px; background: linear-gradient(90deg, var(--accent-color) 0%, transparent 100%); opacity: 0.5;"></div>
+        <!-- VECTORS GRID -->
+        <div class="grid-3" style="gap: 20px;">
+            {% if sample_axioms.is_empty() %}
+            <div class="glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center; border-style: dashed; border-color: var(--panel-border-hover);">
+                <i data-lucide="box-select" style="width: 48px; height: 48px; color: var(--text-tertiary); margin-bottom: 16px; opacity: 0.5;"></i>
+                <h4 style="font-size: 16px; font-weight: 500; color: var(--text-primary); margin-bottom: 8px;">Vide de Mémoire</h4>
+                <p style="font-size: 13px; color: var(--text-secondary); max-width: 400px; line-height: 1.5;">
+                    Aucune mémoire vectorielle Zero-Copy n'est actuellement mappée. Moteur d'assimilation Mmap inactif ou `knowledge.bin` inexistant.
+                </p>
             </div>
             {% else %}
-            <div style="grid-column: span 3; color: #888; text-align: center; padding: 32px 0;">
-                <i data-lucide="database" style="margin: 0 auto 12px auto; opacity: 0.5; width: 32px; height: 32px; display: block;"></i>
-                Aucune mémoire vectorielle Zero-Copy actuellement mappée. (Fichier knowledge.bin manquant ou vide)
+            {% for axiom in sample_axioms %}
+            <div class="glass-card" style="display: flex; flex-direction: column; gap: 12px; position: relative;">
+                <div style="position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: linear-gradient(to bottom, var(--status-success), transparent); border-top-left-radius: 12px; border-bottom-left-radius: 12px; opacity: 0.5;"></div>
+                
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <span class="badge neutral" style="font-size: 10px;">ID: {{ axiom.0 }}</span>
+                    <span style="font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary);">384 DIMS</span>
+                </div>
+                
+                <p style="font-size: 13px; color: var(--text-primary); line-height: 1.6; height: 80px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; word-break: break-word;">
+                    "{{ axiom.1 }}"
+                </p>
+                
+                <div style="display: flex; justify-content: flex-end; margin-top: auto; border-top: 1px solid var(--panel-border); padding-top: 12px;">
+                    <div style="font-size: 11px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
+                        <i data-lucide="link" style="width: 12px;"></i> Chunk Semantic
+                    </div>
+                </div>
             </div>
             {% endfor %}
+            {% endif %}
         </div>
     </div>
 </div>
+
+<!-- CONTEXT SIDEBAR OVERRIDE -->
+<div id="context-content" hx-swap-oob="true" style="padding: 32px 24px; display: flex; flex-direction: column; gap: 32px; animation: fadeIn 0.3s ease;">
+    <div>
+        <h4 style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-secondary); margin-bottom: 16px; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="cpu" style="width: 14px;"></i> Zéro-Copy Engine
+        </h4>
+        <div class="glass-card" style="padding: 16px; border-color: rgba(16, 185, 129, 0.3);">
+            <p style="font-size: 12px; color: var(--text-primary); line-height: 1.5; margin-bottom: 12px;">
+                Cortex utilise `mmap` pour refléter la mémoire du disque dur directement dans la RAM du processus sans surcharge.
+            </p>
+            <div style="width: 100%; height: 6px; background: var(--bg-void); border-radius: var(--radius-pill); overflow: hidden;">
+                <div style="width: 100%; height: 100%; background: linear-gradient(90deg, var(--status-success), var(--status-info)); opacity: 0.8;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    if(typeof lucide !== 'undefined') lucide.createIcons();
+    if(typeof htmx !== 'undefined') htmx.process(document.body);
+</script>

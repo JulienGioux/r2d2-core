@@ -95,56 +95,54 @@ async fn main() -> Result<()> {
 
     let mut all_chunks = Vec::new();
 
-    for line in reader.lines() {
-        if let Ok(l) = line {
-            if let Ok(entry) = serde_json::from_str::<serde_json::Value>(&l) {
-                // Filtre ciblé sur une mission spécifique si demandé
-                if let Some(target) = &target_mission {
-                    if let Some(m_id) = entry.get("mission_id").and_then(|v| v.as_str()) {
-                        if m_id != target {
-                            continue; // On ignore ce qui n'est pas la mission ciblée
-                        }
-                    } else {
-                        continue; // Pas de mission ID = on ignore
+    for l in reader.lines().map_while(Result::ok) {
+        if let Ok(entry) = serde_json::from_str::<serde_json::Value>(&l) {
+            // Filtre ciblé sur une mission spécifique si demandé
+            if let Some(target) = &target_mission {
+                if let Some(m_id) = entry.get("mission_id").and_then(|v| v.as_str()) {
+                    if m_id != target {
+                        continue; // On ignore ce qui n'est pas la mission ciblée
                     }
+                } else {
+                    continue; // Pas de mission ID = on ignore
                 }
+            }
 
-                let theme = entry
-                    .get("theme")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Connaissance Générale");
+            let theme = entry
+                .get("theme")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Connaissance Générale");
 
-                if let Some(messages) = entry.get("messages").and_then(|v| v.as_array()) {
-                    for msg in messages {
-                        if msg.get("role").and_then(|v| v.as_str()) == Some("assistant") {
-                            if let Some(content_str) = msg.get("content").and_then(|v| v.as_str()) {
-                                // Parsing du JSON interne généré par NotebookLM
-                                if let Ok(inner) =
-                                    serde_json::from_str::<serde_json::Value>(content_str)
-                                {
-                                    // SECURITE ZERO-TRUST: Validation Formelle
-                                    let success = inner
-                                        .get("success")
-                                        .and_then(|v| v.as_bool())
-                                        .unwrap_or(false);
-                                    if !success {
-                                        tracing::warn!("🛡️ [ZERO-TRUST] Rejet d'un payload invalide (Trace Erreur détectée).");
-                                        continue;
-                                    }
-
-                                    // Extraction pure
-                                    if let Some(answer) = inner
-                                        .get("data")
-                                        .and_then(|d| d.get("answer"))
-                                        .and_then(|a| a.as_str())
-                                    {
-                                        let full_text = format!("Thème: {}\n\n{}", theme, answer);
-                                        let chunks = chunk_text(&full_text, 200, 40);
-                                        all_chunks.extend(chunks);
-                                    }
-                                } else {
-                                    tracing::warn!("🛡️ [ZERO-TRUST] Impossible de parser le contenu JSON interne. Rejeté.");
+            if let Some(messages) = entry.get("messages").and_then(|v| v.as_array()) {
+                for msg in messages {
+                    if msg.get("role").and_then(|v| v.as_str()) == Some("assistant") {
+                        if let Some(content_str) = msg.get("content").and_then(|v| v.as_str()) {
+                            // Parsing du JSON interne généré par NotebookLM
+                            if let Ok(inner) =
+                                serde_json::from_str::<serde_json::Value>(content_str)
+                            {
+                                // SECURITE ZERO-TRUST: Validation Formelle
+                                let success = inner
+                                    .get("success")
+                                    .and_then(|v| v.as_bool())
+                                    .unwrap_or(false);
+                                if !success {
+                                    tracing::warn!("🛡️ [ZERO-TRUST] Rejet d'un payload invalide (Trace Erreur détectée).");
+                                    continue;
                                 }
+
+                                // Extraction pure
+                                if let Some(answer) = inner
+                                    .get("data")
+                                    .and_then(|d| d.get("answer"))
+                                    .and_then(|a| a.as_str())
+                                {
+                                    let full_text = format!("Thème: {}\n\n{}", theme, answer);
+                                    let chunks = chunk_text(&full_text, 200, 40);
+                                    all_chunks.extend(chunks);
+                                }
+                            } else {
+                                tracing::warn!("🛡️ [ZERO-TRUST] Impossible de parser le contenu JSON interne. Rejeté.");
                             }
                         }
                     }

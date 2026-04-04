@@ -1,138 +1,105 @@
-<style>
-@keyframes pulse-danger {
-    0% { box-shadow: 0 0 10px rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.5); }
-    50% { box-shadow: 0 0 25px rgba(231,76,60,0.6); border-color: rgba(231,76,60,1); }
-    100% { box-shadow: 0 0 10px rgba(231,76,60,0.2); border-color: rgba(231,76,60,0.5); }
-}
-@keyframes pulse-icon {
-    0% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(231,76,60,0.5)); }
-    50% { transform: scale(1.15); filter: drop-shadow(0 0 8px rgba(231,76,60,0.8)); }
-    100% { transform: scale(1); filter: drop-shadow(0 0 2px rgba(231,76,60,0.5)); }
-}
-.danger-state {
-    animation: pulse-danger 2s infinite ease-in-out;
-}
-.danger-icon {
-    animation: pulse-icon 2s infinite ease-in-out;
-    color: #e74c3c;
-}
-.gauge-bar {
-    transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.5s ease;
-}
-</style>
-
-<div class="dashboard-grid" style="grid-template-columns: repeat(4, 1fr); gap: 24px; animation: slideIn 0.3s ease-out;">
-    
-    <!-- Hero / Welcome Card -->
-    <div class="glass-card" style="grid-column: span 4; display: flex; align-items: center; justify-content: space-between; padding: 32px; background: linear-gradient(135deg, rgba(74, 144, 226, 0.1) 0%, rgba(0, 0, 0, 0.4) 100%);">
+<div class="padded-content">
+    <div class="section-header" style="animation: slideUp 0.3s ease-out;">
         <div>
-            <h1 style="margin: 0 0 8px 0; font-size: 2.5em; font-weight: 700; background: linear-gradient(45deg, #fff, #4a90e2); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;">
-                Paradox Engine 1.58b
+            <h1 class="section-title">
+                R2D2 Engine <span style="font-weight: 400; color: var(--text-tertiary);">v2.0</span>
             </h1>
-            <p style="margin: 0; color: #aaa; font-size: 1.1em;">
-                Système Souverain d'Intelligence Artificielle.
+            <p class="section-subtitle">
+                Système Souverain d'Intelligence Artificielle. Architecture Edge-Native.
             </p>
         </div>
         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="pulse-dot" style="background: #2ecc71;"></span>
-                <span style="color: #2ecc71; font-weight: 500;">Système Nominal</span>
+            <div class="status-indicator">
+                <span class="pulse-dot"></span>
+                <span>Système Nominal</span>
             </div>
-            <div style="font-family: monospace; color: #888;">UPTIME LOGIQUE: {{ uptime_formatted }}</div>
+            <div style="font-family: var(--font-mono); color: var(--text-tertiary); font-size: 11px; margin-top: 4px; text-transform: uppercase;">
+                UPTIME: {{ uptime_formatted }}
+            </div>
         </div>
     </div>
 
     <!-- Quick Stats Widgets -->
-    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px; {% if alert_threshold %}border: 1px solid rgba(231, 76, 60, 0.5); box-shadow: 0 0 15px rgba(231, 76, 60, 0.2);{% endif %}">
-        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>RAM Hôte Globale</span>
-            <i data-lucide="cpu" style="width: 20px; {% if alert_threshold %}color: #e74c3c;{% endif %}"></i>
-        </div>
-        <div style="font-size: 2em; font-weight: 600; {% if alert_threshold %}color: #e74c3c;{% endif %}">{{ used_ram_gb }} <span style="font-size: 0.5em; color: #666;">GB / {{ total_ram_gb }} GB</span></div>
-        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-            <div class="gauge-bar" style="width: {{ ram_percent }}%; height: 100%; background: {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %}; border-radius: 2px; box-shadow: 0 0 8px {% if alert_threshold %}#e74c3c{% else %}#4a90e2{% endif %};"></div>
-        </div>
-    </div>
-
-    <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 12px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>Axiomes Mémoire</span>
-            <i data-lucide="database" style="width: 20px;"></i>
-        </div>
-        <div style="font-size: 2em; font-weight: 600;">{{ memory_vectors_count }}</div>
-        <div style="font-size: 0.85em; color: #2ecc71; display: flex; align-items: center; gap: 4px;">
-            Vecteurs chargés en Mmap
-        </div>
-    </div>
-
-    <div class="glass-card stat-card {% if entropy > 0.85 %}danger-state{% endif %}" style="display: flex; flex-direction: column; gap: 12px; transition: all 0.5s ease;">
-        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>Entropie Sémantique</span>
-            <i data-lucide="brain-circuit" class="{% if entropy > 0.85 %}danger-icon{% endif %}" style="width: 20px; transition: color 0.5s ease;"></i>
-        </div>
-        <div style="font-size: 2em; font-weight: 600; transition: color 0.5s ease; {% if entropy > 0.85 %}color: #e74c3c;{% endif %}">{{ entropy }}</div>
-        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
-            <div class="gauge-bar" style="width: calc({{ entropy }} * 100%); height: 100%; background: {% if entropy > 0.85 %}#e74c3c{% else %}#9b59b6{% endif %}; border-radius: 2px;"></div>
-        </div>
-    </div>
-
-    <div class="glass-card stat-card {% if tension > 0.85 %}danger-state{% endif %}" style="display: flex; flex-direction: column; gap: 12px; transition: all 0.5s ease;">
-        <div style="display: flex; justify-content: space-between; align-items: center; color: #888;">
-            <span>Dissonance / Tension</span>
-            <i data-lucide="activity" class="{% if tension > 0.85 %}danger-icon{% endif %}" style="width: 20px;"></i>
-        </div>
-        <div style="display: flex; align-items: baseline; gap: 8px;">
-            <div style="font-size: 1.8em; font-weight: 600; color: #f39c12; transition: all 0.5s ease;">{{ dissonance }}</div>
-            <div style="font-size: 1em; color: #888;">/</div>
-            <div style="font-size: 1.8em; font-weight: 600; color: #e74c3c; transition: all 0.5s ease;">{{ tension }}</div>
-        </div>
-        <div style="font-size: 0.85em; color: #bbb;">
-            Pression Système (VibeVector)
-        </div>
-    </div>
-
-    <!-- Live Activity Log -->
-    <div class="glass-card" style="grid-column: span 2; display: flex; flex-direction: column; gap: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
-            <i data-lucide="activity"></i>
-            <h3 style="margin: 0; font-weight: 500;">Activité Récente</h3>
-        </div>
-        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 0.9em; color: #ccc;">
-            <div style="display: flex; gap: 16px;">
-                <span style="color: #888; font-family: monospace;">T-00:01</span>
-                <span>Détection de visage (SensoryGateway) -> Qwen3-VL</span>
+    <div class="grid-3" style="animation: slideUp 0.4s ease-out;">
+        <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px; {% if alert_threshold %}border-color: var(--status-danger);{% endif %}">
+            <div class="card-header" style="margin-bottom:0;">
+                <span class="card-title">RAM Hôte Globale</span>
+                <i data-lucide="cpu" style="width: 18px; color: {% if alert_threshold %}var(--status-danger){% else %}var(--text-secondary){% endif %};"></i>
             </div>
-            <div style="display: flex; gap: 16px;">
-                <span style="color: #888; font-family: monospace;">T-00:04</span>
-                <span>Sauvegarde des embeddings (1.4K chunks) -> vector.bin</span>
+            <div>
+                <span class="metric-value">{{ used_ram_gb }}</span>
+                <span style="font-size: 14px; color: var(--text-tertiary); font-family: var(--font-mono);">/ {{ total_ram_gb }} GB</span>
             </div>
-            <div style="display: flex; gap: 16px;">
-                <span style="color: #888; font-family: monospace;">T-00:15</span>
-                <span>Vampire Job 'Rust-Engineering' Complété.</span>
+            <div class="progress-bg">
+                <div class="progress-fill {% if alert_threshold %}danger{% endif %}" style="width: {{ ram_percent }}%;"></div>
+            </div>
+        </div>
+
+        <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="card-header" style="margin-bottom:0;">
+                <span class="card-title">Axiomes Mémoire</span>
+                <i data-lucide="database" style="width: 18px; color: var(--text-secondary);"></i>
+            </div>
+            <div class="metric-value">
+                {{ memory_vectors_count }}
+            </div>
+            <div style="font-size: 12px; color: var(--status-success); display: flex; align-items: center; gap: 6px;">
+                <i data-lucide="check-circle-2" style="width: 14px;"></i> Vecteurs Mmap Synchronisés
+            </div>
+        </div>
+
+        <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="card-header" style="margin-bottom:0;">
+                <span class="card-title">Pression / Tension</span>
+                <i data-lucide="activity" style="width: 18px; color: {% if tension > 0.85 %}var(--status-danger){% else %}var(--text-secondary){% endif %};"></i>
+            </div>
+            <div style="display: flex; align-items: baseline; gap: 8px;">
+                <span class="metric-value" style="color: var(--status-warning);">{{ dissonance }}</span>
+                <span style="font-size: 16px; color: var(--text-tertiary);">/</span>
+                <span class="metric-value" style="{% if tension > 0.85 %}color: var(--status-danger);{% endif %}">{{ tension }}</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-tertiary);">
+                Indicateurs VibeVector Logiques
             </div>
         </div>
     </div>
 
-    <!-- Quick Actions -->
-    <div class="glass-card" style="grid-column: span 2; display: flex; flex-direction: column; gap: 16px;">
-        <div style="display: flex; align-items: center; gap: 8px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px;">
-            <i data-lucide="zap"></i>
-            <h3 style="margin: 0; font-weight: 500;">Actions Rapides</h3>
+    <div style="display: flex; gap: 24px; animation: slideUp 0.5s ease-out;">
+        <!-- Live Activity Log -->
+        <div class="glass-card" style="flex: 2; display: flex; flex-direction: column; gap: 16px; min-height: 280px;">
+            <div class="card-header" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 16px; margin: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i data-lucide="terminal" style="color: var(--text-secondary); width: 16px;"></i>
+                    <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Télémétrie en temps réel</h3>
+                </div>
+                <span class="pulse-dot" style="background: var(--status-info); box-shadow: 0 0 8px var(--status-info);"></span>
+            </div>
+            <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);" hx-ext="sse" sse-connect="/api/admin/system/logs" sse-swap="message" hx-swap="beforeend">
+                <div style="color: var(--text-tertiary); font-style: italic;">En attente des signaux système...</div>
+            </div>
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-            <button class="btn-primary" hx-get="/ui/chat" hx-target="#main-content" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i data-lucide="message-square"></i> Nouveau Chat
-            </button>
-            <button class="btn-primary" hx-get="/ui/admin" hx-target="#main-content" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i data-lucide="shield-alert"></i> Manager Modèles
-            </button>
-            <button class="btn-primary" hx-get="/ui/memory" hx-target="#main-content" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i data-lucide="search"></i> Requête RAG
-            </button>
-            <button class="btn-primary" hx-post="/api/system/purge" style="background: rgba(231, 76, 60, 0.2); border: 1px solid rgba(231, 76, 60, 0.5); color: #e74c3c; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                <i data-lucide="trash-2"></i> Purger VRAM
-            </button>
+
+        <!-- Quick Actions -->
+        <div class="glass-card" style="flex: 1; display: flex; flex-direction: column; gap: 16px;">
+            <div class="card-header" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 16px; margin: 0;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i data-lucide="zap" style="color: var(--text-secondary); width: 16px;"></i>
+                    <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Actions Rapides</h3>
+                </div>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
+                <button class="btn-primary" hx-get="/ui/chat" hx-target="#main-content" style="justify-content: flex-start; padding: 14px 16px;">
+                    <i data-lucide="message-square"></i> Nouveau Chat Cortex
+                </button>
+                <button class="btn-secondary" hx-get="/ui/store" hx-target="#main-content" style="justify-content: flex-start; padding: 14px 16px;">
+                    <i data-lucide="box"></i> Découvrir les Modèles (Store)
+                </button>
+                <div style="margin: 8px 0; height: 1px; background: var(--panel-border);"></div>
+                <button class="btn-danger" hx-post="/api/system/purge" style="justify-content: center;">
+                    <i data-lucide="trash-2"></i> Purger VRAM
+                </button>
+            </div>
         </div>
     </div>
-
 </div>
+<script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>

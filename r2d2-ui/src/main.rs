@@ -41,6 +41,9 @@ struct AppState {
     sys: Arc<Mutex<System>>,
     start_time: Instant,
     circadian_rx: tokio::sync::watch::Receiver<Arc<VibeVector>>,
+    blackboard: Arc<PostgresBlackboard>,
+    hf_models_cache: Arc<tokio::sync::RwLock<Vec<String>>>,
+    chat_status: Arc<tokio::sync::RwLock<String>>,
 }
 
 #[derive(Template)]
@@ -62,6 +65,8 @@ struct DashboardTemplate {
     pub uptime_formatted: String,
     #[allow(dead_code)]
     pub core_count: usize,
+    #[allow(dead_code)]
+    #[allow(dead_code)]
     pub entropy: f32,
     pub dissonance: f32,
     pub tension: f32,
@@ -75,7 +80,9 @@ struct CortexTemplate {}
 #[template(path = "chat.html")]
 struct ChatTemplate {
     history_html: String,
+    #[allow(dead_code)]
     github_configured: bool,
+    #[allow(dead_code)]
     active_sources_html: String,
     library_repos: Vec<String>,
 }
@@ -88,65 +95,122 @@ struct MemoryTemplate {
     pub sample_axioms: Vec<(usize, String)>,
 }
 
+pub struct KeyView {
+    pub provider: String,
+    pub masked_value: String,
+    pub is_set: bool,
+}
+
 #[derive(Template)]
 #[template(path = "admin.html")]
 struct AdminTemplate {
-    local_models: Vec<String>,
+    keys: Vec<KeyView>,
 }
 
-pub fn list_local_hf_models() -> Vec<String> {
-    let mut models = vec![];
-    if let Some(home) = dirs::home_dir() {
-        let hf_hub = home.join(".cache/huggingface/hub");
-        if let Ok(entries) = std::fs::read_dir(hf_hub) {
-            for entry in entries.flatten() {
-                if let Ok(name) = entry.file_name().into_string() {
-                    if name.starts_with("models--") {
-                        models.push(name.replace("models--", "").replace("--", "/"));
+pub struct McpToolView {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub command: String,
+    pub is_enabled: bool,
+}
+
+pub struct CuratedModel {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Template)]
+#[template(path = "store.html")]
+struct StoreTemplate {
+    local_models: Vec<(String, String)>,
+    mcp_tools: Vec<McpToolView>,
+    curated_models: Vec<CuratedModel>,
+    db_error: Option<String>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
+pub struct ModelRoleMapping {
+    pub roles: std::collections::HashMap<String, String>,
+}
+
+pub async fn read_model_roles() -> ModelRoleMapping {
+    if let Ok(data) = tokio::fs::read_to_string("data/models.json").await {
+        if let Ok(map) = serde_json::from_str(&data) {
+            return map;
+        }
+    }
+    ModelRoleMapping {
+        roles: std::collections::HashMap::new(),
+    }
+}
+
+pub async fn write_model_roles(mapping: &ModelRoleMapping) {
+    if let Ok(data) = serde_json::to_string_pretty(mapping) {
+        let _ = tokio::fs::create_dir_all("data").await;
+        let _ = tokio::fs::write("data/models.json", data).await;
+    }
+}
+
+pub async fn list_local_hf_models() -> Vec<String> {
+    tokio::task::spawn_blocking(|| {
+        let mut local = vec![];
+        if let Some(home) = dirs::home_dir() {
+            let hf_hub = home.join(".cache/huggingface/hub");
+            if let Ok(entries) = std::fs::read_dir(hf_hub) {
+                for entry in entries.flatten() {
+                    if let Ok(name) = entry.file_name().into_string() {
+                        if name.starts_with("models--") {
+                            local.push(name.replace("models--", "").replace("--", "/"));
+                        }
                     }
                 }
             }
         }
-    }
-    models.sort();
-    models
+        local.sort();
+        if local.is_empty() {
+            local.push("Aucun modèle détecté dans ~/.cache/huggingface".to_string());
+        }
+        local
+    })
+    .await
+    .unwrap_or_else(|_| vec!["(Erreur lors du scan du cache local HF)".to_string()])
 }
 
 #[derive(Template)]
 #[template(
     source = r#"
 <div class="message user">
-    <i data-lucide="user"></i>
+    <div class="message-avatar"><i data-lucide="user" style="width: 18px;"></i></div>
     <div class="message-content">
-        <strong>Directif Utilisateur</strong>
-        <p>{{ prompt }}</p>
+        <div class="message-sender">User</div>
+        <div class="message-bubble">{{ prompt|safe }}</div>
     </div>
 </div>
 {{ mcp_feedback|safe }}
 <div class="message system">
-    <i data-lucide="brain-circuit" style="margin-top: 4px;"></i>
+    <div class="message-avatar"><i data-lucide="brain-circuit" style="width: 18px;"></i></div>
     <div class="message-content" style="width: 100%;">
-        <div class="message-header" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 12px;">
-            <strong style="color: var(--highlight-color); font-size: 0.9rem;">{{ model_name }}</strong>
+        <div class="message-sender" style="justify-content: space-between; width: 100%;">
+            <span style="color: var(--accent-brand);">{{ model_name }}</span>
             <div class="view-toggles" style="display: flex; gap: 4px;">
-                <button type="button" class="btn-sm" onclick="showTab(this, 0)" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Vue Synthétique (MD)</button>
-                <button type="button" class="btn-sm" onclick="showTab(this, 1)" style="background: transparent; border: 1px solid var(--border-color); color: #888; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Matrice JSONAi</button>
-                <button type="button" class="btn-sm" onclick="showTab(this, 2)" style="background: transparent; border: 1px solid var(--border-color); color: #888; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; cursor: pointer; transition: all 0.2s;">Trace Réseau</button>
+                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[0].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';" style="background: var(--bg-active);">MD</button>
+                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[1].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';">JSON</button>
+                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[2].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';">Trace</button>
             </div>
         </div>
         
-        <div class="tab-content" style="display: block;">
-            <div class="markdown-body" style="font-size: 0.95rem; line-height: 1.6;">{{ response_md|safe }}</div>
+        <div class="message-bubble tab-content" style="display: block; width: 100%;">
+            <div class="markdown-body">{{ response_md|safe }}</div>
         </div>
-        <div class="tab-content" style="display: none;">
-            <pre style="background: rgba(0,0,0,0.5); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; color: #a5d6ff; margin: 0;">{{ jsonai|safe }}</pre>
+        <div class="message-bubble tab-content" style="display: none; width: 100%;">
+            <pre style="margin:0;">{{ jsonai|safe }}</pre>
         </div>
-        <div class="tab-content" style="display: none;">
-            <pre style="background: rgba(0,0,0,0.5); padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 0.8rem; color: #ffcc00; margin: 0;">
-⌚ Délai d'inférence cognitif : {{ latency }} ms
-🏭 Provider Cloud Ciblé      : {{ model_name }}
-🫂 Consensus d'Inférence     : {{ consensus }}
-            </pre>
+        <div class="message-bubble tab-content" style="display: none; font-family: var(--font-mono); font-size: 12px; width: 100%;">
+            <div style="margin-bottom:8px; color: var(--text-tertiary);">⌚ Délai: <span style="color: var(--text-primary);">{{ latency }} ms</span></div>
+            <div style="margin-bottom:8px; color: var(--text-tertiary);">🏭 Provider: <span style="color: var(--text-primary);">{{ model_name }}</span></div>
+            <div style="color: var(--text-tertiary);">🫂 Consensus: <span style="color: var(--text-primary);">{{ consensus }}</span></div>
         </div>
     </div>
 </div>
@@ -195,6 +259,75 @@ async fn main() -> anyhow::Result<()> {
         .load()
         .await
         .expect("Erreur Fatale lors de l'allocation Tensorielle du Cortex Local");
+
+    tracing::info!("🔌 Initialisation planifiée du Hub global MCP (Model Context Protocol)...");
+    let mut envs = std::collections::HashMap::new();
+    if let Ok(github_token) = std::env::var("GITHUB_PERSONAL_ACCESS_TOKEN") {
+        if !github_token.is_empty() {
+            envs.insert("GITHUB_PERSONAL_ACCESS_TOKEN".to_string(), github_token);
+        }
+    } else {
+        // Fallback or via vault
+        let vault_token =
+            r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN")
+                .unwrap_or_default();
+        if !vault_token.is_empty() {
+            envs.insert("GITHUB_PERSONAL_ACCESS_TOKEN".to_string(), vault_token);
+        }
+    }
+
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://r2d2_admin:secure_r2d2_password_local@localhost:5433/r2d2_blackboard"
+            .to_string()
+    });
+    let blackboard = Arc::new(PostgresBlackboard::new(&db_url).await?);
+
+    // FIX: S'assurer que les tables (mcp_registry, model_registry) existent avant toute requête.
+    if let Err(e) = blackboard.initialize_registry_tables().await {
+        tracing::error!(
+            "❌ Échec critique lors de l'initialisation du registre: {}",
+            e
+        );
+    }
+
+    match blackboard.get_all_mcp_tools().await {
+        Ok(tools) => {
+            let mut configs = Vec::new();
+            for tool in tools {
+                if tool.is_enabled {
+                    let args_vec: Vec<String> =
+                        serde_json::from_str(&tool.args_json).unwrap_or_default();
+                    configs.push(r2d2_cortex::mcp_hub::McpServerConfig {
+                        name: tool.name,
+                        command: tool.command,
+                        args: args_vec,
+                        envs: envs.clone(),
+                    });
+                }
+            }
+            match r2d2_cortex::mcp_hub::McpHub::new(configs).await {
+                Ok(hub) => {
+                    let mcp_hub = std::sync::Arc::new(tokio::sync::Mutex::new(Some(hub)));
+                    reasoning_agent.mcp_hub = mcp_hub;
+                    tracing::info!(
+                        "✅ MCP Hub instancié avec succès et rattaché au ReasoningAgent."
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "❌ Échec critique lors de l'instanciation de l'écosystème MCP : {}",
+                        e
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                "❌ [DB-ERROR] Impossible de récupérer les outils MCP depuis le Blackboard : {:?}",
+                e
+            );
+        }
+    }
 
     // 2. Initialisation du Démon Circadien (L'Hyperviseur Background)
     tracing::info!("Démarrage de l'Hyperviseur R2D2 en arrière-plan...");
@@ -273,11 +406,21 @@ async fn main() -> anyhow::Result<()> {
         sys: Arc::new(Mutex::new(sys)),
         start_time: Instant::now(),
         circadian_rx,
+        blackboard: blackboard.clone(),
+        hf_models_cache: Arc::new(tokio::sync::RwLock::new(Vec::new())),
+        chat_status: Arc::new(tokio::sync::RwLock::new(String::new())),
     };
+
+    let cache_clone = shared_state.hf_models_cache.clone();
+    tokio::spawn(async move {
+        let models = list_local_hf_models().await;
+        *cache_clone.write().await = models;
+    });
 
     let api_routes = Router::new()
         .route("/widgets/status", get(get_status_widget))
         .route("/chat", post(handle_chat))
+        .route("/chat/status", get(get_chat_status))
         .route("/chat/history/list", get(get_history_list))
         .route("/chat/history/:id", get(load_chat_history))
         .route("/chat/history/:id", delete(delete_chat_session))
@@ -294,10 +437,16 @@ async fn main() -> anyhow::Result<()> {
         .route("/admin/assimilate", post(start_assimilation_all))
         .route("/admin/assimilate/:id", post(start_assimilation_id))
         .route("/admin/system/logs", get(stream_system_logs))
-        .route("/admin/keys", get(get_admin_keys))
         .route("/admin/keys", post(set_admin_keys))
         .route("/chat/context/attach", post(attach_context))
-        .route("/chat/context/remove", post(remove_context));
+        .route("/chat/context/remove", post(remove_context))
+        .route("/mcp/add", post(add_mcp_tool))
+        .route("/mcp/toggle/:id", post(toggle_mcp_tool))
+        .route("/mcp/delete/:id", delete(delete_mcp_tool))
+        .route("/store/download", post(store_download_model))
+        .route("/store/scan", post(store_scan_hf))
+        .route("/store/assign_role", post(assign_model_role))
+        .route("/store/delete", post(delete_local_hf_model));
 
     let app = Router::new()
         .route("/", get(render_index))
@@ -305,6 +454,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/ui/chat", get(render_chat))
         .route("/ui/cortex", get(render_cortex))
         .route("/ui/memory", get(render_memory))
+        .route("/ui/store", get(render_store))
         .route("/ui/admin", get(render_admin))
         .nest("/api", api_routes)
         .nest_service(
@@ -508,18 +658,264 @@ async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-async fn render_admin() -> impl IntoResponse {
-    Html(
-        AdminTemplate {
-            local_models: list_local_hf_models(),
+async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
+    let t0 = std::time::Instant::now();
+    let cached_models = state.hf_models_cache.read().await.clone();
+    let t1 = std::time::Instant::now();
+    tracing::info!(
+        "⏱️ [STORE TELEMETRY] Lecture du Cache HD Models (RwLock): {:?}",
+        t1.duration_since(t0)
+    );
+
+    let mappings = read_model_roles().await;
+    let t2 = std::time::Instant::now();
+    tracing::info!(
+        "⏱️ [STORE TELEMETRY] Lecture Asynchrone (tokio::fs) models.json: {:?}",
+        t2.duration_since(t1)
+    );
+
+    let mut local_models = vec![];
+    for m in cached_models {
+        let role = mappings
+            .roles
+            .get(&m)
+            .cloned()
+            .unwrap_or_else(|| "none".to_string());
+        local_models.push((m, role));
+    }
+
+    let mut mcp_tools = vec![];
+    let mut db_error = None;
+
+    let t3 = std::time::Instant::now();
+    match state.blackboard.get_all_mcp_tools().await {
+        Ok(tools) => {
+            for t in tools {
+                mcp_tools.push(McpToolView {
+                    id: t.id,
+                    name: t.name,
+                    description: "Serveur MCP distant configuré via Blackboard".to_string(),
+                    command: format!("{} {}", t.command, t.args_json),
+                    is_enabled: t.is_enabled,
+                });
+            }
+        }
+        Err(e) => {
+            tracing::error!("Erreur accès Blackboard (MCP_Tools): {}", e);
+            db_error = Some("La base de données PostgreSQL est actuellement inaccessible. Vérifiez que votre conteneur est lancé et disponible.".to_string());
+        }
+    }
+    let t4 = std::time::Instant::now();
+    tracing::info!(
+        "⏱️ [STORE TELEMETRY] Requête PostgresBlackboard MCP_Tools: {:?}",
+        t4.duration_since(t3)
+    );
+
+    let curated_models = vec![
+        CuratedModel {
+            id: "microsoft/Phi-3-mini-4k-instruct".into(),
+            name: "Phi-3 Mini (4K)".into(),
+            description: "Modèle compact ultra-performant idéal pour le code local.".into(),
+        },
+        CuratedModel {
+            id: "deepseek-ai/deepseek-coder-1.3b-instruct".into(),
+            name: "DeepSeek Coder 1.3B".into(),
+            description: "Modèle de génération de code optimisé pour R2D2.".into(),
+        },
+        CuratedModel {
+            id: "nomic-ai/nomic-embed-text-v1.5".into(),
+            name: "Nomic Embed Text v1.5".into(),
+            description: "Modèle Embedding Vectoriel Multilingue (8192 context).".into(),
+        },
+    ];
+
+    let html_res = Html(
+        StoreTemplate {
+            local_models,
+            mcp_tools,
+            curated_models,
+            db_error,
         }
         .render()
         .unwrap(),
-    )
+    );
+
+    let t5 = std::time::Instant::now();
+    tracing::info!(
+        "⏱️ [STORE TELEMETRY] Rendu Askama Template (html): {:?}",
+        t5.duration_since(t4)
+    );
+    tracing::info!(
+        "⏱️ [STORE TELEMETRY] TEMPS TOTAL: {:?}",
+        t5.duration_since(t0)
+    );
+
+    html_res
+}
+
+#[derive(serde::Deserialize)]
+struct AssignRolePayload {
+    model: String,
+    role: String,
+}
+
+async fn assign_model_role(Form(payload): Form<AssignRolePayload>) -> impl IntoResponse {
+    let mut mapping = read_model_roles().await;
+    if payload.role == "none" {
+        mapping.roles.remove(&payload.model);
+    } else {
+        mapping
+            .roles
+            .insert(payload.model.clone(), payload.role.clone());
+    }
+    write_model_roles(&mapping).await;
+
+    let role_display = match payload.role.as_str() {
+        "reasoning" => "Main Reasoning",
+        "vision" => "Vision Engine",
+        "code" => "Code Assistant",
+        _ => "Désactivé",
+    };
+
+    let color = if payload.role == "none" {
+        "var(--text-tertiary)"
+    } else {
+        "var(--status-success)"
+    };
+    let icon = if payload.role == "none" {
+        "power-off"
+    } else {
+        "check-circle-2"
+    };
+
+    Html(format!(
+        "<div style='color: {}; font-size: 11px; margin-top: 4px;'><i data-lucide='{}' style='width: 12px; vertical-align: middle;'></i> Assigné : {}</div><script>lucide.createIcons();</script>",
+        color, icon, role_display
+    ))
+}
+
+async fn store_scan_hf(State(state): State<AppState>) -> impl IntoResponse {
+    let cache_clone = state.hf_models_cache.clone();
+    tokio::spawn(async move {
+        let models = list_local_hf_models().await;
+        *cache_clone.write().await = models;
+    });
+    Html("<div class='badge info' style='margin-top: 8px; margin-left: 12px; position: absolute; right: 260px; top: -4px;'><i data-lucide='loader-2' class='spin' style='width:14px'></i> Analyse de la matrice...</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'}), 2000);</script>".to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct DeleteModelPayload {
+    model: String,
+}
+
+async fn delete_local_hf_model(
+    State(state): State<AppState>,
+    Form(payload): Form<DeleteModelPayload>,
+) -> impl IntoResponse {
+    let model_name = payload.model;
+    let cache_clone = state.hf_models_cache.clone();
+
+    // Lancement de la suppression lourde et du rescan 100% en tâche de fond pour ne jamais bloquer l'UI
+    tokio::spawn(async move {
+        if !model_name.contains("..") && !model_name.is_empty() {
+            let target_dir = format!("models--{}", model_name.replace("/", "--"));
+            // 1. Suppression Physique
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Some(home) = dirs::home_dir() {
+                    let hf_hub = home.join(".cache/huggingface/hub");
+                    let model_path = hf_hub.join(target_dir);
+                    let _ = std::fs::remove_dir_all(&model_path);
+                }
+            })
+            .await;
+
+            // 2. Refresh du Cache
+            let models = list_local_hf_models().await;
+            *cache_clone.write().await = models;
+        }
+    });
+
+    // On notifie l'utilisateur instantanément que l'opération est relayée au démon.
+    Html("<div class='badge warning' style='margin-top:8px; width:100%; border-color: rgba(245,158,11,0.2) !important;'><i data-lucide='cpu' style='width:14px; margin-right:6px;'></i> Désinstallation programmée. Rafraîchissez dans quelques instants.</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'}), 5000);</script>".to_string())
+}
+
+#[derive(serde::Deserialize)]
+struct AddMcpPayload {
+    name: String,
+    command: String,
+    args_json: String,
+}
+
+async fn add_mcp_tool(
+    State(state): State<AppState>,
+    Form(payload): Form<AddMcpPayload>,
+) -> impl IntoResponse {
+    let _ = state
+        .blackboard
+        .add_mcp_tool(&payload.name, &payload.command, &payload.args_json)
+        .await;
+    let success_msg = format!("<div class='mcp-card' style='border-color: var(--status-success);'><i data-lucide='check' style='color:var(--status-success)'></i> Configuré : {}</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {{target: '#main-content', swap: 'innerHTML'}}), 1500);</script>", payload.name);
+    Html(success_msg)
+}
+
+async fn toggle_mcp_tool(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    // On inverse l'état existant
+    if let Ok(tools) = state.blackboard.get_all_mcp_tools().await {
+        if let Some(tool) = tools.iter().find(|t| t.id == id) {
+            let _ = state
+                .blackboard
+                .enable_mcp_tool(&id, !tool.is_enabled)
+                .await;
+        }
+    }
+    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'});</script>"#.to_string())
+}
+
+async fn delete_mcp_tool(
+    State(state): State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let _ = state.blackboard.delete_mcp_tool(&id).await;
+    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'});</script>"#.to_string())
+}
+
+// --- Administration (Vault) ---
+async fn render_admin() -> impl IntoResponse {
+    let masked = r2d2_cortex::security::vault::Vault::get_masked_keys();
+    // Default providers expected in the Vault
+    let providers = vec![
+        "GEMINI_API_KEY",
+        "MISTRAL_API_KEY",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "HF_TOKEN",
+    ];
+
+    let mut keys = Vec::new();
+    for p in providers {
+        let val = masked
+            .get(p)
+            .cloned()
+            .unwrap_or_else(|| "NON DÉFINIE".to_string());
+        keys.push(KeyView {
+            provider: p.to_string(),
+            is_set: val != "NON DÉFINIE",
+            masked_value: val,
+        });
+    }
+
+    Html(AdminTemplate { keys }.render().unwrap())
 }
 
 async fn system_purge() -> impl IntoResponse {
     Html(r#"<div style='color: #2ecc71; padding: 12px; border: 1px solid #2ecc71; border-radius: 4px; background: rgba(46, 204, 113, 0.1);'><i data-lucide='check' style='display:inline-block; vertical-align:middle;'></i> VRAM Purgée (Mock). Cache nettoyé.</div><script>lucide.createIcons(); setTimeout(()=>document.querySelector(".dashboard-grid").innerHTML="", 3000);</script>"#.to_string())
+}
+
+async fn get_chat_status(State(state): State<AppState>) -> impl IntoResponse {
+    let status = state.chat_status.read().await.clone();
+    Html(status)
 }
 
 async fn handle_chat(
@@ -536,7 +932,7 @@ async fn handle_chat(
         *state.pending_debate_prompt.lock().await = Some(input.prompt.clone());
         let safe_prompt = input.prompt.replace("<", "&lt;").replace(">", "&gt;");
         let user_msg_html = format!(
-            "<div class='message user'><i data-lucide='user'></i><div class='message-content'><strong>Directif Utilisateur</strong><p>{}</p></div></div>", 
+            "<div class='message user'><div class='message-avatar'><i data-lucide='user' style='width:18px;'></i></div><div class='message-content'><div class='message-sender'>Vous</div><div class='message-bubble'>{}</div></div></div>", 
             safe_prompt
         );
         let html = format!(
@@ -603,6 +999,14 @@ async fn handle_chat(
     let mut last_function_name = String::new();
 
     loop {
+        // MAJ Statut : Inférence Cognitive ou Outil
+        let status_msg = if is_function_result {
+            format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Analyse du retour de l'outil {}...</span></div>", last_function_name)
+        } else {
+            "<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Inférence Cognitive en cours...</span></div>".to_string()
+        };
+        *state.chat_status.write().await = status_msg;
+
         let thought_future = cortex.generate_thought_agentic(
             &current_prompt,
             &otf_repos,
@@ -633,57 +1037,68 @@ async fn handle_chat(
                     args
                 );
 
-                // Lazy initialization du Daemon MCP (Actor Pattern)
-                let github_token = r2d2_cortex::security::vault::Vault::get_api_key(
-                    "GITHUB_PERSONAL_ACCESS_TOKEN",
-                )
-                .unwrap_or_default();
-                let mut mcp_lock = cortex.mcp_client.lock().await;
+                // MAJ Statut : Exécution MCP
+                *state.chat_status.write().await = format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Exécution de l'outil {}...</span></div>", name);
+
+                let mcp_lock = cortex.mcp_hub.lock().await;
                 let mut init_failed = false;
                 if mcp_lock.is_none() {
-                    tracing::info!("Instantiating persistent MCP Daemon...");
-                    match r2d2_cortex::mcp_client::McpClient::new(&github_token).await {
-                        Ok(client) => {
-                            *mcp_lock = Some(client);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to instantiate MCP Daemon: {}", e);
-                            current_prompt = format!("Erreur système interne: impossible d'instancier le démon MCP. L'appel 'npx' a échoué (Timeout ou Proxy). Raison : {}", e);
-                            is_function_result = true;
-                            last_function_name = name.clone();
-                            mcp_feedback_html.push_str(&format!(
-                                "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur d'Amorçage Outil `github-mcp::{}`: Daemon Instantiation Failed</div>",
-                                name
-                            ));
-                            init_failed = true;
-                        }
-                    }
+                    tracing::error!("Failed to use MCP Hub: Backend not initialized.");
+                    current_prompt = "Erreur système interne: Le Hub MCP n'est pas instancié. L'appel outil a échoué.".to_string();
+                    is_function_result = true;
+                    last_function_name = name.clone();
+                    mcp_feedback_html.push_str(&format!(
+                        "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur d'Amorçage Outil `Hub-MCP::{}`: Daemon Not Instantiated</div>",
+                        name
+                    ));
+                    init_failed = true;
                 }
 
                 if !init_failed {
                     if let Some(ref mcp) = *mcp_lock {
-                        match mcp.call_tool(&name, args).await {
-                            Ok(res) => {
+                        let parts: Vec<&str> = name.split("___").collect();
+                        let (server_name, tool_name) = if parts.len() == 2 {
+                            (parts[0], parts[1])
+                        } else {
+                            ("unknown", name.as_str())
+                        };
+
+                        let tool_future = mcp.call_tool(server_name, tool_name, args.clone());
+                        let tool_result =
+                            tokio::time::timeout(std::time::Duration::from_secs(10), tool_future)
+                                .await;
+
+                        match tool_result {
+                            Ok(Ok(res)) => {
                                 let mut res_str = res.to_string();
                                 if res_str.len() > 250_000 {
                                     res_str = res_str.chars().take(250_000).collect();
                                     res_str.push_str("... [RESULT TRUNCATED BY R2D2]");
                                 }
-                                current_prompt = format!("{}", res_str);
+                                current_prompt = res_str.to_string();
                                 is_function_result = true;
                                 last_function_name = name.clone();
                                 mcp_feedback_html.push_str(&format!(
-                                    "<div style='font-size:0.8rem; color:#888; border-left:2px solid #3b82f6; padding-left:8px; margin-bottom:8px;'><i data-lucide='cpu' style='width:14px;'></i> Outil `github-mcp::{}` exécuté.</div>",
-                                    name
+                                    "<div style='font-size:0.8rem; color:#888; border-left:2px solid #3b82f6; padding-left:8px; margin-bottom:8px;'><i data-lucide='cpu' style='width:14px;'></i> Outil `{}::{}` exécuté.</div>",
+                                    server_name, tool_name
                                 ));
                             }
-                            Err(e) => {
+                            Ok(Err(e)) => {
                                 current_prompt = format!("Tool {} execution failed: {}", name, e);
                                 is_function_result = true;
                                 last_function_name = name.clone();
                                 mcp_feedback_html.push_str(&format!(
-                                    "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur `github-mcp::{}`: {}</div>",
+                                    "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Erreur `{}`: {}</div>",
                                     name, e
+                                ));
+                            }
+                            Err(_) => {
+                                current_prompt = format!("System Error: Timeout réseau de 10s. Le sous-processus MCP ({}) ne répond pas et semble bufferiser la sortie ou être en boucle (Hang inter-processus).", server_name);
+                                is_function_result = true;
+                                last_function_name = name.clone();
+                                mcp_feedback_html.push_str(&format!(
+                                    "<div style='font-size:0.8rem; color:#ef4444; border-left:2px solid #ef4444; padding-left:8px; margin-bottom:8px;'><i data-lucide='alert-circle' style='width:14px;'></i> Timeout 10s: `{}` n'a pas répondu</div>",
+                                    name
                                 ));
                             }
                         }
@@ -742,7 +1157,12 @@ async fn handle_chat(
         .replace("paradox-multiapi-", "");
 
     // 4. Compilation Markdown vers HTML "Premium" Zero-Dependency (pulldown-cmark)
-    let parser = pulldown_cmark::Parser::new(&raw_text);
+    let mut options = pulldown_cmark::Options::empty();
+    options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    options.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    options.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
+    options.insert(pulldown_cmark::Options::ENABLE_SMART_PUNCTUATION);
+    let parser = pulldown_cmark::Parser::new_ext(&raw_text, options);
     let mut html_output = String::new();
     pulldown_cmark::html::push_html(&mut html_output, parser);
 
@@ -1252,10 +1672,10 @@ async fn start_assimilation_id(
             write_queue(&queue);
         }
 
-        let success_html = format!("<button class='btn-sm' disabled style='background: rgba(46, 204, 113, 0.1); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); padding: 4px 8px; border-radius: 4px; cursor: default;'>✅ Forgé</button><script>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh'));</script>");
+        let success_html = "<button class='btn-sm' disabled style='background: rgba(46, 204, 113, 0.1); color: #2ecc71; border: 1px solid rgba(46, 204, 113, 0.3); padding: 4px 8px; border-radius: 4px; cursor: default;'>✅ Forgé</button><script>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh'));</script>".to_string();
         axum::response::Html(success_html)
     } else {
-        let err_html = format!("<button class='btn-sm' style='background: rgba(231, 76, 60, 0.1); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.3); padding: 4px 8px; border-radius: 4px; cursor: default;'>❌ Échec</button><script>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh'));</script>");
+        let err_html = "<button class='btn-sm' style='background: rgba(231, 76, 60, 0.1); color: #e74c3c; border: 1px solid rgba(231, 76, 60, 0.3); padding: 4px 8px; border-radius: 4px; cursor: default;'>❌ Échec</button><script>document.getElementById('queue-list-container').dispatchEvent(new Event('refresh'));</script>".to_string();
         axum::response::Html(err_html)
     }
 }
@@ -1266,55 +1686,31 @@ struct KeyUpdateParams {
     api_key: String,
 }
 
-async fn get_admin_keys() -> axum::response::Response {
-    let keys = r2d2_cortex::security::vault::Vault::get_masked_keys();
-    let gemini_key = keys
-        .get("GEMINI_API_KEY")
-        .map(|k| k.as_str())
-        .unwrap_or("NON DÉFINIE");
-    let mistral_key = keys
-        .get("MISTRAL_API_KEY")
-        .map(|k| k.as_str())
-        .unwrap_or("NON DÉFINIE");
-    let github_key = keys
-        .get("GITHUB_PERSONAL_ACCESS_TOKEN")
-        .map(|k| k.as_str())
-        .unwrap_or("NON DÉFINIE");
-    let hf_key = keys
-        .get("HF_TOKEN")
-        .map(|k| k.as_str())
-        .unwrap_or("NON DÉFINIE");
-
-    let keys_html = format!(
-        r#"
-        <div class="vault-keys" style="margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 8px;">
-                <strong style="color: #2ecc71;">GITHUB_PERSONAL_ACCESS_TOKEN</strong>
-                <span style="font-family: monospace; color: #888;">{}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 8px;">
-                <strong style="color: var(--accent-color);">GEMINI_API_KEY</strong>
-                <span style="font-family: monospace; color: #888;">{}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 8px;">
-                <strong style="color: #f39c12;">MISTRAL_API_KEY</strong>
-                <span style="font-family: monospace; color: #888;">{}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 4px; margin-bottom: 8px;">
-                <strong style="color: #3498db;">HF_TOKEN</strong>
-                <span style="font-family: monospace; color: #888;">{}</span>
-            </div>
-        </div>
-    "#,
-        github_key, gemini_key, mistral_key, hf_key
-    );
-
-    axum::response::Html(keys_html).into_response()
-}
-
 async fn set_admin_keys(Form(params): Form<KeyUpdateParams>) -> axum::response::Response {
     r2d2_cortex::security::vault::Vault::set_api_key(&params.provider, &params.api_key);
-    get_admin_keys().await
+    axum::response::Html(
+        r#"<script>
+        htmx.ajax('GET', '/ui/admin', {target: '#main-content', swap: 'innerHTML'});
+    </script>"#
+            .to_string(),
+    )
+    .into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct DownloadModelPayload {
+    #[allow(dead_code)]
+    #[allow(dead_code)]
+    model_id: String,
+    model_name: String,
+}
+
+async fn store_download_model(
+    axum::Form(payload): axum::Form<DownloadModelPayload>,
+) -> impl axum::response::IntoResponse {
+    tracing::info!("Mocking download process for model: {}", payload.model_name);
+    let html = "<button class='btn-primary' style='width: 100%; background: var(--status-success); color: #fff; cursor: default;' disabled><i data-lucide='check-circle' style='width: 16px;'></i> Allocation Initiée</button><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>".to_string();
+    axum::response::Html(html)
 }
 
 #[derive(serde::Deserialize)]

@@ -1,0 +1,212 @@
+<div class="padded-content">
+    <div class="section-header" style="animation: slideUp 0.3s ease-out;">
+        <div>
+            <h2 class="section-title">Sovereign Store & Integrations</h2>
+            <p class="section-subtitle">Gérez vos Moteurs d'Intelligence Artificielle Locaux et les outils MCP (Model Context Protocol).</p>
+        </div>
+        <button class="btn-secondary" hx-get="/ui/store" hx-target="#main-content">
+            <i data-lucide="refresh-cw" style="width: 16px;"></i> Indexer le FileSystem
+        </button>
+    </div>
+
+    <!-- CATALOGUE R2D2 -->
+    <div style="animation: slideUp 0.4s ease-out;">
+        <h3 style="font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-secondary); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="cpu" style="width: 16px;"></i> 1. Moteurs Cognitifs Recommandés
+        </h3>
+        
+        <div class="grid-3" style="margin-bottom: 40px;">
+            {% for model in curated_models %}
+            <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items:flex-start; margin-bottom: 16px;">
+                        <span class="badge neutral">{{ model.id }}</span>
+                        <i data-lucide="box" style="color: var(--text-tertiary); width: 18px;"></i>
+                    </div>
+                    <h4 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">{{ model.name }}</h4>
+                    <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 24px;">{{ model.description }}</p>
+                </div>
+                
+                <button class="btn-primary" style="width: 100%;" hx-post="/api/store/download" hx-vals='{"model_id": "{{ model.id }}", "model_name": "{{ model.name }}"}' hx-swap="outerHTML">
+                    <i data-lucide="download-cloud" style="width: 16px;"></i> Requérir L'Allocation Locale
+                </button>
+            </div>
+            {% endfor %}
+            
+            <!-- Add Custom HF Model -->
+            <div class="glass-card" style="display: flex; flex-direction: column; justify-content: center; align-items: center; border-style: dashed; border-color: var(--panel-border-hover); background: transparent;">
+                <i data-lucide="plus-circle" style="width: 28px; height: 28px; color: var(--text-tertiary); margin-bottom: 16px;"></i>
+                <h4 style="font-size: 14px; font-weight: 500; color: var(--text-secondary); margin-bottom: 16px;">Référencer un Dépôt HuggingFace</h4>
+                <form hx-post="/api/store/download" style="display: flex; gap: 8px; width: 100%;" hx-target="this" hx-swap="outerHTML">
+                    <input type="text" name="model_id" placeholder="Ex: mistralai/Mistral..." class="raw-input" style="flex: 1;" required>
+                    <input type="hidden" name="model_name" value="Custom HF Model">
+                    <button type="submit" class="btn-secondary" title="Télécharger le modèle"><i data-lucide="download" style="width: 16px;"></i></button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- CACHE LOCAL -->
+    <div style="animation: slideUp 0.5s ease-out; position: relative;">
+        <h3 style="font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-secondary); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; justify-content: space-between;">
+            <span style="display: flex; align-items: center; gap: 8px;"><i data-lucide="hard-drive" style="width: 16px;"></i> 2. Moteurs Tensoriels Locaux (.cache/huggingface)</span>
+            <button class="btn-secondary" hx-post="/api/store/scan" hx-indicator="#scan-indicator" style="padding: 4px 10px; font-size: 11px;">
+                <i data-lucide="refresh-cw" style="width: 12px; height: 12px;"></i> Re-Indexer le FileSystem
+            </button>
+        </h3>
+        <div id="scan-indicator" class="htmx-indicator" style="position: absolute; top: 0; right: 200px; color: var(--status-warning); font-size: 11px;">
+            <i data-lucide="loader-2" class="spin" style="width: 12px; display: inline-block; vertical-align: middle;"></i> Analyse en cours...
+        </div>
+        <div class="grid-3" style="margin-bottom: 40px;">
+            {% if local_models.is_empty() %}
+            <div class="glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: var(--text-tertiary); font-style: italic;">
+                <i data-lucide="hard-drive" style="width: 32px; height: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
+                Aucun modèle détecté dans le point de montage.
+            </div>
+            {% else %}
+            {% for model in local_models %}
+            <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items:flex-start; margin-bottom: 16px;">
+                        <span class="badge neutral" style="font-size: 10px;">Safetensors</span>
+                        <i data-lucide="file-json" style="color: var(--text-tertiary); width: 18px;"></i>
+                    </div>
+                    <div style="font-family: var(--font-mono); font-weight: 500; font-size: 14px; color: var(--text-primary); margin-bottom: 16px; word-break: break-all;">
+                        {{ model.0 }}
+                    </div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; gap: 12px;">
+                    <form hx-post="/api/store/assign_role" hx-target="next div" hx-swap="innerHTML" style="margin: 0;">
+                        <input type="hidden" name="model" value="{{ model.0 }}">
+                        <div class="custom-select" style="width: 100%;">
+                            <select name="role" onchange="htmx.trigger(this.closest('form'), 'submit')" style="width: 100%;">
+                                <option value="none" {% if model.1 == "none" %}selected{% endif %}>Non-assigné / Inactif</option>
+                                <option value="reasoning" {% if model.1 == "reasoning" %}selected{% endif %}>Main Reasoning (Pilote)</option>
+                                <option value="vision" {% if model.1 == "vision" %}selected{% endif %}>Vision Engine (Image)</option>
+                                <option value="code" {% if model.1 == "code" %}selected{% endif %}>Code Assistant (Bitnet)</option>
+                            </select>
+                            <i data-lucide="chevron-down"></i>
+                        </div>
+                    </form>
+                    <div style="margin-bottom: 4px; min-height: 20px;"></div>
+                    
+                    <form hx-post="/api/store/delete" hx-target="closest .glass-card" hx-swap="delete" onsubmit="return confirm('DANGER : Voulez-vous vraiment désinstaller physiquement ce modèle ({{ model.0 }}) ?\n\nCette action est irréversible et va libérer plusieurs Giga-octets sur votre disque dur.');" style="margin: 0; margin-top: auto;">
+                        <input type="hidden" name="model" value="{{ model.0 }}">
+                        <button type="submit" class="btn-secondary" style="width: 100%; color: var(--status-danger); transition: all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.1)'; this.style.borderColor='rgba(239,68,68,0.2)';" onmouseout="this.style.background='var(--bg-hover)'; this.style.borderColor='var(--panel-border)';">
+                            <i data-lucide="trash-2" style="width: 14px;"></i> Purger le modèle
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- MCP MANAGER -->
+    <div style="animation: slideUp 0.6s ease-out;">
+        <h3 style="font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-secondary); margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="plug" style="width: 16px;"></i> 3. Registre Model Context Protocol (MCP)
+        </h3>
+        
+        {% if let Some(err) = db_error %}
+        <div class="glass-card" style="border-color: var(--status-danger); background: rgba(239, 68, 68, 0.05); padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 16px;">
+            <i data-lucide="database" style="color: var(--status-danger); width: 32px; height: 32px; opacity: 0.8;"></i>
+            <h4 style="color: var(--status-danger); margin: 0; font-weight: 600;">Défaut de Connexion Vectorelle</h4>
+            <p style="color: var(--text-secondary); margin: 0; font-size: 13px; line-height: 1.5; max-width: 400px;">
+                {{ err }}
+            </p>
+            <div style="font-family: var(--font-mono); font-size: 11px; padding: 12px; background: rgba(0,0,0,0.4); border-radius: 6px; border: 1px solid rgba(255,255,255,0.05); color: #888;">
+                $ podman compose up -d
+            </div>
+        </div>
+        {% else %}
+        <div class="grid-3">
+            {% if mcp_tools.is_empty() %}
+            <div class="glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: var(--text-tertiary); font-style: italic;">
+                <i data-lucide="plug" style="width: 32px; height: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
+                Aucun serveur MCP injecté dans le Blackboard.
+            </div>
+            {% else %}
+            {% for tool in mcp_tools %}
+            <div class="glass-card" style="display: flex; flex-direction: column; justify-content: space-between;">
+                <div>
+                    <div style="display: flex; justify-content: space-between; align-items:flex-start; margin-bottom: 12px;">
+                        {% if tool.is_enabled %}
+                        <button hx-post="/api/mcp/toggle/{{ tool.id }}" hx-swap="outerHTML" hx-target="this" class="badge success" style="cursor: pointer; border: 1px solid rgba(16,185,129,0.2); font-size:10px;">
+                            <i data-lucide="check-circle-2" style="width: 10px;"></i> Actif
+                        </button>
+                        {% else %}
+                        <button hx-post="/api/mcp/toggle/{{ tool.id }}" hx-swap="outerHTML" hx-target="this" class="badge danger" style="cursor: pointer; border: 1px solid rgba(239,68,68,0.2); font-size:10px;">
+                            <i data-lucide="power-off" style="width: 10px;"></i> Désactivé
+                        </button>
+                        {% endif %}
+                        <i data-lucide="server" style="color: var(--text-tertiary); width: 16px;"></i>
+                    </div>
+                    <div style="font-weight: 600; font-size: 15px; color: var(--text-primary); margin-bottom: 4px;">{{ tool.name }}</div>
+                    <div style="font-size: 12px; color: var(--text-tertiary); margin-bottom: 16px;">{{ tool.description }}</div>
+                    
+                    <div style="background: var(--bg-void); padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border); font-family: var(--font-mono); font-size: 11px; margin-bottom: 24px; word-break: break-all; color: var(--text-secondary);">
+                        {{ tool.command }}
+                    </div>
+                </div>
+                
+                <button class="btn-secondary" hx-delete="/api/mcp/delete/{{ tool.id }}" hx-target="closest .glass-card" hx-swap="delete" style="width: 100%; color: var(--status-danger); transition: all 0.2s;" onmouseover="this.style.background='rgba(239,68,68,0.1)'; this.style.borderColor='rgba(239,68,68,0.2)';" onmouseout="this.style.background='var(--bg-hover)'; this.style.borderColor='var(--panel-border)';">
+                    <i data-lucide="trash" style="width: 14px;"></i> Révoquer l'accès
+                </button>
+            </div>
+            {% endfor %}
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<!-- CONTEXT SIDEBAR OVERRIDE (Right Panel for Adding MCP) -->
+<div id="context-content" hx-swap-oob="true" style="padding: 32px 24px; display: flex; flex-direction: column; gap: 32px; animation: fadeIn 0.3s ease;">
+    <div>
+        <h4 style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-secondary); margin-bottom: 16px; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="plus-square" style="width: 14px;"></i> Injecter un Flux MCP
+        </h4>
+        
+        <form hx-post="/api/mcp/add" hx-target="#mcp-table" hx-swap="none" style="display: flex; flex-direction: column; gap: 16px;" onsubmit="setTimeout(() => { this.reset(); }, 500);">
+            <div class="glass-card" style="display: flex; flex-direction: column; gap: 16px; padding: 20px;">
+                <div>
+                    <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; display: block;">Identité du Serveur (Nom)</label>
+                    <input type="text" name="name" class="raw-input" placeholder="Ex: github-server" required>
+                </div>
+                <div>
+                    <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; display: block;">Binaire d'Exécution</label>
+                    <input type="text" name="command" class="raw-input mono" placeholder="npx" required>
+                </div>
+                <div>
+                    <label style="font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; display: block;">Vecteur d'Arguments (JSON)</label>
+                    <input type="text" name="args_json" class="raw-input mono" placeholder='["-y", "@modelcontextprotocol/server-github"]' required>
+                </div>
+                <button type="submit" class="btn-primary" style="justify-content: center; margin-top: 8px;">
+                    <i data-lucide="server" style="width: 16px;"></i> Provisionner le MCP
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <div>
+        <h4 style="font-size: 11px; text-transform: uppercase; font-weight: 600; color: var(--text-secondary); margin-bottom: 16px; letter-spacing: 0.05em;">Informations Système</h4>
+        <div class="glass-card" style="padding: 16px;">
+            <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 12px;">
+                L'indexation de R2D2 scanne les zones mémoire fragmentées de votre système de fichiers (NTFS/WSL).
+            </p>
+            <div style="display: flex; align-items: flex-start; gap: 8px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.2); padding: 12px; border-radius: var(--radius-sm);">
+                <i data-lucide="info" style="width: 14px; color: var(--status-info); flex-shrink: 0; margin-top: 2px;"></i>
+                <span style="font-size: 12px; color: var(--text-primary);">Prévoyez une latence de ~10s lors du "Refresh Index" si la matrice de disques est froide.</span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    if(typeof lucide !== 'undefined') lucide.createIcons();
+    if(typeof htmx !== 'undefined') htmx.process(document.body);
+</script>

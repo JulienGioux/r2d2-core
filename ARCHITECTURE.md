@@ -26,3 +26,8 @@ Ce document fige les règles d'or et anti-patterns critiques pour l'évolution d
 
 ## 7. Routage Dynamique des Filtres Spatiaux (Mel-Filters)
 **Règle** : L'ingestion audio ne doit jamais supposer une géométrie fixe de 80 bins. Elle doit lire dynamiquement le `config.num_mel_bins` du modèle distant (ex: 128 bins pour `whisper-large-v3-turbo`) et router le téléchargement tensoriel du dictionnaire approprié (`melfilters128.bytes`) sur HuggingFace, garantissant un back-end évolutif sans intervention de l'Architecte.
+
+## 8. Doctrine de Validation & Intégration Continue (Le "Shift-Left" CI)
+**Alerte** : Pousser du code qui échoue à compiler ou qui lève des lint warnings sur le serveur distant détruit la vélocité et brise la confiance ("broken window theory").
+**Règle** : Tout commit doit passer la validation **locale** exacte du pipeline GitHub Actions avant le push. La règle est le "Zero-Warning Policy" avec `cargo clippy -- -D warnings`. 
+**Tests** : Les protocoles lourds (MCP, Gemini API, interactions réseau) doivent être formellement mockés dans les batteries de tests pour préserver l'isolation et la vitesse d'exécution. Les tests doivent être "Industrial-Grade" : tester les cas complexes et non simplifiés.

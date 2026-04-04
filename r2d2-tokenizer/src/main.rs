@@ -5,9 +5,9 @@ use std::path::Path;
 use tokenizers::Tokenizer;
 use tracing::{info, Level};
 
-const HIDDEN_DIM: f64 = 2048.0;     // Standard pour ~1.5B paramètres
-const BYTES_PER_PARAM: f64 = 2.0;   // L'Embedding est en FP16/BF16 (Pas BitNet)
-const NUM_MATRICES: f64 = 2.0;      // E (Input Embedding) + W_out (Unembedding Head)
+const HIDDEN_DIM: f64 = 2048.0; // Standard pour ~1.5B paramètres
+const BYTES_PER_PARAM: f64 = 2.0; // L'Embedding est en FP16/BF16 (Pas BitNet)
+const NUM_MATRICES: f64 = 2.0; // E (Input Embedding) + W_out (Unembedding Head)
 
 struct TokenizerStats {
     name: String,
@@ -41,13 +41,15 @@ fn main() -> Result<()> {
         Path::new("../data/synthetic_dataset.jsonl")
     };
 
-    
     info!("📖 Chargement du corpus en RAM...");
-    let dataset_text = fs::read_to_string(dataset_path)
-        .context("Échec de lecture de synthetic_dataset.jsonl")?;
-    
+    let dataset_text =
+        fs::read_to_string(dataset_path).context("Échec de lecture de synthetic_dataset.jsonl")?;
+
     let total_bytes = dataset_text.len() as f64;
-    info!("✅ Corpus chargé: {:.2} Ko d'octets bruts", total_bytes / 1024.0);
+    info!(
+        "✅ Corpus chargé: {:.2} Ko d'octets bruts",
+        total_bytes / 1024.0
+    );
 
     // 2. Initialiser le client HF_HUB
     let api = Api::new()?;
@@ -64,7 +66,7 @@ fn main() -> Result<()> {
     for (name, repo_id) in candidates {
         info!("---");
         info!("⏳ Téléchargement/Vérification de {} [{}]", name, repo_id);
-        
+
         let repo = api.model(repo_id.to_string());
         let tokenizer_file = match repo.get("tokenizer.json") {
             Ok(path) => path,
@@ -79,13 +81,18 @@ fn main() -> Result<()> {
 
         // Métriques de Taille
         let vocab_size = tokenizer.get_vocab_size(true) as f64;
-        let vram_mb = (vocab_size * HIDDEN_DIM * NUM_MATRICES * BYTES_PER_PARAM) / (1024.0 * 1024.0);
+        let vram_mb =
+            (vocab_size * HIDDEN_DIM * NUM_MATRICES * BYTES_PER_PARAM) / (1024.0 * 1024.0);
 
         // Benchmark de Compression
-        info!("⚙️ Encodage du corpus avec {}... (V={} jetons)", name, vocab_size);
-        let encoding = tokenizer.encode(dataset_text.as_str(), false)
+        info!(
+            "⚙️ Encodage du corpus avec {}... (V={} jetons)",
+            name, vocab_size
+        );
+        let encoding = tokenizer
+            .encode(dataset_text.as_str(), false)
             .map_err(|e| anyhow::anyhow!("Erreur lors de l'encodage: {:?}", e))?;
-            
+
         let total_tokens = encoding.get_ids().len() as f64;
         let compression_ratio = total_bytes / total_tokens;
         let efficiency_score = (compression_ratio / vram_mb) * 1000.0;
@@ -105,7 +112,7 @@ fn main() -> Result<()> {
     info!("==================================================");
     info!("🏆 RÉSULTATS DU BENCHMARK TOKENS vs VRAM R2D2");
     info!("==================================================");
-    
+
     // Tri décroissant selon le Score d'Efficacité R2D2
     leaderboard.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
 

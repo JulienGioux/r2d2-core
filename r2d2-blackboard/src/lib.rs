@@ -15,6 +15,25 @@ use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use thiserror::Error;
 use tracing::{info, instrument};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ModelDbRow {
+    pub id: String,
+    pub name: String,
+    pub model_type: String,
+    pub provider: String,
+    pub config_json: String,
+    pub is_enabled: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct McpToolDbRow {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub args_json: String,
+    pub is_enabled: bool,
+}
+
 #[derive(Debug, Error)]
 pub enum BlackboardError {
     #[error("Erreur de connexion à la base de données: {0}")]
@@ -44,12 +63,76 @@ pub struct PostgresBlackboard {
 impl PostgresBlackboard {
     /// Initialise la connexion au Blackboard vectoriel.
     pub async fn new(database_url: &str) -> Result<Self, BlackboardError> {
+        let max_conn = std::env::var("DATABASE_MAX_CONN")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(20);
+
         let pool = PgPoolOptions::new()
-            .max_connections(20) // Idéal pour le Swarm R2D2 en local.
+            .max_connections(max_conn) // Idéal pour le Swarm R2D2 en local ou paramétrable via env
+            .acquire_timeout(std::time::Duration::from_secs(10)) // FAIL-FAST Assoupli: Laisse le temps pour pgvector
             .connect_lazy(database_url)
             .map_err(|e| BlackboardError::ConnectionError(e.to_string()))?;
 
         Ok(Self { pool })
+    }
+
+    /// Crée les tables dynamiques de registre (Modèles et Outils MCP) si elles n'existent pas.
+    pub async fn initialize_registry_tables(&self) -> Result<(), BlackboardError> {
+        info!("🔧 Initialisation des tables du Registre Sovereign...");
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS model_registry (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                model_type VARCHAR NOT NULL,
+                provider VARCHAR NOT NULL,
+                config_json JSONB NOT NULL DEFAULT '{}',
+                is_enabled BOOLEAN NOT NULL DEFAULT true
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS mcp_registry (
+                id VARCHAR PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                command VARCHAR NOT NULL,
+                args_json JSONB NOT NULL DEFAULT '[]',
+                is_enabled BOOLEAN NOT NULL DEFAULT true
+            );
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Insertion du modèle E5 par défaut pour assurer la compatibilité si la base est neuve
+        sqlx::query(
+            r#"
+            INSERT INTO model_registry (id, name, model_type, provider, config_json, is_enabled)
+            VALUES ('multilingual-e5-small', 'Multilingual-E5-Small', 'semantic', 'local_hf', '{"repo_id": "intfloat/multilingual-e5-small", "revision": "main"}', true)
+            ON CONFLICT (id) DO NOTHING;
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Insertion du connecteur github-mcp par défaut pour permettre l'audit initial
+        sqlx::query(
+            r#"
+            INSERT INTO mcp_registry (id, name, command, args_json, is_enabled)
+            VALUES ('mcp-github-default', 'github-mcp', 'npx', '["-y", "@modelcontextprotocol/server-github"]', true)
+            ON CONFLICT (id) DO NOTHING;
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -78,7 +161,7 @@ impl GlobalBlackboard for PostgresBlackboard {
         let payload_value = serde_json::to_value(&jsonai)?;
 
         let mut retries = 0;
-        let mut delay = std::time::Duration::from_millis(200);
+        let mut delay = std::time::Duration::from_millis(500);
 
         loop {
             let result = sqlx::query(
@@ -117,14 +200,16 @@ impl GlobalBlackboard for PostgresBlackboard {
                         sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::PoolClosed
                     );
 
-                    if !is_ephemeral || retries >= 3 {
+                    if !is_ephemeral || retries >= 5 {
                         return Err(e.into()); // Fin totale, l'erreur est fatale (Erreur de syntaxe, Constraint...)
                     }
                     tracing::warn!(
-                        "⚠️ Erreur R2D2-Blackboard éphémère ({:?}). Tentative {}/3 après {}ms",
+                        "⚠️ Erreur R2D2-Blackboard éphémère ({:?}). Tentative {}/5 après {}ms. Pool [Size: {}, Idle: {}]",
                         e,
                         retries + 1,
-                        delay.as_millis()
+                        delay.as_millis(),
+                        self.pool.size(),
+                        self.pool.num_idle()
                     );
                 }
             }
@@ -385,5 +470,111 @@ impl PostgresBlackboard {
         }
 
         Ok(duplicates_found)
+    }
+
+    /// Récupère l'intégralité des modèles enregistrés dans la configuration (actifs ou inactifs).
+    #[instrument(skip(self))]
+    pub async fn get_all_models(&self) -> Result<Vec<ModelDbRow>, BlackboardError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, model_type, provider, config_json::text as config_json, is_enabled
+            FROM model_registry
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            out.push(ModelDbRow {
+                id: row.try_get("id").unwrap_or_default(),
+                name: row.try_get("name").unwrap_or_default(),
+                model_type: row.try_get("model_type").unwrap_or_default(),
+                provider: row.try_get("provider").unwrap_or_default(),
+                config_json: row
+                    .try_get("config_json")
+                    .unwrap_or_else(|_| "{}".to_string()),
+                is_enabled: row.try_get("is_enabled").unwrap_or(true),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Récupère l'intégralité des outils MCP enregistrés dans la configuration.
+    #[instrument(skip(self))]
+    pub async fn get_all_mcp_tools(&self) -> Result<Vec<McpToolDbRow>, BlackboardError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, command, args_json::text as args_json, is_enabled
+            FROM mcp_registry
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut out = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            out.push(McpToolDbRow {
+                id: row.try_get("id").unwrap_or_default(),
+                name: row.try_get("name").unwrap_or_default(),
+                command: row.try_get("command").unwrap_or_default(),
+                args_json: row
+                    .try_get("args_json")
+                    .unwrap_or_else(|_| "[]".to_string()),
+                is_enabled: row.try_get("is_enabled").unwrap_or(true),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Active ou désactive un modèle.
+    pub async fn enable_model(&self, id: &str, enable: bool) -> Result<(), BlackboardError> {
+        sqlx::query("UPDATE model_registry SET is_enabled = $1 WHERE id = $2")
+            .bind(enable)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Active ou désactive un outil MCP.
+    pub async fn enable_mcp_tool(&self, id: &str, enable: bool) -> Result<(), BlackboardError> {
+        sqlx::query("UPDATE mcp_registry SET is_enabled = $1 WHERE id = $2")
+            .bind(enable)
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Ajoute un nouvel outil MCP.
+    pub async fn add_mcp_tool(
+        &self,
+        name: &str,
+        command: &str,
+        args_json: &str,
+    ) -> Result<String, BlackboardError> {
+        let id = format!("mcp-{}", uuid::Uuid::new_v4().simple());
+        sqlx::query(
+            "INSERT INTO mcp_registry (id, name, command, args_json, is_enabled) VALUES ($1, $2, $3, $4, true)"
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(command)
+        .bind(args_json)
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    /// Supprime un outil MCP.
+    pub async fn delete_mcp_tool(&self, id: &str) -> Result<(), BlackboardError> {
+        sqlx::query("DELETE FROM mcp_registry WHERE id = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
     }
 }

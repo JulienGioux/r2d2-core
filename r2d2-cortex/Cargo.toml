@@ -43,3 +43,7 @@ r2d2-chunker = { path = "../r2d2-chunker" }
 [[bin]]
 name = "benchmark_tokenizers"
 path = "src/bin/benchmark_tokenizers.rs"
+
+[[bin]]
+name = "test_gemini"
+path = "test_gemini.rs"

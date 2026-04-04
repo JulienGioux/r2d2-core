@@ -70,7 +70,7 @@ pub struct ReasoningAgent {
     pub memory: Option<SemanticMemory>,
     pub provider: ModelProvider,
     pub history: Vec<ChatMessage>,
-    pub mcp_client: std::sync::Arc<tokio::sync::Mutex<Option<crate::mcp_client::McpClient>>>,
+    pub mcp_hub: std::sync::Arc<tokio::sync::Mutex<Option<crate::mcp_hub::McpHub>>>,
 }
 
 impl Default for ReasoningAgent {
@@ -89,7 +89,7 @@ impl ReasoningAgent {
             memory: None,
             provider: ModelProvider::GeminiFlash,
             history: Vec::new(),
-            mcp_client: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            mcp_hub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -186,40 +186,17 @@ impl ReasoningAgent {
         });
 
         if inject_tools {
-            payload["tools"] = json!([
-                {
-                    "functionDeclarations": [
+            let mcp_lock = self.mcp_hub.lock().await;
+            if let Some(mcp) = &*mcp_lock {
+                let dynamic_tools = mcp.get_gemini_tools();
+                if !dynamic_tools.is_empty() {
+                    payload["tools"] = json!([
                         {
-                            "name": "search_code",
-                            "description": "Recherche dans le code source de Github. Utilise obligatoirement le pattern 'repo:owner/name query'.",
-                            "parameters": {
-                                "type": "OBJECT",
-                                "properties": {
-                                    "q": {
-                                        "type": "STRING",
-                                        "description": "La requête Github (ex: 'repo:owner/name query')."
-                                    }
-                                },
-                                "required": ["q"]
-                            }
-                        },
-                        {
-                            "name": "get_file_contents",
-                            "description": "Récupère le contenu exact d'un fichier Github.",
-                            "parameters": {
-                                "type": "OBJECT",
-                                "properties": {
-                                    "owner": { "type": "STRING" },
-                                    "repo": { "type": "STRING" },
-                                    "path": { "type": "STRING" },
-                                    "branch": { "type": "STRING", "description": "Branch to get contents from (optional)" }
-                                },
-                                "required": ["owner", "repo", "path"]
-                            }
+                            "functionDeclarations": dynamic_tools
                         }
-                    ]
+                    ]);
                 }
-            ]);
+            }
         }
 
         let client = self.http_client.as_ref().unwrap();
@@ -259,13 +236,26 @@ impl ReasoningAgent {
                         // Success parsing
                         let json_body: serde_json::Value = res.json().await.unwrap();
 
-                        let parts = json_body["candidates"][0]["content"]["parts"]
-                            .as_array()
-                            .ok_or_else(|| {
-                                AgentError::InferenceError(
-                                    "Format invalide: 'parts' est introuvable".to_string(),
-                                )
-                            })?;
+                        let parts = match json_body["candidates"][0]["content"]["parts"].as_array()
+                        {
+                            Some(p) => p,
+                            None => {
+                                let finish_reason = json_body["candidates"][0]["finishReason"]
+                                    .as_str()
+                                    .unwrap_or("UNKNOWN");
+                                if finish_reason == "UNEXPECTED_TOOL_CALL" {
+                                    return Ok(GeminiResponse::Text("⚠️ [R2D2-Cortex] Le modèle a tenté de simuler un outil en texte libre ou d'appeler un outil non déclaré. Analyse interrompue. Veuillez ré-essayer ou corriger le comportement.".to_string()));
+                                }
+                                tracing::error!(
+                                    "R2D2-ERROR: Structure Gemini non conforme. Full Response = {}",
+                                    json_body
+                                );
+                                return Err(AgentError::InferenceError(format!(
+                                    "Inférence bloquée par l'API (Raison: {})",
+                                    finish_reason
+                                )));
+                            }
+                        };
 
                         let mut full_text = String::new();
                         for part in parts {
@@ -313,10 +303,18 @@ impl ReasoningAgent {
         &self,
         system_prompt: &str,
         history: &[ChatMessage],
-    ) -> Result<String, AgentError> {
-        let api_key = Vault::get_api_key("UNIVERSAL_API_KEY").unwrap_or_else(|| "".to_string());
-        let mut url = Vault::get_api_key("UNIVERSAL_API_BASE")
-            .unwrap_or_else(|| "http://localhost:11434/v1".to_string());
+        has_tools: bool,
+    ) -> Result<GeminiResponse, AgentError> {
+        let api_key = Vault::get_api_key("UNIVERSAL_API_KEY")
+            .unwrap_or_else(|| Vault::get_api_key("MISTRAL_API_KEY").unwrap_or_default());
+
+        let mut url = Vault::get_api_key("UNIVERSAL_API_BASE").unwrap_or_else(|| {
+            if Vault::get_api_key("MISTRAL_API_KEY").is_some() {
+                "https://api.mistral.ai/v1".to_string()
+            } else {
+                "http://localhost:11434/v1".to_string()
+            }
+        });
 
         // Ensure /chat/completions suffix
         if !url.ends_with("/chat/completions") {
@@ -340,7 +338,7 @@ impl ReasoningAgent {
                     openai_msgs.push(json!({ "role": "user", "content": format!("Function result for {}: {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
                 }
                 MessageRole::FunctionCall => {
-                    openai_msgs.push(json!({ "role": "assistant", "content": format!("Called function {} with {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
+                    openai_msgs.push(json!({ "role": "assistant", "content": format!("Called function {} with argument {}", msg.function_name.as_deref().unwrap_or("unknown"), &msg.text) }));
                 }
             }
         }
@@ -348,11 +346,32 @@ impl ReasoningAgent {
         let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
             .unwrap_or_else(|| "mistral-large-latest".to_string());
 
-        let payload = json!({
+        let mut payload = json!({
             "model": model_name,
             "messages": openai_msgs,
             "temperature": 0.4
         });
+
+        if has_tools {
+            let mcp_lock = self.mcp_hub.lock().await;
+            if let Some(mcp) = &*mcp_lock {
+                let dynamic_tools = mcp.get_gemini_tools();
+                if !dynamic_tools.is_empty() {
+                    let mut openai_tools = Vec::new();
+                    for dt in dynamic_tools {
+                        openai_tools.push(json!({
+                            "type": "function",
+                            "function": {
+                                "name": dt["name"],
+                                "description": dt["description"],
+                                "parameters": dt["parameters"]
+                            }
+                        }));
+                    }
+                    payload["tools"] = json!(openai_tools);
+                }
+            }
+        }
 
         let client = self.http_client.as_ref().unwrap();
         let mut req_builder = client.post(&url).header("Content-Type", "application/json");
@@ -390,11 +409,33 @@ impl ReasoningAgent {
                         )));
                     } else {
                         let json_body: serde_json::Value = res.json().await.unwrap();
-                        let text = json_body["choices"][0]["message"]["content"]
-                            .as_str()
-                            .unwrap_or("")
-                            .to_string();
+                        let message = &json_body["choices"][0]["message"];
 
+                        if let Some(tool_calls) = message["tool_calls"].as_array() {
+                            if !tool_calls.is_empty() {
+                                let tc = &tool_calls[0];
+                                let name =
+                                    tc["function"]["name"].as_str().unwrap_or("").to_string();
+                                let mut args = serde_json::json!({});
+                                if let Some(arg_str) = tc["function"]["arguments"].as_str() {
+                                    if let Ok(parsed) =
+                                        serde_json::from_str::<serde_json::Value>(arg_str)
+                                    {
+                                        args = parsed;
+                                    } else {
+                                        // Some models return exact json
+                                        if let Some(obj) = tc["function"]["arguments"].as_object() {
+                                            args = serde_json::json!(obj);
+                                        }
+                                    }
+                                } else if let Some(obj) = tc["function"]["arguments"].as_object() {
+                                    args = serde_json::json!(obj);
+                                }
+                                return Ok(GeminiResponse::FunctionCall { name, args });
+                            }
+                        }
+
+                        let text = message["content"].as_str().unwrap_or("").to_string();
                         let clean_json = text
                             .trim()
                             .strip_prefix("```json")
@@ -402,7 +443,7 @@ impl ReasoningAgent {
                             .strip_suffix("```")
                             .unwrap_or(&text)
                             .trim();
-                        return Ok(clean_json.to_string());
+                        return Ok(GeminiResponse::Text(clean_json.to_string()));
                     }
                 }
                 Err(e) => {
@@ -470,9 +511,17 @@ impl ReasoningAgent {
                 "🔥 [CRUCIBLE] Passe {} : Avocat du Diable Red Teaming en cours...",
                 iteration
             );
-            let mistral_critique = self
-                .call_openai_compatible(system_prompt, &mistral_history)
+            let mistral_critique_res = self
+                .call_openai_compatible(system_prompt, &mistral_history, false)
                 .await?;
+            let mistral_critique = match mistral_critique_res {
+                GeminiResponse::Text(t) => t,
+                _ => {
+                    return Err(AgentError::InferenceError(
+                        "Crucible doesn't support tools".to_string(),
+                    ))
+                }
+            };
 
             if mistral_critique.contains("ACCORD_ATTEINT") {
                 info!(
@@ -672,9 +721,17 @@ impl ReasoningAgent {
                     iteration
                 )))
                 .await;
-            let mistral_critique = self
-                .call_openai_compatible(&system_prompt, &mistral_history)
+            let mistral_critique_res = self
+                .call_openai_compatible(&system_prompt, &mistral_history, false)
                 .await?;
+            let mistral_critique = match mistral_critique_res {
+                GeminiResponse::Text(t) => t,
+                _ => {
+                    return Err(AgentError::InferenceError(
+                        "Debate doesn't support tools".to_string(),
+                    ))
+                }
+            };
 
             if iteration >= 3 && mistral_critique.contains("ACCORD_ATTEINT") {
                 let _ = tx
@@ -814,8 +871,9 @@ impl ReasoningAgent {
         if !github_sources.is_empty() {
             allowed_repos_instruction = format!(
                 "\n\nL'utilisateur a explicitement ajouté ces dépôts GitHub au contexte : {:?}.\n\
-                 Tu disposes d'outils (Function Calling) pour rechercher dans le code (`search_code`) et inspecter les fichiers (`get_file_contents`).\n\
-                 Pour examiner ces dépôts, tu utiliseras silencieusement ces outils via l'API, plutôt que d'en deviner le contenu.",
+                 POUVOIR SPECIAL ACTIF : Tu disposes d'outils (Function Calling) pour interagir avec ces dépôts.\n\
+                 Dès que l'utilisateur te pose une question sur son code, tu DOIS appeler tes outils de recherche ou de lecture de fichiers au travers de l'API native JSON 'Function Calling'.\n\
+                 N'imagine pas le contenu des fichiers et ne simule jamais de code Python type `print(outil(...))`.",
                  github_sources
             );
         }
@@ -828,9 +886,10 @@ impl ReasoningAgent {
              {}\n\
              {}\n\
              \n\
-             == REGLE DE REPONSE CRITIQUE ==\n\
-             Tu dois interagir avec le Chef de manière organique et directe.\n\
-             Quand tu parles au Chef, réponds au format texte clair. NE CONSTRUIS PAS MANUELLEMENT DES CHAINES JSON et ne simule jamais de console textuelle de tes appels d'outils. L'invocation d'outil doit être une vraie requête API.",
+             == REGLE DE REPONSE ==\n\
+             - Tu dois interagir avec le Chef de manière organique et directe.\n\
+             - Si tu as besoin d'informations (Github, Système...), INVOQUE TES OUTILS (Function Call) SANS RETENUE ni hésitation.\n\
+             - N'utilise jamais de formatage texte bash ou python pour simuler des actions.",
              context,
              allowed_repos_instruction
         );
@@ -876,16 +935,29 @@ impl ReasoningAgent {
                 }
             }
             ModelProvider::OpenAICompatible => {
-                let text = self
-                    .call_openai_compatible(&system_prompt, &self.history)
-                    .await?;
-                let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
-                    .unwrap_or_else(|| "Unknown".to_string());
-                (
-                    format!("Universal Node ({})", model_name),
-                    "UniversalSynthesis",
-                    text,
-                )
+                let has_tools = !github_sources.is_empty();
+                match self
+                    .call_openai_compatible(&system_prompt, &self.history, has_tools)
+                    .await?
+                {
+                    GeminiResponse::FunctionCall { name, args } => {
+                        self.history.push(ChatMessage {
+                            role: MessageRole::FunctionCall,
+                            text: serde_json::to_string(&args).unwrap_or_default(),
+                            function_name: Some(name.clone()),
+                        });
+                        return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
+                    }
+                    GeminiResponse::Text(t) => {
+                        let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        (
+                            format!("Universal Node ({})", model_name),
+                            "UniversalSynthesis",
+                            t,
+                        )
+                    }
+                }
             }
             ModelProvider::Consensus => (
                 "Consensus Loop".to_string(),
@@ -958,7 +1030,7 @@ impl CognitiveAgent for ReasoningAgent {
         // Brique VIII : Chargement de la Mémoire Sémantique Zéro-Copy et de son Embedder
         info!("   [CORTEX] Booting RAG subsystem (MiniLM + Mmap)...");
         let mut embedder = MiniLmEmbedderAgent::new();
-        if let Ok(_) = embedder.load().await {
+        if embedder.load().await.is_ok() {
             self.embedder = Some(embedder);
         } else {
             warn!("   [CORTEX] Failed to load embedder, RAG will be disabled.");

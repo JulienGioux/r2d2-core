@@ -1,4 +1,3 @@
-
 use crate::ternary::TernaryBlock16;
 use candle_core::{Result, Tensor};
 use tracing::{info, instrument};
@@ -23,7 +22,7 @@ impl BitNetPacker {
         // 2. Aplatir le tenseur (Flatten)
         let flat_wq = w_q.flatten_all()?;
         let num_elements = flat_wq.elem_count();
-        
+
         // Assert : La taille totale doit être un multiple de 16 pour permettre un packing propre.
         // Sinon, l'architecture a été mal dimensionnée.
         debug_assert_eq!(
@@ -34,7 +33,7 @@ impl BitNetPacker {
 
         // EXTRACTION ZÉRO-COST: On ramène les flottants quantifiés dans un `Vec<f32>` classique CPU
         let flat_f32_vec = flat_wq.to_vec1::<f32>()?;
-        
+
         // 3. Empaqueter massivement par chunks de 16 sans allocations superflues
         let num_blocks = num_elements / 16;
         let mut blocks = Vec::with_capacity(num_blocks);
@@ -46,11 +45,14 @@ impl BitNetPacker {
                 // Cast natif garanti sans arrondi dangereux car les valeurs sont exactement -1.0, 0.0, 1.0
                 chunk_i8[i] = flat_f32_vec[offset + i] as i8;
             }
-            
+
             blocks.push(TernaryBlock16::from_i8_slice(&chunk_i8));
         }
 
-        info!("🧊 Tenseur cristallisé: {} valeurs -> {} TernaryBlock16", num_elements, num_blocks);
+        info!(
+            "🧊 Tenseur cristallisé: {} valeurs -> {} TernaryBlock16",
+            num_elements, num_blocks
+        );
         Ok(blocks)
     }
 }
