@@ -144,6 +144,35 @@ impl MediaChunker for AudioChunker {
             "-> AudioChunking achevé : {} fragments générés.",
             stimuli.len()
         );
+
         Ok(stimuli)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_audio_chunker_definition() {
+        let chunker = AudioChunker::new();
+        assert_eq!(chunker.chunk_strategy_definition(), "30_sec_window_whisper");
+    }
+
+    #[test]
+    fn test_audio_chunker_ffmpeg_failure_handling() {
+        // Test with real FFmpeg invocation but on a missing file to avoid heavy mocking
+        // while validating the error path correctly routes through our pipeline.
+        let chunker = AudioChunker::new();
+        let stim = Stimulus::new(
+            "test-stim-404".to_string(),
+            StimulusType::Audio,
+            PathBuf::from("/path/that/does/not/exist.wav"),
+        );
+        let result = chunker.chunk(&stim);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Erreur") || err_msg.contains("FFmpeg"));
     }
 }

@@ -58,6 +58,14 @@ struct DashboardTemplate {
     pub total_ram_gb: String,
     pub used_ram_gb: String,
     pub ram_percent: i32,
+    pub vram_limit_gb: String,
+    pub vram_used_gb: String,
+    pub vram_percent: i32,
+    pub active_model: String,
+    pub inference_tps: f64,
+    pub scale_factor: f64,
+    pub mcp_tools_count: usize,
+    pub db_connections: usize,
     #[allow(dead_code)]
     pub active_agents_count: usize,
     pub memory_vectors_count: usize,
@@ -66,9 +74,10 @@ struct DashboardTemplate {
     #[allow(dead_code)]
     pub core_count: usize,
     #[allow(dead_code)]
-    #[allow(dead_code)]
     pub entropy: f32,
+    #[allow(dead_code)]
     pub dissonance: f32,
+    #[allow(dead_code)]
     pub tension: f32,
 }
 
@@ -84,6 +93,7 @@ struct ChatTemplate {
     github_configured: bool,
     #[allow(dead_code)]
     active_sources_html: String,
+    #[allow(dead_code)]
     library_repos: Vec<String>,
 }
 
@@ -93,6 +103,9 @@ struct MemoryTemplate {
     #[allow(dead_code)]
     pub total_vectors: usize,
     pub sample_axioms: Vec<(usize, String)>,
+    pub db_active_conns: usize,
+    pub db_idle_conns: usize,
+    pub db_status: String,
 }
 
 pub struct KeyView {
@@ -179,45 +192,7 @@ pub async fn list_local_hf_models() -> Vec<String> {
 }
 
 #[derive(Template)]
-#[template(
-    source = r#"
-<div class="message user">
-    <div class="message-avatar"><i data-lucide="user" style="width: 18px;"></i></div>
-    <div class="message-content">
-        <div class="message-sender">User</div>
-        <div class="message-bubble">{{ prompt|safe }}</div>
-    </div>
-</div>
-{{ mcp_feedback|safe }}
-<div class="message system">
-    <div class="message-avatar"><i data-lucide="brain-circuit" style="width: 18px;"></i></div>
-    <div class="message-content" style="width: 100%;">
-        <div class="message-sender" style="justify-content: space-between; width: 100%;">
-            <span style="color: var(--accent-brand);">{{ model_name }}</span>
-            <div class="view-toggles" style="display: flex; gap: 4px;">
-                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[0].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';" style="background: var(--bg-active);">MD</button>
-                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[1].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';">JSON</button>
-                <button type="button" class="btn-icon-small" onclick="const p=this.parentElement.parentElement.parentElement; p.querySelectorAll('.tab-content').forEach(el=>el.style.display='none'); p.querySelectorAll('.tab-content')[2].style.display='block'; this.parentElement.querySelectorAll('button').forEach(b=>b.style.background='transparent'); this.style.background='var(--bg-active)';">Trace</button>
-            </div>
-        </div>
-        
-        <div class="message-bubble tab-content" style="display: block; width: 100%;">
-            <div class="markdown-body">{{ response_md|safe }}</div>
-        </div>
-        <div class="message-bubble tab-content" style="display: none; width: 100%;">
-            <pre style="margin:0;">{{ jsonai|safe }}</pre>
-        </div>
-        <div class="message-bubble tab-content" style="display: none; font-family: var(--font-mono); font-size: 12px; width: 100%;">
-            <div style="margin-bottom:8px; color: var(--text-tertiary);">⌚ Délai: <span style="color: var(--text-primary);">{{ latency }} ms</span></div>
-            <div style="margin-bottom:8px; color: var(--text-tertiary);">🏭 Provider: <span style="color: var(--text-primary);">{{ model_name }}</span></div>
-            <div style="color: var(--text-tertiary);">🫂 Consensus: <span style="color: var(--text-primary);">{{ consensus }}</span></div>
-        </div>
-    </div>
-</div>
-<script>if (typeof lucide !== 'undefined') { lucide.createIcons(); }</script>
-"#,
-    ext = "html"
-)]
+#[template(path = "chat_response.html")]
 struct ChatResponseTemplate {
     mcp_feedback: String,
     prompt: String,
@@ -226,6 +201,9 @@ struct ChatResponseTemplate {
     jsonai: String,
     latency: String,
     consensus: String,
+    is_fact: bool,
+    belief_state: f64,
+    belief_pct: String,
 }
 
 #[derive(Deserialize)]
@@ -430,6 +408,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/chat/new", post(new_chat_session))
         .route("/chat/stream", get(handle_sse_stream))
         .route("/system/purge", post(system_purge))
+        .route("/system/airgap", post(system_airgap_mock))
+        .route("/system/heuristic", post(system_heuristic_mock))
         .route("/admin/vampire/queue/list", get(list_vampire_jobs))
         .route("/admin/vampire/queue/add", post(add_vampire_job))
         .route("/admin/vampire/queue/delete/:id", post(delete_vampire_job))
@@ -506,6 +486,27 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
     let memory_vectors_count = agent.memory_vectors_count();
     let active_agents_count = if agent.is_active() { 3 } else { 0 };
 
+    // Extracted / Mocked Deep Telemetry
+    let vram_limit_gb = "3.5".to_string();
+    let vram_used_gb = if agent.is_active() {
+        "0.8".to_string()
+    } else {
+        "0.0".to_string()
+    }; // BitNet 1.58b weight size approx
+    let vram_percent = if agent.is_active() { 22 } else { 0 };
+    let active_model = "r2d2_bitnet_1_58b".to_string();
+    let inference_tps = if agent.is_active() { 45.2 } else { 0.0 };
+    let scale_factor = 2.45; // Beta quantization factor
+
+    // Fetch MCP tools loaded
+    let mcp_tools_count = if let Some(hub) = &*agent.mcp_hub.lock().await {
+        hub.get_gemini_tools().len()
+    } else {
+        0
+    };
+
+    let db_connections = 3; // TODO: Query blackboard pool stats
+
     let vibe = state.circadian_rx.borrow().clone();
 
     Html(
@@ -513,6 +514,14 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
             total_ram_gb: format!("{:.1}", total_ram),
             used_ram_gb: format!("{:.1}", used_ram),
             ram_percent,
+            vram_limit_gb,
+            vram_used_gb,
+            vram_percent,
+            active_model,
+            inference_tps,
+            scale_factor,
+            mcp_tools_count,
+            db_connections,
             active_agents_count,
             memory_vectors_count,
             alert_threshold,
@@ -584,6 +593,16 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                     .unwrap_or("")
                     .replace("paradox-multiapi-", "");
 
+                let belief_state = parsed
+                    .get("belief_state")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0);
+                let belief_pct = format!("{:.0}", belief_state * 100.0);
+                let is_fact = parsed
+                    .get("is_fact")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
                 let parser = pulldown_cmark::Parser::new(&raw_text);
                 let mut html_output = String::new();
                 pulldown_cmark::html::push_html(&mut html_output, parser);
@@ -597,6 +616,9 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                         jsonai: json_resp,
                         latency,
                         consensus,
+                        belief_pct,
+                        belief_state,
+                        is_fact,
                     }
                     .render()
                     .unwrap(),
@@ -648,10 +670,18 @@ async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
         (0, vec![])
     };
 
+    // Postgres Pool telemetry mock
+    let db_active_conns = 2;
+    let db_idle_conns = 4;
+    let db_status = "OK (max=10)".to_string();
+
     Html(
         MemoryTemplate {
             total_vectors,
             sample_axioms,
+            db_active_conns,
+            db_idle_conns,
+            db_status,
         }
         .render()
         .unwrap(),
@@ -1166,6 +1196,16 @@ async fn handle_chat(
     let mut html_output = String::new();
     pulldown_cmark::html::push_html(&mut html_output, parser);
 
+    let is_fact = parsed
+        .get("is_fact")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let belief_state = parsed
+        .get("belief_state")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let belief_pct = format!("{:.0}", belief_state * 100.0);
+
     let tmpl = ChatResponseTemplate {
         mcp_feedback: mcp_feedback_html,
         prompt: input.prompt.clone(),
@@ -1174,6 +1214,9 @@ async fn handle_chat(
         jsonai: json_resp.clone(),
         latency,
         consensus,
+        is_fact,
+        belief_state,
+        belief_pct,
     };
 
     let session_id = state.current_chat_session.lock().await.clone();
@@ -1788,4 +1831,47 @@ async fn remove_context(
     let session_id = state.current_chat_session.lock().await.clone();
     chat_history::remove_github_source(&session_id, &payload.repo);
     axum::response::Html("") // Return empty block to swap out the pill
+}
+
+async fn system_airgap_mock(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let enabled = params.get("enabled").map(|v| v == "true").unwrap_or(false);
+    tracing::info!("🔒 [C2] Air-Gapped Mode set to: {}", enabled);
+    axum::response::Html(format!("Air-Gapped: {}", enabled))
+}
+
+async fn system_heuristic_mock(
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let value = params
+        .get("threshold")
+        .unwrap_or(&"0.45".to_string())
+        .clone();
+    tracing::info!("⚖️ [C2] Confidence Heuristic set to: {}", value);
+    axum::response::Html(format!("Heuristic: {}", value))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::Query;
+    use axum::response::IntoResponse;
+    use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn test_system_airgap_mock_toggle() {
+        let mut params = HashMap::new();
+        params.insert("enabled".to_string(), "true".to_string());
+        let res = system_airgap_mock(Query(params)).await.into_response();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_system_heuristic_mock_parsing() {
+        let mut params = HashMap::new();
+        params.insert("threshold".to_string(), "0.85".to_string());
+        let res = system_heuristic_mock(Query(params)).await.into_response();
+        assert_eq!(res.status(), axum::http::StatusCode::OK);
+    }
 }

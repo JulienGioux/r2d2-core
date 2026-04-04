@@ -3,11 +3,13 @@
     <!-- CHAT HISTORY / MESSAGES ZONE -->
     <div id="chat-history" class="chat-history">
         {% if history_html.is_empty() %}
-        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.6; margin-top: 10vh; animation: fadeIn 0.5s ease;">
-            <i data-lucide="terminal-square" style="width: 48px; height: 48px; margin-bottom: 24px; color: var(--text-secondary);"></i>
-            <h2 style="font-family: var(--font-mono); font-weight: 600; font-size: 16px; margin-bottom: 12px; letter-spacing: 0.1em;">R2D2 CORTEX ACTIVATED</h2>
-            <p style="text-align: center; max-width: 450px; font-size: 14px; line-height: 1.6; color: var(--text-secondary);">
-                Type your request to initialize the inference engine. You can mention active repositories or MCP tools for context-awareness.
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10vh; animation: fadeIn 0.5s ease;">
+            <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 32px; box-shadow: 0 0 64px rgba(255,255,255,0.02) inset;">
+                <i data-lucide="terminal-square" style="width: 42px; height: 42px; color: var(--text-secondary);"></i>
+            </div>
+            <h2 style="font-family: var(--font-mono); font-weight: 600; font-size: 16px; margin-bottom: 16px; letter-spacing: 0.15em; text-transform: uppercase;">R2D2 Cortex Activated</h2>
+            <p style="text-align: center; max-width: 500px; font-size: 14px; line-height: 1.6; color: var(--text-tertiary);">
+                Indiquez votre requête pour initialiser le moteur d'inférence vectoriel. Vous pouvez mentionner des modules MCP actifs ou requérir des axiomes spécifiques depuis le Blackboard.
             </p>
         </div>
         {% else %}
@@ -60,66 +62,64 @@
     
     <div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Current Workspace</h4>
+            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Contrôle de Routage (Cortex)</h4>
             <span class="pulse-dot"></span>
         </div>
         
-        <div class="glass-card" style="padding: 16px;">
-            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
-                <i data-lucide="server" style="width: 16px; color: var(--status-success);"></i>
-                <span style="font-size: 13px; font-weight: 600; font-family: var(--font-mono); color: var(--text-primary);">R2D2 Engine v2.0</span>
+        <div class="glass-card" style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">
+            
+            <!-- Air Gapped Toggle -->
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <i data-lucide="wifi-off" style="width: 16px; color: var(--status-warning);"></i>
+                    <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Air-Gapped Mode</span>
+                </div>
+                <label class="switch">
+                    <input type="checkbox" onchange="fetch('/api/system/airgap?enabled=' + this.checked, {method: 'POST'})">
+                    <span class="slider round"></span>
+                </label>
             </div>
-            <div style="display: flex; align-items: center; gap: 10px;">
-                <i data-lucide="database" style="width: 16px; color: var(--text-tertiary);"></i>
-                <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);">Context: <span style="color: var(--text-primary);">Global</span></span>
+            <div style="font-size: 11px; color: var(--text-tertiary); line-height: 1.4;">Force 100% de l'inférence sur le tensoriel local (BitNet). Coupe l'escalade Cloud.</div>
+
+            <hr style="border: none; border-top: 1px dashed var(--panel-border); margin: 4px 0;">
+
+            <!-- Confidence Slider -->
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);">Seuil d'Heuristique</span>
+                    <span id="heuristic-val" style="font-size: 12px; font-weight: 600; color: var(--accent-brand);">0.45</span>
+                </div>
+                <input type="range" class="r2d2-slider" min="0" max="1" step="0.05" value="0.45" 
+                       oninput="document.getElementById('heuristic-val').textContent = this.value;"
+                       onchange="fetch('/api/system/heuristic?threshold=' + this.value, {method: 'POST'})"
+                       style="width: 100%;">
+                <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); margin-top: 4px;">
+                    <span>BitNet</span>
+                    <span>Gemini / Modèles Experts</span>
+                </div>
             </div>
+            
         </div>
     </div>
 
     <div>
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Attached Repositories</h4>
-            <button class="btn-icon-small" title="Attach Repo">
-                <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
-            </button>
+            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Topologie MCP (Vue Rapide)</h4>
+            <i data-lucide="activity" style="width: 14px; color: var(--text-secondary);"></i>
         </div>
         
         <div style="display: flex; flex-direction: column; gap: 8px;">
-            {% if library_repos.is_empty() %}
-            <div style="font-size: 12px; color: var(--text-tertiary); font-style: italic; padding: 12px; border: 1px dashed var(--panel-border); border-radius: var(--radius-sm); text-align: center;">No repositories attached.</div>
-            {% else %}
-            {% for repo in library_repos %}
-            <div class="glass-card" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px;">
+            <div class="glass-card" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer;" onclick="document.getElementById('nav-store').click();">
                 <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
-                    <i data-lucide="folder-git-2" style="width: 16px; color: var(--text-secondary); flex-shrink: 0;"></i>
-                    <span style="font-size: 12px; font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);">{{ repo }}</span>
+                    <span class="status-indicator">
+                        <span class="pulse-dot" style="background-color: var(--status-success);"></span>
+                    </span>
+                    <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-primary);">Outils Actifs (Gérer)</span>
                 </div>
-                <button class="btn-icon-small danger">
-                    <i data-lucide="x" style="width: 14px; height: 14px;"></i>
-                </button>
-            </div>
-            {% endfor %}
-            {% endif %}
-        </div>
-    </div>
-    
-    <div>
-        <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 12px; letter-spacing: 0.05em; font-weight: 600;">Active MCP Tooling</h4>
-        <div class="glass-card" style="padding: 16px; font-family: var(--font-mono); font-size: 11px;">
-            <div style="color: var(--status-success); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="check-circle-2" style="width: 12px;"></i> default_api:github-mcp
-            </div>
-            <div style="color: var(--status-success); margin-bottom: 6px; display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="check-circle-2" style="width: 12px;"></i> default_api:run_command
-            </div>
-            <div style="color: var(--text-tertiary); display: flex; align-items: center; gap: 8px;">
-                <i data-lucide="circle" style="width: 12px;"></i> default_api:file_editor
+                <i data-lucide="arrow-right" style="width: 14px; height: 14px; color: var(--text-secondary);"></i>
             </div>
         </div>
-        <p style="font-size: 11px; color: var(--text-tertiary); margin-top: 12px; line-height: 1.5;">The reasoning agent will automatically trigger these tools if the conversational logic requires it.</p>
-    </div>
-
-</div>
+    </div></div>
 
 <style>
     .spinner {

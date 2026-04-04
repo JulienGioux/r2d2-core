@@ -59,28 +59,43 @@ async fn test_semantic_proxy_allow_safe() {
 
 #[tokio::test]
 async fn test_mcp_universal_client_init() {
-    let py_mock = r#"
-import sys
-import json
-sys.stderr.write("Ready to receive\n")
-sys.stderr.flush()
-while True:
-    line = sys.stdin.readline()
-    if not line:
-        break
-    try:
-        req = json.loads(line)
-        res = {"jsonrpc": "2.0", "id": req.get("id"), "result": {"success": True}}
-        sys.stdout.write(json.dumps(res) + '\n')
-        sys.stdout.flush()
-    except Exception:
-        pass
-"#;
+    // Mode Mock: Si on est le processus enfant, on se comporte comme le serveur MCP.
+    if std::env::var("R2D2_MOCK_MCP").is_ok() {
+        use std::io::BufRead;
+        // Indiquer au client parent qu'on est prêt à recevoir
+        eprintln!("Ready to receive");
+        let stdin = std::io::stdin();
+        let mut handle = stdin.lock();
+        let mut line = String::new();
+        while handle.read_line(&mut line).unwrap_or(0) > 0 {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) {
+                if let Some(id) = value.get("id") {
+                    let res = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": { "success": true }
+                    });
+                    println!("{}", res);
+                }
+            }
+            line.clear();
+        }
+        std::process::exit(0);
+    }
 
-    // En test, on va utiliser "python3" "-u" "-c"
-    let mut client = McpUniversalClient::spawn("python3", &["-u", "-c", py_mock], None)
-        .await
-        .expect("Erreur au spawn du client MCP mocké");
+    // Lancement du Processus Enfant "Mock" en invoquant l'exécutable cargo test courant
+    let exe = std::env::current_exe().expect("Impossible de récupérer l'exécutable courant");
+    let mut envs = std::collections::HashMap::new();
+    envs.insert("R2D2_MOCK_MCP".to_string(), "1".to_string());
+
+    // On repasse le nom du test pour que le test_harness cible uniquement ce code rapide (au lieu de touuuut relancer en boucle)
+    let mut client = McpUniversalClient::spawn(
+        exe.to_str().unwrap(),
+        &["--nocapture", "test_mcp_universal_client_init", "--exact"],
+        Some(envs),
+    )
+    .await
+    .expect("Erreur au spawn du client MCP mocké");
 
     let init_res = client.initialize().await.unwrap();
     assert_eq!(init_res.get("success").unwrap().as_bool(), Some(true));

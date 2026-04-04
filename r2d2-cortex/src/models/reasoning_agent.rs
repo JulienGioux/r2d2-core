@@ -71,6 +71,7 @@ pub struct ReasoningAgent {
     pub provider: ModelProvider,
     pub history: Vec<ChatMessage>,
     pub mcp_hub: std::sync::Arc<tokio::sync::Mutex<Option<crate::mcp_hub::McpHub>>>,
+    pub bitnet: Option<crate::models::bitnet_agent::BitNetAgent>,
 }
 
 impl Default for ReasoningAgent {
@@ -90,6 +91,7 @@ impl ReasoningAgent {
             provider: ModelProvider::GeminiFlash,
             history: Vec::new(),
             mcp_hub: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+            bitnet: None,
         }
     }
 
@@ -910,63 +912,114 @@ impl ReasoningAgent {
             }
         }
 
+        // 2.5 Logique "Tiered Fallback" (Edge Inference d'abord)
+        let mut bitnet_confidence = 0.0;
+        let mut local_response_opt = None;
+        let is_trivial = prompt.len() < 40 && !prompt.contains('?');
+
+        if let Some(mut bitnet) = self.bitnet.take() {
+            info!("🧠 [ReasoningAgent] Edge Inference Request to R2D2-BitNet...");
+            if let Ok(resp) = bitnet.generate_thought(prompt).await {
+                // Heuristique simple: on juge la réponse locale
+                if is_trivial {
+                    info!("🧠 [ReasoningAgent] Tâche triviale, confiance haute dans BitNet.");
+                    bitnet_confidence = 0.95;
+                    local_response_opt = Some(resp);
+                } else {
+                    info!(
+                        "🧠 [ReasoningAgent] Tâche complexe, confiance faible ({}).",
+                        0.35
+                    );
+                    bitnet_confidence = 0.35;
+                }
+            }
+            self.bitnet = Some(bitnet);
+        }
+
         // 3. Routage API Multi-Provider Intégrant l'Historique
-        let (node_name, consensus_type, final_text) = match self.provider {
-            ModelProvider::GeminiFlash => {
-                let has_tools = !github_sources.is_empty();
-                match self
-                    .call_gemini(&system_prompt, &self.history, has_tools)
-                    .await?
-                {
-                    GeminiResponse::FunctionCall { name, args } => {
-                        self.history.push(ChatMessage {
-                            role: MessageRole::FunctionCall,
-                            text: serde_json::to_string(&args).unwrap_or_default(),
-                            function_name: Some(name.clone()),
-                        });
-                        // Delegation à Maint
-                        return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
-                    }
-                    GeminiResponse::Text(t) => (
-                        "Gemini 2.5 Flash Cloud Node".to_string(),
-                        "CloudDistillation",
-                        t,
-                    ),
-                }
-            }
-            ModelProvider::OpenAICompatible => {
-                let has_tools = !github_sources.is_empty();
-                match self
-                    .call_openai_compatible(&system_prompt, &self.history, has_tools)
-                    .await?
-                {
-                    GeminiResponse::FunctionCall { name, args } => {
-                        self.history.push(ChatMessage {
-                            role: MessageRole::FunctionCall,
-                            text: serde_json::to_string(&args).unwrap_or_default(),
-                            function_name: Some(name.clone()),
-                        });
-                        return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
-                    }
-                    GeminiResponse::Text(t) => {
-                        let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
-                            .unwrap_or_else(|| "Unknown".to_string());
-                        (
-                            format!("Universal Node ({})", model_name),
-                            "UniversalSynthesis",
-                            t,
-                        )
-                    }
-                }
-            }
-            ModelProvider::Consensus => (
-                "Consensus Loop".to_string(),
-                "Debate SSE",
-                "Ceci est un signal SSE, cette trace ne devrait pas apparaitre.".to_string(),
+        let (node_name, consensus_type, final_text) = match local_response_opt.clone() {
+            Some(resp) if bitnet_confidence > 0.8 => (
+                "ParadoxLocal (BitNet-b1.58)".to_string(),
+                "EdgeInference",
+                resp,
             ),
-            ModelProvider::ParadoxLocal => {
-                let text = format!("**[MOCK LOCAL]** Chef, la Brique VII 'ParadoxEngine 1.58b' Bare-Metal nécessite des poids GGUF pour inférer. Pour l'heure, ceci est un échafaudage d'attente zero-dependency.\n\nMemoire Recall: {} ...", context);
-                ("ParadoxLocal (Mock)".to_string(), "MockSynthesis", text)
+            _ => {
+                if local_response_opt.is_some() {
+                    warn!("⚠️ [ReasoningAgent] Escalade ! BitNet n'est pas sûr de lui. Transmission au Cloud Architect...");
+                }
+                match self.provider {
+                    ModelProvider::GeminiFlash => {
+                        let has_tools = !github_sources.is_empty();
+                        match self
+                            .call_gemini(&system_prompt, &self.history, has_tools)
+                            .await?
+                        {
+                            GeminiResponse::FunctionCall { name, args } => {
+                                self.history.push(ChatMessage {
+                                    role: MessageRole::FunctionCall,
+                                    text: serde_json::to_string(&args).unwrap_or_default(),
+                                    function_name: Some(name.clone()),
+                                });
+                                // Delegation à Maint
+                                return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
+                            }
+                            GeminiResponse::Text(t) => (
+                                if bitnet_confidence > 0.0 {
+                                    format!(
+                                        "Gemini Cloud (Fallback from BitNet {:.2})",
+                                        bitnet_confidence
+                                    )
+                                } else {
+                                    "Gemini 2.5 Flash Cloud Node".to_string()
+                                },
+                                "CloudDistillation",
+                                t,
+                            ),
+                        }
+                    }
+                    ModelProvider::OpenAICompatible => {
+                        let has_tools = !github_sources.is_empty();
+                        match self
+                            .call_openai_compatible(&system_prompt, &self.history, has_tools)
+                            .await?
+                        {
+                            GeminiResponse::FunctionCall { name, args } => {
+                                self.history.push(ChatMessage {
+                                    role: MessageRole::FunctionCall,
+                                    text: serde_json::to_string(&args).unwrap_or_default(),
+                                    function_name: Some(name.clone()),
+                                });
+                                return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
+                            }
+                            GeminiResponse::Text(t) => {
+                                let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+                                    .unwrap_or_else(|| "Unknown".to_string());
+                                (
+                                    if bitnet_confidence > 0.0 {
+                                        format!(
+                                            "Universal Node ({}) (Fallback from BitNet)",
+                                            model_name
+                                        )
+                                    } else {
+                                        format!("Universal Node ({})", model_name)
+                                    },
+                                    "UniversalSynthesis",
+                                    t,
+                                )
+                            }
+                        }
+                    }
+                    ModelProvider::Consensus => (
+                        "Consensus Loop".to_string(),
+                        "Debate SSE",
+                        "Ceci est un signal SSE, cette trace ne devrait pas apparaitre."
+                            .to_string(),
+                    ),
+                    ModelProvider::ParadoxLocal => {
+                        let text = format!("**[MOCK LOCAL]** Chef, la Brique VII 'ParadoxEngine 1.58b' Bare-Metal nécessite des poids GGUF pour inférer. Pour l'heure, ceci est un échafaudage d'attente zero-dependency.\n\nMemoire Recall: {} ...", context);
+                        ("ParadoxLocal (Mock)".to_string(), "MockSynthesis", text)
+                    }
+                }
             }
         };
 
@@ -1049,6 +1102,14 @@ impl CognitiveAgent for ReasoningAgent {
             }
         }
 
+        info!("   [CORTEX] Initialisation du Edge Node R2D2-BitNet...");
+        let mut bitnet_agent = crate::models::bitnet_agent::BitNetAgent::new();
+        if bitnet_agent.load().await.is_ok() {
+            self.bitnet = Some(bitnet_agent);
+        } else {
+            warn!("   [CORTEX] ⚠️ Brique BitNet indisponible (local fallback offline).");
+        }
+
         self.active = true;
 
         info!("✅ [ReasoningAgent] ParadoxEngine is UP and Air-Gapped.");
@@ -1060,6 +1121,9 @@ impl CognitiveAgent for ReasoningAgent {
         self.http_client = None;
         if let Some(mut embedder) = self.embedder.take() {
             let _ = embedder.unload().await;
+        }
+        if let Some(mut bitnet) = self.bitnet.take() {
+            let _ = bitnet.unload().await;
         }
         self.memory = None;
         self.active = false;

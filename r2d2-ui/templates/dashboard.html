@@ -1,102 +1,172 @@
 <div class="padded-content">
-    <div class="section-header" style="animation: slideUp 0.3s ease-out;">
-        <div>
-            <h1 class="section-title">
-                R2D2 Engine <span style="font-weight: 400; color: var(--text-tertiary);">v2.0</span>
-            </h1>
-            <p class="section-subtitle">
-                Système Souverain d'Intelligence Artificielle. Architecture Edge-Native.
-            </p>
-        </div>
-        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
-            <div class="status-indicator">
-                <span class="pulse-dot"></span>
-                <span>Système Nominal</span>
+    <!-- Welcome / Onboarding Hero -->
+    <div class="glass-card" style="animation: slideUp 0.3s ease-out; padding: 32px; background: linear-gradient(135deg, rgba(30, 30, 30, 0.4) 0%, rgba(10, 10, 10, 0.9) 100%);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+            <div>
+                <h1 style="font-size: 28px; font-weight: 600; letter-spacing: -0.03em; margin-bottom: 8px; display: flex; align-items: center; gap: 12px;">
+                    <i data-lucide="cpu" style="color: var(--accent-brand); width: 28px; height: 28px;"></i>
+                    R2D2 Command & Control
+                </h1>
+                <p style="font-size: 15px; color: var(--text-secondary); max-width: 700px; line-height: 1.6;">
+                    Bienvenue dans votre système souverain d'Intelligence Artificielle. Ce poste de contrôle vous permet de piloter et d'observer en temps réel le comportement de votre <strong>Réseau Neuronal Edge-Native</strong> (Air-Gapped).
+                </p>
             </div>
-            <div style="font-family: var(--font-mono); color: var(--text-tertiary); font-size: 11px; margin-top: 4px; text-transform: uppercase;">
-                UPTIME: {{ uptime_formatted }}
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 8px;">
+                <div class="status-indicator">
+                    <span class="pulse-dot"></span>
+                    <span>Système Nominal</span>
+                </div>
+                <div style="font-family: var(--font-mono); color: var(--text-tertiary); font-size: 11px; margin-top: 4px; text-transform: uppercase;">
+                    UPTIME: {{ uptime_formatted }}
+                </div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.05);">
+            <div style="display: flex; gap: 12px;">
+                <div style="background: rgba(59, 130, 246, 0.1); padding: 10px; border-radius: var(--radius-sm); border: 1px solid rgba(59, 130, 246, 0.2); height: max-content;">
+                    <i data-lucide="binary" style="color: var(--accent-brand); width: 20px; height: 20px;"></i>
+                </div>
+                <div>
+                    <h4 style="color: var(--text-primary); margin-bottom: 4px;">Inférence Locale (BitNet)</h4>
+                    <p style="font-size: 12px; color: var(--text-tertiary); line-height: 1.5;">Le modèle mathématique compressé à 1.58 bits, optimisé pour tourner sur une configuration VRAM stricte (3.5 Go).</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <div style="background: rgba(16, 185, 129, 0.1); padding: 10px; border-radius: var(--radius-sm); border: 1px solid rgba(16, 185, 129, 0.2); height: max-content;">
+                    <i data-lucide="database" style="color: var(--status-success); width: 20px; height: 20px;"></i>
+                </div>
+                <div>
+                    <h4 style="color: var(--text-primary); margin-bottom: 4px;">Axiomes (Memory Mmap)</h4>
+                    <p style="font-size: 12px; color: var(--text-tertiary); line-height: 1.5;">La mémoire à très haute vitesse Zero-Copy. Vos fichiers et vecteurs sont lus directement depuis le disque nvme.</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 12px;">
+                <div style="background: rgba(245, 158, 11, 0.1); padding: 10px; border-radius: var(--radius-sm); border: 1px solid rgba(245, 158, 11, 0.2); height: max-content;">
+                    <i data-lucide="layers" style="color: var(--status-warning); width: 20px; height: 20px;"></i>
+                </div>
+                <div>
+                    <h4 style="color: var(--text-primary); margin-bottom: 4px;">Topologie MCP</h4>
+                    <p style="font-size: 12px; color: var(--text-tertiary); line-height: 1.5;">Extension des capacités de l'agent (Model Context Protocol). Permet à l'IA d'accéder au web, ou à des bases distantes.</p>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Quick Stats Widgets -->
+    <!-- Quick Stats Widgets (C2 Level) -->
     <div class="grid-3" style="animation: slideUp 0.4s ease-out;">
-        <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px; {% if alert_threshold %}border-color: var(--status-danger);{% endif %}">
+        <!-- VRAM Constraint Block -->
+        <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px; border-color: {% if active_model != "" %}var(--accent-brand){% else %}var(--panel-border){% endif %};">
             <div class="card-header" style="margin-bottom:0;">
-                <span class="card-title">RAM Hôte Globale</span>
-                <i data-lucide="cpu" style="width: 18px; color: {% if alert_threshold %}var(--status-danger){% else %}var(--text-secondary){% endif %};"></i>
+                <span class="card-title">VRAM & Modèle</span>
+                <i data-lucide="cpu" style="width: 18px; color: var(--accent-brand);"></i>
             </div>
             <div>
-                <span class="metric-value">{{ used_ram_gb }}</span>
-                <span style="font-size: 14px; color: var(--text-tertiary); font-family: var(--font-mono);">/ {{ total_ram_gb }} GB</span>
+                <div style="display:flex; justify-content:space-between; align-items:baseline;">
+                    <span class="metric-value" style="color: var(--accent-brand);">{{ vram_used_gb }}</span>
+                    <span style="font-size: 14px; color: var(--text-tertiary); font-family: var(--font-mono);">/ {{ vram_limit_gb }} GB</span>
+                </div>
+                <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">Modèle Pinned: <code style="color: var(--text-primary);">{{ active_model }}</code></div>
             </div>
-            <div class="progress-bg">
-                <div class="progress-fill {% if alert_threshold %}danger{% endif %}" style="width: {{ ram_percent }}%;"></div>
+            <div class="progress-bg" style="background: rgba(59, 130, 246, 0.1);">
+                <div class="progress-fill info" style="width: {{ vram_percent }}%; background: var(--accent-brand);"></div>
             </div>
         </div>
 
+        <!-- Tensor Matrix Block -->
         <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px;">
             <div class="card-header" style="margin-bottom:0;">
-                <span class="card-title">Axiomes Mémoire</span>
-                <i data-lucide="database" style="width: 18px; color: var(--text-secondary);"></i>
+                <span class="card-title">Débit Inférence (MatMul-free)</span>
+                <i data-lucide="zap" style="width: 18px; color: var(--status-warning);"></i>
             </div>
             <div class="metric-value">
-                {{ memory_vectors_count }}
+                {{ inference_tps }} <span style="font-size: 14px; color: var(--text-tertiary); font-weight: normal;">T/s</span>
             </div>
             <div style="font-size: 12px; color: var(--status-success); display: flex; align-items: center; gap: 6px;">
-                <i data-lucide="check-circle-2" style="width: 14px;"></i> Vecteurs Mmap Synchronisés
+                <i data-lucide="code-2" style="width: 14px;"></i> Facteur Déquant. β = {{ scale_factor }}
             </div>
         </div>
 
+        <!-- Mmap Vector & DB Block -->
         <div class="glass-card stat-card" style="display: flex; flex-direction: column; gap: 16px;">
             <div class="card-header" style="margin-bottom:0;">
-                <span class="card-title">Pression / Tension</span>
-                <i data-lucide="activity" style="width: 18px; color: {% if tension > 0.85 %}var(--status-danger){% else %}var(--text-secondary){% endif %};"></i>
+                <span class="card-title">Axiomes Mémoire & Connexions</span>
+                <i data-lucide="database" style="width: 18px; color: var(--status-success);"></i>
             </div>
-            <div style="display: flex; align-items: baseline; gap: 8px;">
-                <span class="metric-value" style="color: var(--status-warning);">{{ dissonance }}</span>
-                <span style="font-size: 16px; color: var(--text-tertiary);">/</span>
-                <span class="metric-value" style="{% if tension > 0.85 %}color: var(--status-danger);{% endif %}">{{ tension }}</span>
+            <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                <span class="metric-value">{{ memory_vectors_count }} <span style="font-size: 14px; font-weight:normal; color:var(--text-tertiary)">chunks</span></span>
             </div>
-            <div style="font-size: 12px; color: var(--text-tertiary);">
-                Indicateurs VibeVector Logiques
+            <div style="font-size: 12px; color: var(--text-tertiary); display: flex; align-items: center; gap: 6px;">
+                <div class="badge success" style="padding: 2px 6px;">{{ db_connections }} pools</div> Postgres DB & Mmap
             </div>
         </div>
     </div>
 
-    <div style="display: flex; gap: 24px; animation: slideUp 0.5s ease-out;">
-        <!-- Live Activity Log -->
-        <div class="glass-card" style="flex: 2; display: flex; flex-direction: column; gap: 16px; min-height: 280px;">
+    <div style="display: flex; gap: 24px; animation: slideUp 0.5s ease-out; margin-top: -8px;">
+        <!-- Live Topology & Event Loop Status -->
+        <div class="glass-card" style="flex: 2; display: flex; flex-direction: column; gap: 16px; min-height: 280px; position:relative;">
             <div class="card-header" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 16px; margin: 0;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <i data-lucide="terminal" style="color: var(--text-secondary); width: 16px;"></i>
-                    <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Télémétrie en temps réel</h3>
+                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <i data-lucide="workflow" style="color: var(--text-secondary); width: 16px;"></i>
+                        <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Topologie & Event Loop</h3>
+                    </div>
+                    <div class="badge {% if tension > 0.8 %}danger{% else %}neutral{% endif %}">
+                        Tension: {{ tension }}
+                    </div>
                 </div>
-                <span class="pulse-dot" style="background: var(--status-info); box-shadow: 0 0 8px var(--status-info);"></span>
             </div>
-            <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary);" hx-ext="sse" sse-connect="/api/admin/system/logs" sse-swap="message" hx-swap="beforeend">
-                <div style="color: var(--text-tertiary); font-style: italic;">En attente des signaux système...</div>
+            
+            <!-- Graphic layout mimicking node connections -->
+            <div style="display:flex; flex-direction:column; gap:16px; padding: 12px 0;">
+                <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.2); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <i data-lucide="server-cog" style="width:16px; color:var(--status-info)"></i>
+                        <span style="font-family: var(--font-mono); font-size: 12px;">r2d2-cortex</span>
+                    </div>
+                    <span style="font-size:11px; color:var(--status-success);">Active ({{ active_agents_count }} Agents)</span>
+                </div>
+                
+                <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.2); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <i data-lucide="binary" style="width:16px; color:var(--text-secondary)"></i>
+                        <span style="font-family: var(--font-mono); font-size: 12px;">r2d2-bitnet</span>
+                    </div>
+                    <span style="font-size:11px; color:var(--accent-brand);">Spawn Blocking OK</span>
+                </div>
+
+                <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(0,0,0,0.2); padding: 12px; border-radius: var(--radius-sm); border: 1px solid var(--panel-border);">
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <i data-lucide="layers" style="width:16px; color:var(--status-warning)"></i>
+                        <span style="font-family: var(--font-mono); font-size: 12px;">mcp-hub</span>
+                    </div>
+                    <span style="font-size:11px; color:var(--text-secondary);">{{ mcp_tools_count }} Outils Montés</span>
+                </div>
             </div>
+            
         </div>
 
-        <!-- Quick Actions -->
+        <!-- Quick Actions & Diagnostics -->
         <div class="glass-card" style="flex: 1; display: flex; flex-direction: column; gap: 16px;">
             <div class="card-header" style="border-bottom: 1px solid var(--panel-border); padding-bottom: 16px; margin: 0;">
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    <i data-lucide="zap" style="color: var(--text-secondary); width: 16px;"></i>
-                    <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Actions Rapides</h3>
+                    <i data-lucide="git-merge" style="color: var(--text-secondary); width: 16px;"></i>
+                    <h3 class="card-title" style="margin: 0; text-transform: uppercase;">Actions C2</h3>
                 </div>
             </div>
             <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 8px;">
                 <button class="btn-primary" hx-get="/ui/chat" hx-target="#main-content" style="justify-content: flex-start; padding: 14px 16px;">
-                    <i data-lucide="message-square"></i> Nouveau Chat Cortex
+                    <i data-lucide="terminal-square"></i> Activer Flux Cognitif
                 </button>
-                <button class="btn-secondary" hx-get="/ui/store" hx-target="#main-content" style="justify-content: flex-start; padding: 14px 16px;">
-                    <i data-lucide="box"></i> Découvrir les Modèles (Store)
-                </button>
-                <div style="margin: 8px 0; height: 1px; background: var(--panel-border);"></div>
-                <button class="btn-danger" hx-post="/api/system/purge" style="justify-content: center;">
-                    <i data-lucide="trash-2"></i> Purger VRAM
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--text-secondary); padding: 8px 0; border-top: 1px dashed var(--panel-border);">
+                    <span>RAM Physique</span>
+                    <span style="font-family: var(--font-mono);">{{ used_ram_gb }} / {{ total_ram_gb }} GB</span>
+                </div>
+                <div class="progress-bg" style="height: 2px;">
+                    <div class="progress-fill {% if alert_threshold %}danger{% endif %}" style="width: {{ ram_percent }}%;"></div>
+                </div>
+                <button class="btn-danger" hx-post="/api/system/purge" style="justify-content: center; margin-top:8px;">
+                    <i data-lucide="trash-2"></i> Forcer Eviction LRU
                 </button>
             </div>
         </div>

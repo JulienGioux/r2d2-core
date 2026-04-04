@@ -578,3 +578,52 @@ impl PostgresBlackboard {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_db_row_serialization() {
+        let row = ModelDbRow {
+            id: "test-e5".to_string(),
+            name: "E5-Small".to_string(),
+            model_type: "semantic".to_string(),
+            provider: "local_hf".to_string(),
+            config_json: "{}".to_string(),
+            is_enabled: true,
+        };
+        let js = serde_json::to_string(&row).expect("Doit parser");
+        assert!(js.contains("test-e5"));
+        assert!(js.contains("E5-Small"));
+
+        let parsed: ModelDbRow = serde_json::from_str(&js).expect("Doit parser");
+        assert!(parsed.is_enabled);
+    }
+
+    #[test]
+    fn test_mcp_tool_db_row_serialization() {
+        let row = McpToolDbRow {
+            id: "mcp-test".to_string(),
+            name: "test-mcp".to_string(),
+            command: "npx".to_string(),
+            args_json: "[]".to_string(),
+            is_enabled: false,
+        };
+        let js = serde_json::to_string(&row).unwrap();
+        assert!(js.contains("mcp-test"));
+        assert!(js.contains("test-mcp"));
+
+        let parsed: McpToolDbRow = serde_json::from_str(&js).unwrap();
+        assert!(!parsed.is_enabled);
+    }
+
+    #[test]
+    fn test_blackboard_error_format() {
+        let err = BlackboardError::ConnectionError("PG Offline".to_string());
+        assert_eq!(
+            err.to_string(),
+            "Erreur de connexion à la base de données: PG Offline"
+        );
+    }
+}

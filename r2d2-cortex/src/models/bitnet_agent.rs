@@ -4,6 +4,8 @@ use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
 use r2d2_bitnet::model::{BitNetConfig, BitNetModel};
 use r2d2_bitnet::InferenceWeights;
+use std::sync::Arc;
+use tokenizers::Tokenizer;
 use tracing::{info, instrument};
 
 /// Agent IA Natif : R2D2-BitNet (1.58-bit)
@@ -14,7 +16,8 @@ use tracing::{info, instrument};
 pub struct BitNetAgent {
     name: String,
     device: Device,
-    model: Option<BitNetModel<InferenceWeights>>,
+    model: Option<Arc<BitNetModel<InferenceWeights>>>,
+    tokenizer: Option<Arc<Tokenizer>>,
 }
 
 impl BitNetAgent {
@@ -23,6 +26,7 @@ impl BitNetAgent {
             name: "R2D2-BitNet-Native".to_string(),
             device: Device::Cpu,
             model: None,
+            tokenizer: None,
         }
     }
 }
@@ -54,40 +58,55 @@ impl CognitiveAgent for BitNetAgent {
             .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
             .build();
 
-        let vb = match api_result {
+        let (vb, tokenizer) = match api_result {
             Ok(api) => {
-                // Modèle exemple (à ajuster selon la repo cible finale)
                 let repo = api.model("1bitLLM/bitnet_b1_58-3B".to_string());
+
+                let tok_res = repo.get("tokenizer.json").await;
+                let tokenizer = if let Ok(tok_path) = tok_res {
+                    Tokenizer::from_file(&tok_path).ok()
+                } else {
+                    None
+                };
+
                 match repo.get("model.safetensors").await {
                     Ok(weights_filename) => {
                         info!("✅ Poids BitNet localisés : {:?}", weights_filename);
-                        unsafe {
+                        let vb_res = unsafe {
                             VarBuilder::from_mmaped_safetensors(
                                 &[weights_filename],
                                 DType::F32,
                                 &self.device,
                             )
+                        };
+                        match vb_res {
+                            Ok(vb) => (vb, tokenizer),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "⚠️ Erreur Mmap Safetensors: {}. Fallback -> Tenseurs zéros.",
+                                    e
+                                );
+                                (VarBuilder::zeros(DType::F32, &self.device), tokenizer)
+                            }
                         }
-                        .map_err(|e| {
-                            AgentError::LoadError(format!("Erreur Mmap Safetensors: {}", e))
-                        })?
                     }
                     Err(_) => {
                         tracing::warn!("⚠️ Impossible de télécharger les poids. Fallback -> Tenseurs Structuraux Zéros.");
-                        VarBuilder::zeros(DType::F32, &self.device)
+                        (VarBuilder::zeros(DType::F32, &self.device), tokenizer)
                     }
                 }
             }
             Err(_) => {
                 tracing::warn!("⚠️ API HF inaccessible. Fallback -> Tenseurs Structuraux Zéros.");
-                VarBuilder::zeros(DType::F32, &self.device)
+                (VarBuilder::zeros(DType::F32, &self.device), None)
             }
         };
 
         let model = BitNetModel::<InferenceWeights>::load_inference(vb, &config)
             .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage BitNet: {}", e)))?;
 
-        self.model = Some(model);
+        self.model = Some(Arc::new(model));
+        self.tokenizer = tokenizer.map(Arc::new);
         info!("✅ [CORTEX] Topologie R2D2-BitNet instanciée avec succès en RAM (0 TFLOPS MatMul).");
 
         Ok(())
@@ -101,28 +120,42 @@ impl CognitiveAgent for BitNetAgent {
 
     #[instrument(skip(self, prompt))]
     async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
-        let model = self.model.as_ref().ok_or(AgentError::NotActive)?;
+        let model = self
+            .model
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(AgentError::NotActive)?;
+        let tokenizer = self
+            .tokenizer
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(AgentError::NotActive)?;
+        let device = self.device.clone();
 
-        info!(
-            "🧠 [BitNet] Réflexion Autorégressive sur le prompt: '{}'",
-            prompt
-        );
+        let prompt_str = prompt.to_string();
 
-        // Simulation d'un Tokenizer basique : chaque caractère devient son code ASCII
-        // Le Llama Tokenizer complet (BPE) sera branché dans une itération ultérieure.
-        let prompt_tokens: Vec<u32> = prompt.chars().map(|c| c as u32).collect();
+        tokio::task::spawn_blocking(move || {
+            info!("🧠 [BitNet] Réflexion Autorégressive sur le prompt (spawn_blocking)...");
 
-        // Limite drastique pour le test architectural (5 tokens générés)
-        let generated_ids = model
-            .generate(&prompt_tokens, 5, &self.device)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+            let encoding = tokenizer.encode(prompt_str, false).map_err(|e| {
+                AgentError::InferenceError(format!("Tokenizer encode error: {}", e))
+            })?;
 
-        // Reconstruction textuelle simpliste
-        let generated_text: String = generated_ids
-            .into_iter()
-            .map(|id| std::char::from_u32(id).unwrap_or('?'))
-            .collect();
+            let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
 
-        Ok(generated_text)
+            // Limite drastique pour le test architectural (5 tokens générés)
+            let generated_ids = model
+                .generate(&prompt_tokens, 5, &device)
+                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+
+            // Reconstruction textuelle réelle via BPE tokenizer
+            let generated_text = tokenizer.decode(&generated_ids, true).map_err(|e| {
+                AgentError::InferenceError(format!("Tokenizer decode error: {}", e))
+            })?;
+
+            Ok(generated_text)
+        })
+        .await
+        .map_err(|e| AgentError::InferenceError(format!("Thread local panic: {}", e)))?
     }
 }

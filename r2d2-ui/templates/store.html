@@ -124,9 +124,19 @@
         {% else %}
         <div class="grid-3">
             {% if mcp_tools.is_empty() %}
-            <div class="glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 40px; color: var(--text-tertiary); font-style: italic;">
-                <i data-lucide="plug" style="width: 32px; height: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
-                Aucun serveur MCP injecté dans le Blackboard.
+            <div class="glass-card" style="grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px; background: linear-gradient(180deg, rgba(59,130,246,0.05) 0%, transparent 100%);">
+                <div style="background: rgba(59,130,246,0.1); padding: 16px; border-radius: 50%; border: 1px solid rgba(59,130,246,0.2); margin-bottom: 20px;">
+                    <i data-lucide="plug-zap" style="width: 32px; height: 32px; color: var(--accent-brand);"></i>
+                </div>
+                <h4 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Aucun module MCP actif</h4>
+                <p style="font-size: 13px; color: var(--text-secondary); text-align: center; max-width: 400px; line-height: 1.6; margin-bottom: 24px;">
+                    Le protocole MCP permet à l'agent de se connecter à des outils externes (Bases BDD, Navigateurs, API Github). Ajoutez un flux via le panneau latéral.
+                </p>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn-primary" onclick="document.getElementById('rightSidebarToggle').click();">
+                        <i data-lucide="plus" style="width: 16px;"></i> Ouvrir le Registre
+                    </button>
+                </div>
             </div>
             {% else %}
             {% for tool in mcp_tools %}
