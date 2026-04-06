@@ -2022,7 +2022,7 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
             title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
             updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
             pinned: false,
-            github_sources: if repo_name != "none" { vec![repo_name] } else { vec![] },
+            github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
             debate_config: Some(crate::chat_history::DebateConfig::default()),
             workspace_config: None, // It's updated directly
             turns: vec![],
