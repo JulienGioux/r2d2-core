@@ -96,8 +96,8 @@ pub async fn handle_terminal_socket(socket: WebSocket, session_id: String) {
             if !script.is_empty() {
                 let writer_clone = writer.clone();
                 std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(800));
-                    let cmd = format!("{}\r", script);
+                    std::thread::sleep(std::time::Duration::from_millis(2500));
+                    let cmd = format!("echo -e \"\\n\\033[1;36m[R2D2 Cortex]\\033[0m Lancement de la configuration automatique du Workspace...\\n\"; {}\r", script);
                     if let Ok(mut w) = writer_clone.lock() {
                         let _ = w.write_all(cmd.as_bytes());
                     }

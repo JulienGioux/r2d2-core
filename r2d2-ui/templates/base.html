@@ -3,178 +3,521 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>R2D2 Console</title>
-    <!-- HTMX -->
+    <title>Sovereign IDE - R2D2</title>
+    <!-- GLOBAL JS ERROR TRACER -->
+    <script>
+    window.addEventListener('error', function(e) {
+        new Image().src = 'http://127.0.0.1:8081/jserror?msg=' + encodeURIComponent(e.message + ' @ ' + (e.filename || 'unknown') + ':' + e.lineno);
+    }, true);
+    window.addEventListener('unhandledrejection', function(e) {
+        if(e.reason && !String(e.reason).includes('fetch')) {
+            new Image().src = 'http://127.0.0.1:8081/jspromise?msg=' + encodeURIComponent(e.reason);
+        }
+    });
+    </script>
+    <!-- HTMX & Deps -->
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
-    <!-- Lucide Icons -->
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Highlight.js for Markdown -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="/static/style.css?v=8.0">
-    <!-- Theme Logic (in head to prevent flash of wrong theme) -->
-    <script>
-        (function() {
-            const savedTheme = localStorage.getItem('r2d2-theme');
-            if (savedTheme) {
-                document.documentElement.setAttribute('data-theme', savedTheme);
-            } else {
-                if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                    document.documentElement.setAttribute('data-theme', 'dark');
-                } else {
-                    document.documentElement.setAttribute('data-theme', 'light');
-                }
-            }
-        })();
-    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js"></script>
+    
+    <link rel="stylesheet" href="/ag-framework/css/antigravity.css?v=1.0">
+    <link rel="stylesheet" href="/ag-framework/css/ag-ide.css?v=1.0">
+    <style>
+    /* HTMX States */
+    .chat-history-btn.htmx-request .chat-icon { display: none !important; }
+    .chat-history-btn.htmx-request .chat-spinner { display: inline-block !important; }
+
+    /* Jules Paradigm Layout */
+    :root {
+        --jules-sidebar-bg: #0d0d0d;
+        --jules-context-bg: #131313;
+        --jules-main-bg: var(--bg-surface);
+        --jules-border: rgba(255,255,255,0.06);
+        --jules-header-bg: #000000;
+        --jules-tab-bg: #111111;
+        --jules-tab-active: #1e1e1e;
+    }
+
+    body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        background: var(--jules-sidebar-bg);
+        color: var(--text-primary);
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+    }
+
+    /* 0. Top Header */
+    .ag-header-global {
+        height: 48px;
+        min-height: 48px;
+        background: var(--jules-header-bg);
+        border-bottom: 1px solid var(--jules-border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 16px;
+        z-index: 20;
+    }
+    
+    .ag-header-left { display: flex; align-items: center; gap: 16px; }
+    .ag-header-right { display: flex; align-items: center; gap: 12px; }
+
+    .ag-content-wrapper {
+        display: flex;
+        flex: 1;
+        overflow: hidden;
+    }
+
+    /* 1. Global Sidebar (Left) */
+    .ag-sidebar-global {
+        width: 260px;
+        min-width: 260px;
+        background: var(--jules-sidebar-bg);
+        border-right: 1px solid var(--jules-border);
+        display: flex;
+        flex-direction: column;
+        z-index: 10;
+    }
+
+    .ag-sidebar-search {
+        padding: 16px 12px;
+        border-bottom: 1px solid var(--jules-border);
+    }
+    .ag-search-input {
+        width: 100%;
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 6px;
+        padding: 8px 12px;
+        color: var(--text-primary);
+        font-size: 13px;
+        outline: none;
+    }
+    .ag-search-input:focus { border-color: rgba(255,255,255,0.15); }
+
+    .ag-sidebar-section {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px 0;
+    }
+
+    .ag-section-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        font-weight: 600;
+        color: var(--text-tertiary);
+        margin: 16px 12px 8px 12px;
+        letter-spacing: 0.05em;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .ag-sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        margin: 2px 8px;
+        color: var(--text-secondary);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        transition: 0.15s;
+        text-decoration: none;
+    }
+    .ag-sidebar-item:hover, .ag-sidebar-item.active {
+        background: rgba(255,255,255,0.05);
+        color: var(--text-primary);
+    }
+
+    .ag-sidebar-footer {
+        padding: 12px;
+        border-top: 1px solid var(--jules-border);
+        font-size: 11px;
+        color: var(--text-tertiary);
+        display: flex;
+        justify-content: space-between;
+    }
+
+    /* 2. Main Workspace (Middle) */
+    .ag-main-workspace {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: var(--jules-main-bg);
+        position: relative;
+        overflow: hidden;
+    }
+
+    .ag-editor-container {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* Terminal pane at bottom of middle */
+    .ag-terminal-container {
+        border-top: 1px solid var(--jules-border);
+        background: var(--bg-void);
+        display: flex;
+        flex-direction: column;
+        height: 30vh;
+        min-height: 150px;
+    }
+
+    .ag-terminal-tabs {
+        display: flex;
+        background: var(--jules-tab-bg);
+        border-bottom: 1px solid var(--jules-border);
+        padding: 0 8px;
+    }
+
+    .ag-terminal-tab {
+        padding: 8px 16px;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--text-secondary);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .ag-terminal-tab.active {
+        color: var(--text-primary);
+        background: var(--jules-tab-active);
+        border-bottom: 2px solid var(--accent-brand, #3b82f6);
+    }
+    
+    .ag-terminal-tab:hover:not(.active) {
+        background: rgba(255,255,255,0.02);
+        color: var(--text-primary);
+    }
+
+    .ag-terminal-close {
+        margin-left: auto;
+        padding: 8px;
+        cursor: pointer;
+        color: var(--text-tertiary);
+    }
+    .ag-terminal-close:hover {
+        color: var(--text-primary);
+    }
+
+    .terminal-body {
+        flex: 1;
+        padding: 8px;
+        position: relative;
+    }
+
+    /* 3. Context Sidebar (Right) */
+    .ag-sidebar-context {
+        width: 260px;
+        min-width: 260px;
+        background: var(--jules-context-bg);
+        border-left: 1px solid var(--jules-border);
+        display: flex;
+        flex-direction: column;
+        z-index: 5;
+        transition: width 0.2s;
+    }
+    .ag-sidebar-context:empty {
+        width: 0;
+        min-width: 0;
+        border-left: none;
+    }
+    </style>
 </head>
 <body>
-    <div class="app-layout">
-        
-        <!-- Top Navigation Bar -->
-        <header class="topbar">
-            <div class="topbar-left">
-                <button id="leftSidebarToggle" class="icon-toggle" aria-label="Toggle Navigation">
-                    <i data-lucide="menu"></i>
-                </button>
-                <div class="logo-text">
-                    <i data-lucide="cpu" style="width: 18px; color: var(--accent-brand);"></i>
-                    R2D2 Sovereign OS
-                </div>
+    
+    <!-- TOP HEADER -->
+    <header class="ag-header-global">
+        <div class="ag-header-left">
+            <i data-lucide="cpu" style="color:var(--accent-brand, #3b82f6); width:20px;"></i>
+            <span style="font-weight: 600; font-family: var(--font-mono); font-size: 14px; letter-spacing: 0.08em; text-transform: uppercase;">R2D2 Sovereign</span>
+        </div>
+        <div class="ag-header-right">
+            <span style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);">
+                <div style="width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e88;"></div>
+                System Online
+            </span>
+            <button class="btn-secondary" style="padding: 6px; border: none; background: transparent; cursor: pointer;" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" title="Settings">
+                <i data-lucide="settings" style="width: 16px; color: var(--text-tertiary);"></i>
+            </button>
+        </div>
+    </header>
+
+    <div class="ag-content-wrapper">
+        <!-- PANNEAU 1 : GLOBAL SIDEBAR (LEFT) -->
+        <aside class="ag-sidebar-global">
+            <div class="ag-sidebar-search">
+                <input type="text" class="ag-search-input" placeholder="Search for models or sessions...">
             </div>
             
-            <div class="topbar-right">
-                <button id="themeToggle" class="icon-toggle" title="Toggle Light/Dark Theme">
-                    <i data-lucide="moon" id="themeIcon"></i>
-                </button>
-                <div class="status-indicator" title="System Status: Online">
-                    <span class="pulse-dot"></span>
-                    <span>{{ status }}</span>
-                </div>
-                <button id="rightSidebarToggle" class="icon-toggle" aria-label="Toggle Context">
-                    <i data-lucide="panel-right"></i>
-                </button>
-            </div>
-        </header>
-
-        <div class="main-layout">
-            <!-- Left Navigation Sidebar -->
-            <aside class="sidebar sidebar-left" id="mainSidebar">
-                <div class="sidebar-header">
-                    <span>Navigation</span>
-                </div>
-                <nav class="sidebar-nav">
-                    <a href="#" class="nav-item active" hx-get="/ui/dashboard" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="layout-dashboard"></i> <span>Dashboard</span>
-                    </a>
-                    <a href="#" class="nav-item" hx-get="/ui/chat" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="message-square"></i> <span>Workspace</span>
-                    </a>
-                    <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="activity"></i> <span>Cortex Live</span>
-                    </a>
-                    <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="database"></i> <span>Memory</span>
-                    </a>
-                    <a href="#" class="nav-item" hx-get="/ui/store" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="box"></i> <span>Sovereign Store</span>
-                    </a>
-                    <a href="#" class="nav-item" hx-get="/ui/admin" hx-target="#main-content" onclick="setActiveNav(this)">
-                        <i data-lucide="lock"></i> <span>Vault</span>
-                    </a>
-                </nav>
-            </aside>
-
-            <!-- Main Dynamic Content Area -->
-            <main id="main-content" class="content-area" hx-get="/ui/dashboard" hx-trigger="load">
-                <div style="display:flex; justify-content:center; align-items:center; height:100%;">
-                    <i data-lucide="loader-2" style="color: var(--text-tertiary); animation: spin 1.5s linear infinite; width: 32px; height: 32px;"></i>
-                </div>
-            </main>
-
-            <!-- Right Context Sidebar -->
-            <aside class="sidebar sidebar-right" id="contextSidebar">
-                <div class="sidebar-header">
-                    <span>Contextual Feed</span>
-                    <button class="icon-toggle" onclick="document.getElementById('contextSidebar').classList.add('collapsed')" style="width: 28px; height: 28px;">
-                        <i data-lucide="x" style="width: 14px; height: 14px;"></i>
+            <div class="ag-sidebar-section">
+                <div class="ag-section-title">
+                    Recent sessions
+                    <button hx-get="/api/chat/new_modal" hx-target="body" hx-swap="beforeend" style="background:transparent; border:none; cursor:pointer; color:var(--text-tertiary);">
+                        <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
                     </button>
                 </div>
-                <div id="context-content" style="flex: 1; overflow-y: auto;">
-                    <div style="padding: 32px 24px; color: var(--text-tertiary);">
-                        <i data-lucide="compass" style="margin-bottom: 16px; width: 32px; height: 32px; color: var(--accent-brand); opacity: 0.8;"></i>
-                        <h4 style="color: var(--text-primary); font-size: 14px; text-transform: none; font-weight: 600; margin-bottom: 8px;">Guide de Démarrage Rapide</h4>
-                        <p style="font-size: 13px; font-weight: 400; color: var(--text-secondary); line-height: 1.6; margin-bottom: 16px;">
-                            Sélectionnez un sous-système dans le menu de gauche pour afficher ses actions contextuelles ici. 
-                        </p>
-                        <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); padding: 12px;">
-                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text-secondary); font-size: 12px; font-weight: 500;">
-                                <i data-lucide="zap" style="width: 14px; height: 14px; color: var(--status-warning);"></i> Astuce
-                            </div>
-                            <p style="font-size: 11px; line-height: 1.5; color: var(--text-tertiary);">
-                                En mode <strong>Air-Gapped</strong>, le système coupe tous les accès externes (MCP Inbound/Outbound) et tourne exclusivement sur le modèle mathématique quantifié local (BitNet).
-                            </p>
-                        </div>
+                
+                <div id="ag-history-list" hx-get="/api/chat/history/list" hx-trigger="load, chat-history-update from:body" style="max-height: 40vh; overflow-y: auto;">
+                    <!-- Chat history injected here -->
+                </div>
+                
+                <div class="ag-section-title" style="margin-top: 24px;">
+                    Codebases / Store
+                </div>
+                
+                <a class="ag-sidebar-item" hx-get="/ui/store" hx-target="#ag-editor-target">
+                    <i data-lucide="database" style="width: 14px;"></i>
+                    Sovereign Infrastructure
+                </a>
+                <a class="ag-sidebar-item" hx-get="/ui/store/cloud" hx-target="#ag-editor-target">
+                    <i data-lucide="cloud" style="width: 14px;"></i>
+                    Cloud Gateways
+                </a>
+            </div>
+
+            <div class="ag-sidebar-footer">
+                <span style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-secondary);" hx-get="/ui/store" hx-target="#ag-editor-target" title="Documentation">
+                    <i data-lucide="file-text" style="width:12px;"></i> Docs
+                </span>
+                <span style="display: flex; gap: 8px;">
+                    <span onclick="window.TerminalManager.toggleTerminal()" style="cursor: pointer; color: var(--text-secondary); display: inline-flex;" title="Afficher/Masquer Terminal">
+                        <i data-lucide="terminal-square" style="width:14px;"></i>
+                    </span>
+                    <span hx-get="/ui/editor/logs" hx-target="#ag-editor-target" style="cursor: pointer; color: var(--text-secondary); display: inline-flex;" title="System Logs & Audit">
+                        <i data-lucide="scroll-text" style="width:14px;"></i>
+                    </span>
+                    <span hx-get="/api/chat/current/workspace_config" hx-target="body" hx-swap="beforeend" style="cursor: pointer; color: var(--text-secondary); display: inline-flex;" title="Workspace Configuration">
+                        <i data-lucide="sliders-horizontal" style="width:14px;"></i>
+                    </span>
+                </span>
+            </div>
+        </aside>
+
+        <!-- PANNEAU 2 : MAIN WORKSPACE (CENTER) -->
+        <main class="ag-main-workspace" id="ag-main-wrapper">
+            
+            <div class="ag-editor-container" id="ag-editor-target" hx-get="/ui/chat" hx-trigger="load">
+                <div style="display:flex; justify-content:center; align-items:center; height:100%;">
+                    <i data-lucide="loader-2" style="animation: spin 1s linear infinite; color: var(--text-tertiary); width: 32px; height: 32px;"></i>
+                </div>
+            </div>
+
+            <!-- TERMINAL SECTION (BOTTOM OF CENTER) -->
+            <div id="ag-terminal-section" class="ag-terminal-container" style="display: none;">
+                <div class="ag-terminal-tabs">
+                    <div id="terminal-tabs-container" style="display: flex;">
+                        <!-- Tabs dynamically added here -->
+                    </div>
+                    <div class="ag-terminal-close" onclick="window.TerminalManager.hideTerminal()">
+                        <i data-lucide="x" style="width: 14px;"></i>
                     </div>
                 </div>
-            </aside>
-        </div>
+                <div id="terminal-body" class="terminal-body">
+                    <!-- The active xterm instance attaches here -->
+                </div>
+            </div>
+
+        </main>
+
+        <!-- PANNEAU 3 : CONTEXT SIDEBAR (RIGHT) -->
+        <aside class="ag-sidebar-context" id="ag-context-target">
+            <!-- Will be dynamically populated. -->
+        </aside>
     </div>
 
     <script>
         lucide.createIcons();
 
-        // Left Sidebar Toggle
-        document.getElementById('leftSidebarToggle').addEventListener('click', function() {
-            document.getElementById('mainSidebar').classList.toggle('collapsed');
-            this.classList.toggle('active');
-        });
+        // Terminal Manager handles multiple sessions natively for Contextual Tabs
+        window.TerminalManager = {
+            instances: {},
+            activeSession: null,
+            isVisible: false,
+            
+            toggleTerminal() {
+                this.isVisible = !this.isVisible;
+                document.getElementById('ag-terminal-section').style.display = this.isVisible ? 'flex' : 'none';
+                if(this.isVisible && this.activeSession && this.instances[this.activeSession]) {
+                    this.instances[this.activeSession].fitAddon.fit();
+                }
+            },
+            
+            hideTerminal() {
+                this.isVisible = false;
+                document.getElementById('ag-terminal-section').style.display = 'none';
+            },
 
-        // Right Sidebar Toggle
-        document.getElementById('rightSidebarToggle').addEventListener('click', function() {
-            document.getElementById('contextSidebar').classList.toggle('collapsed');
-            this.classList.toggle('active');
-        });
+            clearAllTerminals() {
+                for (const key in this.instances) {
+                    let obj = this.instances[key];
+                    if (obj.wsTerm) obj.wsTerm.close();
+                    if (obj.term) obj.term.dispose();
+                }
+                this.instances = {};
+                this.activeSession = null;
+                const container = document.getElementById('terminal-body');
+                if (container) container.innerHTML = '';
+                const tabsContainer = document.getElementById('terminal-tabs-container');
+                if (tabsContainer) tabsContainer.innerHTML = '';
+            },
 
-        // Theme Toggle Logic
-        const themeToggle = document.getElementById('themeToggle');
-        const themeIcon = document.getElementById('themeIcon');
-        
-        function updateThemeIcon() {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            if (currentTheme === 'dark') {
-                themeIcon.setAttribute('data-lucide', 'sun');
-            } else {
-                themeIcon.setAttribute('data-lucide', 'moon');
+            openTerminalForSession(sessionId, tabName, wsUrl, readOnly) {
+                this.isVisible = true;
+                document.getElementById('ag-terminal-section').style.display = 'flex';
+                let termKey = sessionId || 'local';
+                const name = tabName || termKey;
+                
+                // Switch tab visuals
+                this.activeSession = termKey;
+                this.renderTabs(termKey, name, wsUrl, readOnly);
+
+                const container = document.getElementById('terminal-body');
+
+                // Hide all existing terminal divs
+                Array.from(container.children).forEach(child => {
+                    child.style.display = 'none';
+                });
+
+                let termDiv = document.getElementById('term-wrap-' + termKey);
+                if (!termDiv) {
+                    termDiv = document.createElement('div');
+                    termDiv.id = 'term-wrap-' + termKey;
+                    termDiv.style.position = 'absolute';
+                    termDiv.style.top = '8px';
+                    termDiv.style.bottom = '8px';
+                    termDiv.style.left = '8px';
+                    termDiv.style.right = '8px';
+                    container.appendChild(termDiv);
+                }
+                termDiv.style.display = 'block';
+
+                if (!this.instances[termKey] || this.instances[termKey].preInit) {
+                    const term = new Terminal({
+                        theme: { background: '#000000', foreground: '#e0e0e0', cursor: '#3b82f6' },
+                        fontFamily: 'monospace',
+                        fontSize: 13,
+                        disableStdin: readOnly
+                    });
+                    const fitAddon = new FitAddon.FitAddon();
+                    term.loadAddon(fitAddon);
+                    const linkAddon = new WebLinksAddon.WebLinksAddon();
+                    term.loadAddon(linkAddon);
+                    
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const targetUrl = wsUrl ? wsUrl : ('/api/ws/terminal/' + termKey);
+                    
+                    const wsTerm = new WebSocket(protocol + '//' + window.location.host + targetUrl);
+                    wsTerm.binaryType = 'arraybuffer';
+                    
+                    wsTerm.onopen = () => {
+                        console.log("WebSocket connected for", termKey);
+                        if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
+                    };
+                    wsTerm.onerror = (e) => {
+                        console.error("WebSocket error for", termKey, e);
+                        if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
+                    };
+                    wsTerm.onclose = (e) => {
+                        console.log("WebSocket closed for", termKey, e.code);
+                        if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
+                    };
+                    
+                    wsTerm.onmessage = (ev) => {
+                        if (ev.data instanceof ArrayBuffer) {
+                            term.write(new Uint8Array(ev.data));
+                        } else {
+                            term.write(ev.data);
+                        }
+                    };
+                    
+                    if (!readOnly) {
+                        term.onData(data => {
+                            if(wsTerm.readyState === WebSocket.OPEN) {
+                                const encoder = new TextEncoder();
+                                wsTerm.send(encoder.encode(data));
+                            }
+                        });
+                    }
+                    
+                    term.onResize(size => {
+                        if(wsTerm.readyState === WebSocket.OPEN) {
+                            wsTerm.send(JSON.stringify({ type: "resize", cols: size.cols, rows: size.rows }));
+                        }
+                    });
+
+                    this.instances[termKey] = { term, wsTerm, fitAddon, name: name, wsUrl: wsUrl, readOnly: readOnly };
+                    // Render ONCE directly on its dedicated div
+                    this.instances[termKey].term.open(termDiv);
+                }
+
+                // Need small timeout for DOM to compute layout before fitting
+                setTimeout(() => {
+                    if (this.instances[termKey] && this.instances[termKey].fitAddon) {
+                        this.instances[termKey].fitAddon.fit();
+                    }
+                }, 10);
+            },
+
+            renderTabs(activeKey, activeName, wsUrl, readOnly) {
+                const tabsContainer = document.getElementById('terminal-tabs-container');
+                tabsContainer.innerHTML = '';
+
+                // Build a tab for each instance running + the current one if not exists
+                if(!this.instances[activeKey]) {
+                     this.instances[activeKey] = { name: activeName, preInit: true, wsUrl: wsUrl, readOnly: readOnly }; // placeholder
+                }
+
+                for(const [key, obj] of Object.entries(this.instances)) {
+                    const tab = document.createElement('div');
+                    tab.className = 'ag-terminal-tab' + (key === activeKey ? ' active' : '');
+                    tab.innerHTML = '<i data-lucide="terminal" style="width:12px;"></i> ' + obj.name;
+                    tab.onclick = () => {
+                        this.openTerminalForSession(key, obj.name, obj.wsUrl, obj.readOnly);
+                    };
+                    tabsContainer.appendChild(tab);
+                }
+                lucide.createIcons({root: tabsContainer});
+            },
+
+            snippetName(tabName, termKey) {
+                if(tabName) return tabName;
+                if(termKey === 'local') return 'Local System';
+                return 'Session ' + termKey.substring(0, 6);
             }
-            lucide.createIcons();
-        }
-        
-        updateThemeIcon();
+        };
 
-        themeToggle.addEventListener('click', () => {
-            const currentTheme = document.documentElement.getAttribute('data-theme');
-            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
-            document.documentElement.setAttribute('data-theme', newTheme);
-            localStorage.setItem('r2d2-theme', newTheme);
-            updateThemeIcon();
+        window.addEventListener('resize', () => {
+            if(window.TerminalManager.isVisible && window.TerminalManager.activeSession) {
+                const active = window.TerminalManager.instances[window.TerminalManager.activeSession];
+                if(active && active.fitAddon) active.fitAddon.fit();
+            }
         });
 
-        // Active Nav
-        function setActiveNav(element) {
-            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-            element.classList.add('active');
-        }
-
-        // Auto re-init icons and scroll chat to bottom after HTMX swaps
         document.body.addEventListener('htmx:afterSwap', function(e) {
             lucide.createIcons();
             if (typeof hljs !== 'undefined') hljs.highlightAll();
-            const chatHistory = document.getElementById('chat-history');
-            if (chatHistory && e.detail.target.id === 'chat-history') {
-                chatHistory.scrollTop = chatHistory.scrollHeight;
+        });
+        
+        document.body.addEventListener('htmx:afterSettle', function(e) {
+            const history = e.target.querySelector('.chat-history') || document.querySelector('.chat-history');
+            if (history) {
+                history.scrollTop = history.scrollHeight;
             }
         });
     </script>

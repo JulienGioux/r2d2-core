@@ -1,15 +1,34 @@
-<div class="chat-workspace">
+<aside id="ag-context-target" hx-swap-oob="true"></aside>
 
-    <!-- CHAT HISTORY / MESSAGES ZONE -->
-    <div id="chat-history" class="chat-history">
+<div style="display: flex; height: 100%; width: 100%; background: var(--jules-main-bg); overflow: hidden;">
+    
+    <!-- COLONNE PRINCIPALE CHAT -->
+    <div style="flex: 1; display: flex; flex-direction: column; position: relative;">
+    
+    <!-- HEADER CHAT -->
+    <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--panel-border); background: var(--bg-void);">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="bot" style="width: 16px; color: var(--accent-brand);"></i>
+            <span style="font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase;">R2D2 Cortex</span>
+        </div>
+        <div style="display: flex; gap: 8px;">
+            <button class="btn-secondary" style="padding: 4px; border: none; background: transparent;" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" onclick="document.querySelector('[title=\'Settings\']').click()" title="Configuration Cortex">
+                <i data-lucide="git-merge" style="width: 14px; color: var(--text-tertiary);"></i>
+            </button>
+            <button class="btn-secondary" style="padding: 4px; border: none; background: transparent;" hx-get="/api/chat/new_modal" hx-target="body" hx-swap="beforeend" title="Nouvelle Session">
+                <i data-lucide="plus-circle" style="color: var(--text-tertiary);" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-tertiary)'"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- MESSAGES (CHAT HISTORY) -->
+    <div id="chat-history" class="chat-history" style="flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; align-items: center;">
         {% if history_html.is_empty() %}
-        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; margin-top: 10vh; animation: fadeIn 0.5s ease;">
-            <div style="background: rgba(255,255,255,0.03); padding: 24px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.05); margin-bottom: 32px; box-shadow: 0 0 64px rgba(255,255,255,0.02) inset;">
-                <i data-lucide="terminal-square" style="width: 42px; height: 42px; color: var(--text-secondary);"></i>
-            </div>
-            <h2 style="font-family: var(--font-mono); font-weight: 600; font-size: 16px; margin-bottom: 16px; letter-spacing: 0.15em; text-transform: uppercase;">R2D2 Cortex Activated</h2>
-            <p style="text-align: center; max-width: 500px; font-size: 14px; line-height: 1.6; color: var(--text-tertiary);">
-                Indiquez votre requête pour initialiser le moteur d'inférence vectoriel. Vous pouvez mentionner des modules MCP actifs ou requérir des axiomes spécifiques depuis le Blackboard.
+        <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.5; margin-top: 10vh;">
+            <i data-lucide="zap" style="width: 32px; height: 32px; margin-bottom: 16px; color: var(--text-tertiary);"></i>
+            <h2 style="font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px;">Cortex Prêt</h2>
+            <p style="text-align: center; font-size: 11px; max-width: 250px; color: var(--text-tertiary); line-height: 1.5;">
+                Assignez des tâches au système. Les réponses R2D2 sont déduites du graphe E5 ou de l'astuce réseau.
             </p>
         </div>
         {% else %}
@@ -17,131 +36,71 @@
         {% endif %}
     </div>
 
-    <!-- DOCKED CHAT INPUT (Premium Glassmorphism Style) -->
-    <div class="chat-input-container">
-        <form id="chat-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend">
-            <div class="input-shell">
-                
+    <!-- INPUT AREA -->
+    <div style="padding: 24px; background: var(--bg-surface); display: flex; justify-content: center;">
+        <form id="chat-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" style="width: 100%; max-width: 800px;">
+            <div class="input-shell" style="box-shadow: 0 4px 20px rgba(0,0,0,0.5); border-radius: var(--radius-md); background: var(--bg-void); border: 1px solid var(--panel-border);">
                 <textarea 
                     id="chat-input"
                     name="prompt" 
-                    placeholder="Provide instructions to the agent... (e.g. 'Analyze the security of r2d2-ui' or 'List files in Github')"
+                    placeholder="Posez une question..."
                     rows="1"
-                    oninput="this.style.height = ''; this.style.height = Math.min(this.scrollHeight, 300) + 'px'"
+                    style="min-height: 36px; padding: 10px 12px; max-height: 250px; font-size: 12px;"
+                    oninput="this.style.height = ''; this.style.height = Math.min(this.scrollHeight, 250) + 'px'"
+                    onkeydown="if(event.key === 'Enter' && !event.shiftKey && !event.altKey) { event.preventDefault(); document.getElementById('chat-form').dispatchEvent(new Event('submit', { cancelable: true })); document.querySelector('#chat-form button[type=submit]').click(); }"
                     required
                 ></textarea>
                 
-                <div class="input-toolbar">
-                    <div class="input-toolbar-left">
-                        <input type="hidden" name="github_sources" value="JulienGioux/r2d2-core">
-                        
-                        <div class="custom-select">
-                            <select id="provider-select" name="provider">
-                                <option value="openai">Auto (Reasoning Agent)</option>
-                                <option value="r2d2-bitnet">R2D2 (Bitnet Local)</option>
-                                <option value="gemini">Gemini 2.5 Flash</option>
-                                <option value="mistral">Mistral (HuggingFace)</option>
-                                <option value="consensus">Triangulation (Debate)</option>
-                            </select>
-                            <i data-lucide="chevron-down"></i>
+                <div class="input-toolbar" style="padding: 6px 12px; justify-content: space-between;">
+                    <div class="input-toolbar-left" style="gap: 8px;">
+                        <input type="hidden" name="github_sources" value="{{ active_sources_html }}">
+                        <!-- Provider Select -->
+                        <div class="custom-select" style="min-width: 140px; display: flex; align-items: center; gap: 4px;">
+                            <div style="position: relative; width: 100%;">
+                                <select id="provider-select" name="provider" style="font-size: 10px; padding: 4px 24px 4px 8px;" onchange="document.getElementById('debate-settings-btn').style.display = this.value === 'consensus' ? 'flex' : 'none';">
+                                    <option value="openai">Reasoning (Auto)</option>
+                                    <option value="consensus">Triangulation</option>
+                                    {% for p in active_providers %}
+                                    <option value="{{ p.0 }}">{{ p.0 }} : {{ p.1 }}</option>
+                                    {% endfor %}
+                                </select>
+                                <i data-lucide="chevron-down" style="width: 10px; right: 8px; position: absolute; top: 50%; transform: translateY(-50%); pointer-events: none;"></i>
+                            </div>
+                            <button type="button" id="debate-settings-btn" class="btn-icon" hx-get="/api/chat/current/debate_config" hx-target="#modal-container" hx-swap="innerHTML" style="padding: 4px; display: none;" title="Configurer le mode Triangulation">
+                                <i data-lucide="settings" style="width: 14px; height: 14px;"></i>
+                            </button>
                         </div>
                     </div>
                     
-                    <button type="submit" class="btn-primary" style="border-radius: var(--radius-pill);">
-                        <i data-lucide="send" style="width: 14px;"></i> Execute
+                    <button type="submit" class="btn-primary" style="padding: 4px 10px; font-size: 10px; border-radius: 4px;">
+                        <i data-lucide="send" style="width: 12px;"></i> Envoyer
                     </button>
                 </div>
             </div>
         </form>
     </div>
 
-</div>
-
-<!-- CONTEXT SIDEBAR OOB (Updates the Right Panel) -->
-<div id="context-content" hx-swap-oob="true" style="padding: 24px; display: flex; flex-direction: column; gap: 24px; animation: fadeIn 0.3s ease;">
-    
-    <div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Contrôle de Routage (Cortex)</h4>
-            <span class="pulse-dot"></span>
-        </div>
-        
-        <div class="glass-card" style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">
-            
-            <!-- Air Gapped Toggle -->
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <i data-lucide="wifi-off" style="width: 16px; color: var(--status-warning);"></i>
-                    <span style="font-size: 13px; font-weight: 600; color: var(--text-primary);">Air-Gapped Mode</span>
-                </div>
-                <label class="switch">
-                    <input type="checkbox" onchange="fetch('/api/system/airgap?enabled=' + this.checked, {method: 'POST'})">
-                    <span class="slider round"></span>
-                </label>
-            </div>
-            <div style="font-size: 11px; color: var(--text-tertiary); line-height: 1.4;">Force 100% de l'inférence sur le tensoriel local (BitNet). Coupe l'escalade Cloud.</div>
-
-            <hr style="border: none; border-top: 1px dashed var(--panel-border); margin: 4px 0;">
-
-            <!-- Confidence Slider -->
-            <div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                    <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-secondary);">Seuil d'Heuristique</span>
-                    <span id="heuristic-val" style="font-size: 12px; font-weight: 600; color: var(--accent-brand);">0.45</span>
-                </div>
-                <input type="range" class="r2d2-slider" min="0" max="1" step="0.05" value="0.45" 
-                       oninput="document.getElementById('heuristic-val').textContent = this.value;"
-                       onchange="fetch('/api/system/heuristic?threshold=' + this.value, {method: 'POST'})"
-                       style="width: 100%;">
-                <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); margin-top: 4px;">
-                    <span>BitNet</span>
-                    <span>Gemini / Modèles Experts</span>
-                </div>
-            </div>
-            
-        </div>
     </div>
 
-    <div>
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
-            <h4 style="font-size: 11px; text-transform: uppercase; color: var(--text-secondary); letter-spacing: 0.05em; font-weight: 600;">Topologie MCP (Vue Rapide)</h4>
-            <i data-lucide="activity" style="width: 14px; color: var(--text-secondary);"></i>
-        </div>
-        
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-            <div class="glass-card" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer;" onclick="document.getElementById('nav-store').click();">
-                <div style="display: flex; align-items: center; gap: 10px; overflow: hidden;">
-                    <span class="status-indicator">
-                        <span class="pulse-dot" style="background-color: var(--status-success);"></span>
-                    </span>
-                    <span style="font-size: 12px; font-family: var(--font-mono); color: var(--text-primary);">Outils Actifs (Gérer)</span>
-                </div>
-                <i data-lucide="arrow-right" style="width: 14px; height: 14px; color: var(--text-secondary);"></i>
-            </div>
-        </div>
-    </div></div>
+    <!-- COLONNE ARTEFACTS (SPLIT SCREEN) -->
+    <aside id="ag-split-pane" style="width: 0px; display: none; border-left: 1px solid var(--jules-border); background: #0a0a0a; overflow-y: auto;">
+        <!-- Populated via hx-swap-oob during chat_response.html if needed -->
+    </aside>
 
-<style>
-    .spinner {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.2);
-        border-top-color: var(--accent-brand, #3b82f6);
-        border-radius: 50%;
-        animation: spin 1s linear infinite;
-    }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
-    
-    .pulsating-text {
-        animation: pulseText 1.5s ease-in-out infinite;
-    }
-    @keyframes pulseText {
-        0%, 100% { opacity: 0.6; }
-        50% { opacity: 1; }
-    }
-</style>
+</div>
+
 <script>
-    if(typeof lucide !== 'undefined') lucide.createIcons();
+    // Initialiser les icônes sur le chargement partiel
+    lucide.createIcons();
+    
+    // Gérer l'état initial du bouton "Settings" si on rafraichît
+    setTimeout(() => {
+        let select = document.getElementById('provider-select');
+        if (select && select.value === 'consensus') {
+            document.getElementById('debate-settings-btn').style.display = 'flex';
+        }
+    }, 100);
+
     var ch = document.getElementById("chat-history");
     if(ch) ch.scrollTop = ch.scrollHeight;
     
@@ -152,39 +111,37 @@
 
     let pollInterval = null;
 
-    // Optimistic UI for chat submission
     document.getElementById('chat-form').addEventListener('submit', function(e) {
         const inputEl = document.getElementById('chat-input');
         const val = inputEl.value;
         if(!val.trim()) return;
 
-        // Create temporary optimistic bubble
         const tempIdUser = 'temp-msg-user';
         const tempIdAgent = 'temp-msg-agent';
         const safeVal = val.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
         
         const tempHtml = `
-            <div id="${tempIdUser}" class="message user" style="opacity: 0.8; animation: fadeIn 0.3s ease;">
-                <div class="message-avatar"><i data-lucide="user" style="width: 18px;"></i></div>
+            <div id="${tempIdUser}" class="message user" style="width: 100%; max-width: 800px; margin: 0 auto; opacity: 0.8; animation: fadeIn 0.3s ease;">
+                <div class="message-avatar"><i data-lucide="user" style="width: 16px;"></i></div>
                 <div class="message-content">
                     <div class="message-sender">Vous</div>
-                    <div class="message-bubble">${safeVal}</div>
+                    <div class="message-bubble" style="font-size: 14px;">${safeVal}</div>
                 </div>
             </div>
             
-            <div id="${tempIdAgent}" class="message system" style="animation: fadeIn 0.3s ease;">
+            <div id="${tempIdAgent}" class="message system" style="width: 100%; max-width: 800px; margin: 12px auto 0 auto; animation: fadeIn 0.3s ease;">
                 <div class="message-avatar" style="background: var(--bg-hover); color: var(--text-primary); border: 1px solid var(--panel-border);">
-                    <i data-lucide="bot" style="width: 18px;"></i>
+                    <i data-lucide="bot" style="width: 14px;"></i>
                 </div>
                 <div class="message-content">
-                    <div class="message-sender" style="color: var(--text-primary); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;">
+                    <div class="message-sender" style="color: var(--text-primary); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;">
                         ⚙️ R2D2 Engine
                     </div>
                     <div class="message-bubble" style="background: transparent; border: none; padding: 0;">
-                        <div id="cognitive-status-box" style="font-size: 13px; color: var(--text-secondary); filter: drop-shadow(0 0 8px rgba(0,0,0,0.5));">
+                        <div id="cognitive-status-box" style="font-size: 12px; color: var(--text-secondary); filter: drop-shadow(0 0 8px rgba(0,0,0,0.5));">
                             <div style="display:flex; align-items:center; gap:8px;">
-                                <div class="spinner"></div> 
-                                <span class="pulsating-text">En attente du système...</span>
+                                <div class="spinner" style="width: 12px; height: 12px; border-width: 2px;"></div> 
+                                <span class="pulsating-text">En attente du backend...</span>
                             </div>
                         </div>
                     </div>
@@ -197,16 +154,14 @@
         if(emptyState) emptyState.remove();
         
         history.insertAdjacentHTML('beforeend', tempHtml);
-        lucide.createIcons();
+        if(typeof lucide !== 'undefined') lucide.createIcons();
         history.scrollTop = history.scrollHeight;
 
-        // Reset input immediately
         setTimeout(() => {
             inputEl.value = '';
             inputEl.style.height = '';
         }, 10);
 
-        // Start Status Polling
         if (pollInterval) clearInterval(pollInterval);
         pollInterval = setInterval(async () => {
             try {
@@ -219,14 +174,34 @@
                     }
                 }
             } catch(e) {}
-        }, 500); // 500ms for hyper-snappy feedback
+        }, 500); 
     });
 
-    // When HTMX completes, clean up the temporary messages and polling
     document.body.addEventListener('htmx:afterSwap', function(e) {
         if(e.detail.target.id === 'chat-history') {
             if (pollInterval) clearInterval(pollInterval);
             document.querySelectorAll('[id^="temp-msg-"]').forEach(el => el.remove());
+            
+            if(typeof lucide !== 'undefined') lucide.createIcons();
+            let history = document.getElementById('chat-history');
+            if (history) history.scrollTop = history.scrollHeight;
         }
     });
+
+    // Handle terminal switching for this session
+    setTimeout(() => {
+        let currentSession = "{{ session_id }}";
+        if (window.TerminalManager) {
+            window.TerminalManager.clearAllTerminals();
+            if (!currentSession || currentSession === "local") {
+                 window.TerminalManager.hideTerminal();
+            } else {
+                 window.TerminalManager.openTerminalForSession(currentSession + "_ai", "R2D2 Engine", "/api/ws/ai_terminal/" + currentSession, true);
+                 // Force switch to Utilisateur tab as active by default so the user sees the interactive bash shell
+                 window.TerminalManager.openTerminalForSession(currentSession + "_user", "Utilisateur", "/api/ws/terminal/" + currentSession, false);
+            }
+        }
+    }, 100);
 </script>
+
+<div id="modal-container"></div>

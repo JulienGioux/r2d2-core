@@ -2041,7 +2041,7 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
         session_id: session_id.clone(),
         history_html,
         github_configured,
-        active_sources_html: String::new(),
+        active_sources_html: if repo_name != "none" { repo_name.clone() } else { String::new() },
         library_repos: vec![],
         active_providers,
     }
