@@ -12,7 +12,7 @@ pub struct TerminalSession {
     pub child: Box<dyn portable_pty::Child + Send + Sync>,
 }
 
-pub fn spawn_terminal(workspace_id: Option<&str>) -> Result<TerminalSession> {
+pub fn spawn_terminal(workspace_id: Option<&str>) -> Result<(TerminalSession, bool, Option<String>)> {
     let pty_system = NativePtySystem::default();
     
     let pair = pty_system.openpty(PtySize {
@@ -68,23 +68,10 @@ pub fn spawn_terminal(workspace_id: Option<&str>) -> Result<TerminalSession> {
 
     let child = pair.slave.spawn_command(cmd_builder)?;
 
-    if is_newly_booted {
-        if let Some(script) = ws_startup_script {
-            if !script.is_empty() {
-                let mut writer = pair.master.try_clone_writer()?;
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(800));
-                    let cmd = format!("{}\r", script);
-                    let _ = std::io::Write::write_all(&mut writer, cmd.as_bytes());
-                });
-            }
-        }
-    }
-
-    Ok(TerminalSession {
+    Ok((TerminalSession {
         master: pair.master,
         child,
-    })
+    }, is_newly_booted, ws_startup_script))
 }
 
 pub async fn handle_terminal_socket(socket: WebSocket, session_id: String) {
@@ -92,7 +79,7 @@ pub async fn handle_terminal_socket(socket: WebSocket, session_id: String) {
     let workspace_id = if session_id == "local" || session_id.is_empty() { None } else { Some(session_id.as_str()) };
 
     
-    let mut term_session = match spawn_terminal(workspace_id) {
+    let (mut term_session, is_newly_booted, ws_startup_script) = match spawn_terminal(workspace_id) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Failed to spawn terminal: {:?}", e);
@@ -103,6 +90,21 @@ pub async fn handle_terminal_socket(socket: WebSocket, session_id: String) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let reader = Arc::new(Mutex::new(term_session.master.try_clone_reader().unwrap()));
     let writer = Arc::new(Mutex::new(term_session.master.take_writer().unwrap()));
+
+    if is_newly_booted {
+        if let Some(script) = ws_startup_script {
+            if !script.is_empty() {
+                let writer_clone = writer.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_millis(800));
+                    let cmd = format!("{}\r", script);
+                    if let Ok(mut w) = writer_clone.lock() {
+                        let _ = w.write_all(cmd.as_bytes());
+                    }
+                });
+            }
+        }
+    }
 
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(32);
     let reader_clone = reader.clone();
