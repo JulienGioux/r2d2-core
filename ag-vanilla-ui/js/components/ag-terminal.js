@@ -55,8 +55,10 @@ class AgTerminal extends HTMLElement {
         this.term.writeln('\x1b[38;2;16;185;129m[AG-Vanilla]\x1b[0m Booting Sovereign PTY connection...');
         
         const host = window.location.host;
+        const sessionId = this.getAttribute('data-session-id') || document.querySelector('meta[name="session-id"]')?.content;
+        
         let protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        this.socket = new WebSocket(`${protocol}//${host}/api/ws/terminal`);
+        this.socket = new WebSocket(`${protocol}//${host}/api/ws/terminal/${sessionId}`);
         
         this.socket.binaryType = 'arraybuffer';
         

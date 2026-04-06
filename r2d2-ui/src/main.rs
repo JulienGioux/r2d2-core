@@ -1302,7 +1302,7 @@ async fn handle_chat(
         );
         let mut resp = Html(html).into_response();
         resp.headers_mut()
-            .insert("HX-Trigger", "chat-updated".parse().unwrap());
+            .insert("HX-Trigger", "chat-history-update".parse().unwrap());
         return resp;
     }
 
@@ -1831,7 +1831,7 @@ async fn handle_chat(
 
     let mut resp = Html(tmpl.render().unwrap()).into_response();
     resp.headers_mut()
-        .insert("HX-Trigger", "chat-updated".parse().unwrap());
+        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
     resp
 }
 
@@ -1895,7 +1895,13 @@ async fn delete_chat_session(
     chat_history::delete_session(&id);
     let mut resp = Html("".to_string()).into_response();
     resp.headers_mut()
-        .insert("HX-Trigger", "chat-updated".parse().unwrap());
+        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
+        
+    let current_session = state.current_chat_session.lock().await.clone();
+    if id == current_session {
+        resp.headers_mut().insert("HX-Redirect", "/".parse().unwrap());
+    }
+    
     resp
 }
 
@@ -1906,7 +1912,7 @@ async fn rename_chat_session(
     chat_history::rename_session(&id, &payload.new_title);
     let mut resp = Html("".to_string()).into_response();
     resp.headers_mut()
-        .insert("HX-Trigger", "chat-updated".parse().unwrap());
+        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
     resp
 }
 
@@ -1916,7 +1922,7 @@ async fn pin_chat_session(
     chat_history::toggle_pin_session(&id);
     let mut resp = Html("".to_string()).into_response();
     resp.headers_mut()
-        .insert("HX-Trigger", "chat-updated".parse().unwrap());
+        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
     resp
 }
 
@@ -2049,11 +2055,11 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
             write_queue(&queue);
             
             tokio::spawn(async move {
-                execute_assimilation(Some(mission_id.clone())).await;
+                let success = execute_assimilation(Some(mission_id.clone())).await;
                 let mut q = read_queue();
                 if let Some(j) = q.iter_mut().find(|x| x.id == mission_id) {
                     j.vampire_status = "VAMPIRISÉ".to_string();
-                    j.assimilation_status = "ASSIMILÉ".to_string();
+                    j.assimilation_status = if success { "ASSIMILÉ".to_string() } else { "ÉCHEC".to_string() };
                 }
                 write_queue(&q);
             });
@@ -2485,7 +2491,7 @@ async fn execute_assimilation(mission_id_arg: Option<String>) -> bool {
         "run",
         "--release",
         "-p",
-        "r2d2-cortex",
+        "r2d2-chunker",
         "--bin",
         "assimilate_knowledge",
     ]);

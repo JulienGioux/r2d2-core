@@ -3,7 +3,7 @@
         <button onclick="document.getElementById('new-session-modal').remove()" style="position: absolute; right: 16px; top: 16px; background: transparent; color: var(--text-tertiary); border: none; font-size: 24px; cursor: pointer;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-tertiary)'">&times;</button>
         <h2 style="margin-top: 0; color: var(--accent-color); font-weight: 500;"><i data-lucide="plus-circle" style="display: inline-block; vertical-align: middle; margin-right: 8px;"></i> Nouvelle Session & Workspace</h2>
         
-        <form hx-post="/api/chat/new" hx-target="#ag-editor-target" hx-on::before-request="if(window.TerminalManager) window.TerminalManager.hideTerminal()" hx-on::after-request="document.getElementById('new-session-modal').remove(); document.getElementById('ag-terminal-section').style.display = 'flex';" style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px;" onclick="event.stopPropagation()">
+        <form hx-post="/api/chat/new" hx-target="#ag-editor-target" hx-indicator="#new-session-spinner" hx-on::before-request="if(window.TerminalManager) window.TerminalManager.hideTerminal()" hx-on::after-request="document.getElementById('new-session-modal').remove(); document.getElementById('ag-terminal-section').style.display = 'flex';" style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px;" onclick="event.stopPropagation()">
             
             <div>
                 <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Nom de la session</label>
@@ -54,9 +54,18 @@
             </details>
 
             <div style="margin-top: 16px;">
-                <button type="submit" class="btn-primary" style="width: 100%;">Créer le Workspace</button>
+                <button type="submit" class="btn-primary" style="width: 100%; position: relative;">
+                    <span id="submit-text">Créer le Workspace</span>
+                    <i id="new-session-spinner" data-lucide="loader-2" class="htmx-indicator" style="position: absolute; right: 16px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; animation: spin 1s linear infinite;"></i>
+                </button>
             </div>
         </form>
     </div>
+    <style>
+        .htmx-request #submit-text { opacity: 0.5; }
+        .htmx-indicator { display: none; }
+        .htmx-request .htmx-indicator { display: block; }
+        @keyframes spin { 100% { transform: translateY(-50%) rotate(360deg); } }
+    </style>
     <script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>
 </div>
