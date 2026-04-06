@@ -1,0 +1,99 @@
+/* Antigravity++ Sovereign IDE Layout */
+.ag-ide-layout {
+    display: grid;
+    grid-template-columns: 48px 240px 1fr 380px;
+    grid-template-rows: 1fr 240px;
+    grid-template-areas:
+        "activity primary editor assistant"
+        "activity primary terminal assistant";
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    background: var(--bg-void);
+    color: var(--text-primary);
+}
+
+/* 1. Activity Bar (Extrême Gauche) */
+.ag-activity-bar {
+    grid-area: activity;
+    border-right: 1px solid var(--panel-border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 16px;
+    gap: 16px;
+    background: var(--panel-base);
+}
+
+.ag-activity-icon {
+    width: 36px; height: 36px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.ag-activity-icon:hover { color: var(--text-primary); }
+.ag-activity-icon.active { color: var(--text-primary); border-left: 2px solid var(--accent-brand); border-radius: 0; }
+
+/* 2. Primary Sidebar (Context Gauche) */
+.ag-primary-sidebar {
+    grid-area: primary;
+    border-right: 1px solid var(--panel-border);
+    background: var(--bg-void); /* slight contrast */
+    display: flex; flex-direction: column;
+}
+.ag-sidebar-header {
+    height: 36px; display: flex; align-items: center; padding: 0 16px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
+    color: var(--text-tertiary); border-bottom: 1px solid var(--panel-border);
+}
+.ag-sidebar-content { flex: 1; overflow-y: auto; padding: 8px 0; }
+
+/* 3. Central Editor Area */
+.ag-editor-area {
+    grid-area: editor;
+    display: flex; flex-direction: column;
+    background: var(--bg-void-radial);
+    overflow: hidden; /* inner scroll handled inside */
+}
+
+/* 4. Bottom Terminal Area */
+.ag-bottom-panel {
+    grid-area: terminal;
+    border-top: 1px solid var(--panel-border);
+    background: #000; /* Deep black for pure terminal */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 5. Assistant Panel (Extrême Droite) */
+.ag-assistant-panel {
+    grid-area: assistant;
+    border-left: 1px solid var(--panel-border);
+    background: var(--panel-base);
+    display: flex; flex-direction: column;
+    z-index: 10;
+}
+
+/* Editor top tabs (Fake tabs for appearance) */
+.ag-editor-tabs {
+    height: 36px; display: flex; align-items: center;
+    background: var(--panel-base); border-bottom: 1px solid var(--panel-border);
+    flex-shrink: 0;
+}
+.ag-editor-tab {
+    height: 100%; border-right: 1px solid var(--panel-border); border-top: 1px solid var(--accent-brand);
+    padding: 0 16px; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary);
+    background: var(--bg-void-radial);
+}
+.ag-editor-content {
+    flex: 1; overflow-y: auto; position: relative;
+}
+
+/* Inner content scrollable areas */
+.ag-scrollable {
+    overflow-y: auto;
+    height: 100%;
+    width: 100%;
+}

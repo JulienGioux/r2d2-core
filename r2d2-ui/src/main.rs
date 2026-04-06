@@ -1360,10 +1360,10 @@ async fn handle_chat(
     let current_provider = {
         let p = cortex.provider.clone();
         match p {
-            r2d2_cortex::models::reasoning_agent::ModelProvider::Mistral { model_id } => model_id,
-            r2d2_cortex::models::reasoning_agent::ModelProvider::Gemini { model_id } => model_id,
-            r2d2_cortex::models::reasoning_agent::ModelProvider::OpenAICompatible { model_id, .. } => model_id,
-            _ => "unknown".to_string(),
+            r2d2_cortex::models::reasoning_agent::ModelProvider::GeminiFlash => "gemini-flash".to_string(),
+            r2d2_cortex::models::reasoning_agent::ModelProvider::OpenAICompatible => "openai".to_string(),
+            r2d2_cortex::models::reasoning_agent::ModelProvider::ParadoxLocal => "paradox".to_string(),
+            r2d2_cortex::models::reasoning_agent::ModelProvider::Consensus => "consensus".to_string(),
         }
     };
 
@@ -2012,20 +2012,26 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
         startup_script: if startup_script_content.is_empty() { None } else { Some(startup_script_content) },
     };
     
-    let session = crate::chat_history::ChatSession {
-        id: session_id.clone(),
-        title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
-        updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-        pinned: false,
-        github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
-        debate_config: Some(crate::chat_history::DebateConfig::default()),
-        workspace_config: Some(w_config),
-        turns: vec![],
-    };
-    crate::chat_history::save_history(&session);
+    // Inject custom config silently into cache, it will be automatically serialized to disk on first chat turn
+    crate::chat_history::update_workspace_config(&session_id, w_config);
+    
+    // Since session might not be fully flushed yet, let's create a stub
+    if crate::chat_history::load_session(&session_id).is_none() {
+        let empty_session = crate::chat_history::ChatSession {
+            id: session_id.clone(),
+            title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
+            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            pinned: false,
+            github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
+            debate_config: None,
+            workspace_config: None,
+            turns: vec![],
+        };
+        crate::chat_history::save_session(&session_id, empty_session);
+    }
 
-    let active_providers = r2d2_cortex::mcp_hub::list_active_providers().await;
-    let github_configured = active_providers.contains(&"github".to_string());
+    let active_providers = r2d2_cortex::mcp_hub::health_check().await;
+    let github_configured = active_providers.iter().any(|p| p.name == "github" && p.status == "connected");
     
     if let Some(rag_toggle) = form.auto_rag {
         if rag_toggle == "true" && repo_name != "none" {
@@ -2054,7 +2060,7 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
         }
     }
 
-    let history_html = crate::chat_history::render_history(&session);
+    let history_html = crate::chat_history::render_history(&session_id);
     let roles = read_model_roles().await;
     let mut active_providers = Vec::new();
     for (id, role) in roles.roles {
@@ -2118,7 +2124,7 @@ async fn handle_sse_stream(
     let session_id = state.current_chat_session.lock().await.clone();
     let prompt_for_save = prompt.clone();
     let session_config = crate::chat_history::load_session(&session_id).and_then(|s| s.debate_config);
-    let debate_config = session_config.map(|c| r2d2_cortex::models::reasoning_agent::DebateConfig {
+    let debate_config = session_config.map(|c| crate::chat_history::DebateConfig {
         architect_provider: c.architect_provider,
         red_teamer_provider: c.red_teamer_provider,
         max_rounds: c.max_rounds,
@@ -2130,7 +2136,7 @@ async fn handle_sse_stream(
     tokio::spawn(async move {
         let mut agent = agent_arc.lock().await;
         agent.set_provider("consensus");
-        if let Err(e) = agent.run_debate(&prompt, tx.clone(), debate_config).await {
+        if let Err(e) = agent.run_debate(&prompt, tx.clone(), ).await {
             let _ = tx
                 .send(DebateEvent::SystemEvent(format!(
                     "[ERREUR CASTRATHROPHIC CORTEX]: {}",

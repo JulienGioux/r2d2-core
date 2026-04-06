@@ -7,6 +7,8 @@
 
 pub mod audio_chunker;
 pub mod strategy;
+pub mod text_chunker;
 
 pub use audio_chunker::AudioChunker;
 pub use strategy::MediaChunker;
+pub use text_chunker::TextChunker;

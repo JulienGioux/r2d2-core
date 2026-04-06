@@ -14,6 +14,20 @@ fn default_pinned() -> bool {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Default)]
+pub struct WorkspaceConfig {
+    pub base_image: String,
+    pub startup_script: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct DebateConfig {
+    pub architect_provider: String,
+    pub red_teamer_provider: String,
+    pub max_rounds: usize,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ChatSession {
     pub id: String,
     pub title: String,
@@ -22,6 +36,8 @@ pub struct ChatSession {
     pub pinned: bool,
     #[serde(default)]
     pub github_sources: Vec<String>,
+    pub debate_config: Option<DebateConfig>,
+    pub workspace_config: Option<WorkspaceConfig>,
     pub turns: Vec<ChatTurn>,
 }
 
@@ -43,7 +59,7 @@ pub fn save_turn(
             updated_at: 0,
             pinned: false,
             github_sources: current_sources.clone(),
-            turns: vec![],
+            debate_config: None, workspace_config: None, turns: vec![],
         })
     } else {
         ChatSession {
@@ -52,7 +68,7 @@ pub fn save_turn(
             updated_at: 0,
             pinned: false,
             github_sources: current_sources.clone(),
-            turns: vec![],
+            debate_config: None, workspace_config: None, turns: vec![],
         }
     };
 
@@ -143,7 +159,7 @@ pub fn append_github_source(session_id: &str, source: &str) {
             .as_secs(),
         pinned: false,
         github_sources: vec![],
-        turns: vec![],
+        debate_config: None, workspace_config: None, turns: vec![],
     });
 
     if !session.github_sources.contains(&source.to_string()) {
@@ -166,5 +182,40 @@ pub fn remove_github_source(session_id: &str, source: &str) {
         if let Ok(json) = serde_json::to_string_pretty(&session) {
             let _ = fs::write(file_path, json);
         }
+    }
+}
+
+pub fn save_session(session_id: &str, session: ChatSession) {
+    let dir = PathBuf::from("data/chats");
+    let _ = fs::create_dir_all(&dir);
+    let file_path = dir.join(format!("{}.json", session_id));
+    if let Ok(data) = serde_json::to_string_pretty(&session) {
+        let _ = fs::write(file_path, data);
+    }
+}
+
+pub fn update_workspace_config(session_id: &str, config: WorkspaceConfig) {
+    if let Some(mut session) = load_session(session_id) {
+        session.workspace_config = Some(config);
+        save_session(session_id, session);
+    }
+}
+
+pub fn update_debate_config(session_id: &str, config: DebateConfig) {
+    if let Some(mut session) = load_session(session_id) {
+        session.debate_config = Some(config);
+        save_session(session_id, session);
+    }
+}
+
+pub fn render_history(session_id: &str) -> String {
+    if let Some(session) = load_session(session_id) {
+        let mut html = String::new();
+        for turn in session.turns {
+            html.push_str(&format!("<div class='chat-message {}'>{}</div>", turn.role, turn.content));
+        }
+        html
+    } else {
+        String::new()
     }
 }

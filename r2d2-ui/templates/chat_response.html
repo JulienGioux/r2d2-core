@@ -1,0 +1,80 @@
+<aside id="ag-split-pane" hx-swap-oob="true" style="width: 450px; min-width: 450px; display: flex; flex-direction: column; border-left: 1px solid var(--jules-border); background: var(--bg-void); overflow-y: auto;">
+    <div style="padding: 16px 20px; border-bottom: 1px solid var(--jules-border); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <i data-lucide="file-json" style="width: 14px; color: var(--text-secondary);"></i>
+            <span style="font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-secondary);">Artefacts & Traces</span>
+        </div>
+        <button onclick="document.getElementById('ag-split-pane').style.width='0'; document.getElementById('ag-split-pane').style.minWidth='0'; document.getElementById('ag-split-pane').style.display='none'; return false;" style="background:transparent; border:none; color:var(--text-tertiary); cursor:pointer;">
+            <i data-lucide="x" style="width: 16px;"></i>
+        </button>
+    </div>
+    <div style="padding: 20px; display: flex; flex-direction: column; gap: 24px;">
+        <!-- Telemetry -->
+        <div>
+            <h4 style="font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 12px;">Telemetry</h4>
+            <ul style="font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); list-style: none; padding: 0; margin: 0; display:flex; flex-direction: column; gap: 8px;">
+                <li style="display: flex; justify-content: space-between;"><span>⌚ Latency</span> <span style="color: var(--text-primary);">{{ latency }} ms</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>🏭 Provider</span> <span style="color: var(--text-primary);">{{ model_name }}</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>🧠 Certainty</span> <span style="color: var(--text-primary);">{{ belief_pct }}%</span></li>
+                <li style="display: flex; justify-content: space-between;"><span>🫂 Consensus</span> <span style="color: var(--text-primary);">{{ consensus }}</span></li>
+            </ul>
+        </div>
+        <!-- JSONAI V3 -->
+        <div>
+            <h4 style="font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 12px;">JSONAI V3 Payload</h4>
+            <pre style="font-size: 11px; font-family: var(--font-mono); background: #000; padding: 16px; border-radius: 6px; overflow-x: auto; border: 1px solid rgba(255,255,255,0.05); color: #a5d6ff;">{{ jsonai|safe }}</pre>
+        </div>
+    </div>
+</aside>
+
+<div class="message user" style="width: 100%; max-width: 800px; margin: 0 auto; padding-right: 16px;">
+    <div class="message-avatar"><i data-lucide="user" style="width: 18px;"></i></div>
+    <div class="message-content">
+        <div class="message-sender">User</div>
+        <div class="message-bubble">{{ prompt|safe }}</div>
+    </div>
+</div>
+{% if mcp_feedback != "" %}
+<details style="width: 100%; max-width: 800px; margin: 12px auto 0 auto; padding-right: 16px;">
+    <summary style="font-size: 12px; color: var(--text-tertiary); cursor: pointer; outline: none; list-style-type: none; display: flex; align-items: center; gap: 6px;">
+        <i data-lucide="activity" style="width: 14px;"></i> Traces Cognitives & Exécutions
+    </summary>
+    <div style="padding: 12px; margin-top: 8px; background: rgba(0,0,0,0.2); border-radius: 8px; font-family: var(--font-mono); font-size: 11px; color: #888; border-left: 2px solid var(--panel-border);">
+        {{ mcp_feedback|safe }}
+    </div>
+</details>
+{% endif %}
+<div class="message system" {% if belief_state < 0.5f64 %}style="border-left: 2px solid var(--status-warning); width: 100%; max-width: 800px; margin: 12px auto 0 auto;"{% else %}style="border-left: 2px solid var(--accent-brand); width: 100%; max-width: 800px; margin: 12px auto 0 auto;"{% endif %}>
+    <div class="message-avatar"><i data-lucide="brain-circuit" style="width: 18px;"></i></div>
+    <div class="message-content" style="width: 100%;">
+        <div class="message-sender" style="justify-content: space-between; width: 100%; display: flex; align-items: center;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <span style="color: var(--accent-brand); font-weight: 600;">{{ model_name }}</span>
+                {% if belief_state > 0.0f64 %}
+                <span class="badge" style="background: rgba(59,130,246,0.1); color: #3b82f6; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">
+                    <i data-lucide="gauge" style="width:10px; margin-right:4px;"></i> {{ belief_pct }}%
+                </span>
+                {% endif %}
+                {% if is_fact %}
+                <span class="badge" style="background: rgba(34,197,94,0.1); color: #22c55e; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">
+                    <i data-lucide="check-circle" style="width:10px; margin-right:4px;"></i> Fait
+                </span>
+                {% else %}
+                <span class="badge" style="background: rgba(234,179,8,0.1); color: #eab308; font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;">
+                    <i data-lucide="help-circle" style="width:10px; margin-right:4px;"></i> Croyance/Opinion
+                </span>
+                {% endif %}
+            </div>
+            
+            <!-- Button to re-open split pane if user closed it manually -->
+            <button class="btn-icon-small" onclick="document.getElementById('ag-split-pane').style.display='flex'; document.getElementById('ag-split-pane').style.width='450px'; document.getElementById('ag-split-pane').style.minWidth='450px'; return false;" title="Voir les artefacts" style="background: transparent; border: 1px solid var(--panel-border); color: var(--text-secondary);">
+                <i data-lucide="panel-right-open" style="width: 14px;"></i>
+            </button>
+        </div>
+        
+        <div class="message-bubble" style="display: block; width: 100%;">
+            <div class="markdown-body">{{ response_md|safe }}</div>
+        </div>
+    </div>
+</div>
+<script>if (typeof lucide !== 'undefined') { lucide.createIcons(); }</script>

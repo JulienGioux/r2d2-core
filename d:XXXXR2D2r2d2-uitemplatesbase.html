@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>R2D2 - Antigravity Edition</title>
+    <!-- HTMX & Deps -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org/dist/ext/sse.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    
+    <link rel="stylesheet" href="/ag-framework/css/antigravity.css?v=1.0">
+    <link rel="stylesheet" href="/ag-framework/css/ag-ide.css?v=1.0">
+    
+    <script src="/ag-framework/js/antigravity.js" defer></script>
+</head>
+<style>
+    /* Simplification drastique Antigravity (Chat Centric) */
+    body { margin: 0; display: flex; height: 100vh; background: var(--bg-void); overflow: hidden; }
+    .sidebar { width: 260px; background: var(--panel-surface); border-right: 1px solid var(--panel-border); display: flex; flex-direction: column; }
+    .main-area { flex: 1; display: flex; flex-direction: column; background: var(--bg-surface); }
+    .sidebar-header { padding: 16px; border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; justify-content: space-between; }
+    .history-list { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .nav-btn { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-md); font-size: 13px; color: var(--text-secondary); cursor: pointer; border: border: 1px solid transparent; background: transparent; transition: 0.2s; text-decoration: none; }
+    .nav-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+    .nav-btn.active { background: var(--bg-active); border: 1px solid var(--panel-border); color: var(--text-primary); }
+    .bottom-settings { padding: 12px; border-top: 1px solid var(--panel-border); }
+</style>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+                <i data-lucide="zap" style="color:var(--accent-brand); width:18px;"></i>
+                <span style="font-family: var(--font-mono); font-weight:600; font-size: 13px; letter-spacing: 0.05em; text-transform: uppercase;">Antigravity R2</span>
+            </div>
+        </div>
+        
+        <div style="padding: 12px;">
+            <button hx-post="/api/chat/new" hx-target="#main-chat-container" class="btn-primary" style="width: 100%; border-radius: var(--radius-sm); padding: 10px; box-shadow: none;">
+                <i data-lucide="plus" style="width:14px; margin-right:6px;"></i> Nouvelle Session
+            </button>
+        </div>
+        
+        <div class="history-list" hx-get="/api/chat/history/list" hx-trigger="load, chat-history-update from:body">
+            <!-- Injecté dynamiquement -->
+        </div>
+        
+        <div class="bottom-settings">
+            <button class="nav-btn" hx-get="/ui/sidebar/store" hx-target="#main-chat-container" style="width:100%; justify-content: flex-start; border:none; padding:8px 12px;">
+                <i data-lucide="box" style="width:14px;"></i> Boutique IA
+            </button>
+            <button class="nav-btn" hx-get="/ui/sidebar/settings" hx-target="#main-chat-container" style="width:100%; justify-content: flex-start; border:none; padding:8px 12px;">
+                <i data-lucide="settings" style="width:14px;"></i> Configuration
+            </button>
+        </div>
+    </div>
+
+    <!-- MAIN CHAT FOCUS -->
+    <div class="main-area" id="main-chat-container" hx-get="/ui/chat" hx-trigger="load">
+        <div style="display:flex; justify-content:center; align-items:center; height:100%;">
+            <i data-lucide="loader-2" style="animation: spin 1s linear infinite; color: var(--text-tertiary);"></i>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+        document.body.addEventListener('htmx:afterSwap', function(e) {
+            lucide.createIcons();
+            if (typeof hljs !== 'undefined') hljs.highlightAll();
+        });
+        document.body.addEventListener('htmx:afterSettle', function(e) {
+            const history = e.target.querySelector('.chat-history') || document.querySelector('.chat-history');
+            if (history) history.scrollTop = history.scrollHeight;
+        });
+    </script>
+</body>
+</html>

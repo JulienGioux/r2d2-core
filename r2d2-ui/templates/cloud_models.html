@@ -1,0 +1,66 @@
+<aside id="ag-context-target" hx-swap-oob="true" style="padding: 16px 8px;">
+    <div style="font-family: var(--font-mono); font-size: 13px; font-weight: 600; padding: 8px 12px; margin-bottom: 12px; border-bottom: 1px solid var(--jules-border);">
+        Configurations
+    </div>
+    <a href="#" hx-get="/ui/store" hx-target="#ag-editor-target" class="ag-sidebar-item">
+        <i data-lucide="hard-drive" style="width: 14px;"></i> Local Infrastructure
+    </a>
+    <a href="#" hx-get="/ui/store/cloud" hx-target="#ag-editor-target" class="ag-sidebar-item active">
+        <i data-lucide="cloud" style="width: 14px;"></i> Cloud Gateways
+    </a>
+</aside>
+
+<div style="background: var(--jules-main-bg); padding: 24px; border-radius: var(--radius-lg); margin-bottom: 24px; max-width: 900px; margin: 0 auto;">
+    <h2 style="font-family: var(--font-mono); font-size: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center;">
+        <span><i data-lucide="cloud" style="width: 18px; margin-right: 8px;"></i> Registre des APIs Cloud (Gemini / Mistral)</span>
+        <button class="btn-secondary" onclick="htmx.trigger('#ag-editor-target', 'load')" style="font-size: 11px;">
+            <i data-lucide="refresh-cw" style="width: 14px;"></i> Actualiser
+        </button>
+    </h2>
+
+    {% if cloud_models.is_empty() %}
+    <div style="text-align: center; padding: 40px; color: var(--text-tertiary); font-style: italic; border: 1px dashed var(--panel-border); border-radius: var(--radius-md);">
+        <i data-lucide="cloud-off" style="width: 32px; height: 32px; margin-bottom: 12px; opacity: 0.5;"></i>
+        <p>Aucun modèle détecté dans le cloud. Vérifiez vos clés d'API sécurisées.</p>
+    </div>
+    {% else %}
+    <div style="border: 1px solid var(--panel-border); border-radius: var(--radius-md); overflow: hidden;">
+        <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+            <thead>
+                <tr style="background: var(--bg-hover); border-bottom: 1px solid var(--panel-border);">
+                    <th style="padding: 12px 16px; font-weight: 600; color: var(--text-secondary);">Provider</th>
+                    <th style="padding: 12px 16px; font-weight: 600; color: var(--text-secondary);">Modèle</th>
+                    <th style="padding: 12px 16px; font-weight: 600; color: var(--text-secondary); width: 250px;">Assignation de Rôle</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in cloud_models %}
+                <tr style="border-bottom: 1px solid var(--panel-border); background: var(--bg-void);">
+                    <td style="padding: 12px 16px;">
+                        <span class="badge neutral" style="font-size: 11px;">{{ model.1 }}</span>
+                    </td>
+                    <td style="padding: 12px 16px; font-family: var(--font-mono); font-weight: 500;">
+                        {{ model.0 }}
+                    </td>
+                    <td style="padding: 12px 16px;">
+                        <form hx-post="/api/store/assign_role" hx-target="this" hx-swap="outerHTML" style="margin: 0;">
+                            <input type="hidden" name="model" value="{{ model.0 }}">
+                            <div class="custom-select" style="width: 100%; border-color: var(--panel-border); background: var(--bg-surface);">
+                                <select name="role" onchange="htmx.trigger(this.closest('form'), 'submit')" style="width: 100%; font-size: 12px; padding: 6px 12px;">
+                                    <option value="none" {% if model.2 == "none" %}selected{% endif %}>Inactif</option>
+                                    <option value="reasoning" {% if model.2 == "reasoning" %}selected{% endif %}>Pilote Raisonnement</option>
+                                    <option value="vision" {% if model.2 == "vision" %}selected{% endif %}>Analyse Visuelle</option>
+                                    <option value="code" {% if model.2 == "code" %}selected{% endif %}>Génération de Code</option>
+                                </select>
+                                <i data-lucide="chevron-down" style="width: 14px;"></i>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+<script>lucide.createIcons();</script>

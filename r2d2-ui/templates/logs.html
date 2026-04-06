@@ -1,0 +1,27 @@
+<div class="ag-scrollable" style="padding: 24px; color: var(--text-primary); background: #000; height: 100%; border-radius: 8px; margin: 16px; border: 1px solid var(--panel-border); font-family: var(--font-mono); font-size: 12px; display: flex; flex-direction: column;">
+    
+    <!-- HEADER -->
+    <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--panel-border); padding-bottom: 12px; margin-bottom: 12px;">
+        <span style="display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="terminal" style="width: 14px; color: var(--text-tertiary);"></i>
+            <span style="font-weight: 600; color: var(--text-secondary);">SYSTEM LOGS AUDIT</span>
+        </span>
+        <span style="display: flex; gap: 12px;">
+            <button class="btn-icon-small" title="Auto-Scroll Logiciel" onclick="document.getElementById('log-scroller').scrollTop = document.getElementById('log-scroller').scrollHeight">
+                <i data-lucide="arrow-down" style="width: 14px;"></i>
+            </button>
+            <button class="btn-icon-small" title="Rafraîchir" hx-get="/ui/editor/logs" hx-target="#ag-editor-target">
+                <i data-lucide="refresh-cw" style="width: 14px;"></i>
+            </button>
+        </span>
+    </div>
+
+    <!-- TERMINAL VIEW (Polled every 2s) -->
+    <div id="log-scroller" style="flex: 1; overflow-y: auto; color: #a1a1aa; line-height: 1.5;"
+         hx-get="/api/logs/tail" hx-trigger="load, every 2s">
+         <div style="display: flex; gap: 8px; align-items: center; justify-content: center; height: 100%;">
+            <i data-lucide="loader" style="animation: spin 1s linear infinite;"></i> Fetching daemon logs...
+         </div>
+    </div>
+</div>
+<script>lucide.createIcons();</script>

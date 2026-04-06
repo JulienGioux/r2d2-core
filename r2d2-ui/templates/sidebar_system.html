@@ -1,0 +1,17 @@
+<div style="display: flex; flex-direction: column; gap: 4px;">
+    <!-- System Metrics Nav -->
+    <a href="#" class="nav-item active" hx-get="/ui/editor/dashboard" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="cpu"></i> <span>System Metrics</span>
+    </a>
+    
+    <div style="margin: 16px 0 8px 16px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; text-transform: uppercase;">
+        Observability
+    </div>
+    <a href="#" class="nav-item" hx-get="/ui/editor/logs" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="scroll-text"></i> <span>Live Trace Logs</span>
+    </a>
+    <a href="#" class="nav-item" hx-get="/ui/cortex" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="activity"></i> <span>Cortex Graph</span>
+    </a>
+</div>
+<script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>
