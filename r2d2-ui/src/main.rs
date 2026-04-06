@@ -1958,12 +1958,13 @@ struct NewSessionTemplate {
 }
 
 #[derive(serde::Deserialize)]
-pub struct NewSessionForm {
-    pub title: String,
-    pub repository: String,
-    pub git_action: String,
-    pub auth_method: String,
-    pub base_image: String,
+struct NewSessionForm {
+    title: String,
+    repository: String,
+    git_action: String,
+    auth_method: String,
+    base_image: String,
+    auto_rag: Option<String>,
 }
 
 async fn get_new_session_modal() -> impl IntoResponse {
@@ -1976,11 +1977,9 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
     let session_id = uuid::Uuid::new_v4().to_string();
     *state.current_chat_session.lock().await = session_id.clone();
     state.agent.lock().await.clear_history();
-    let history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Démarrage de votre Workspace Isolé...</p></div></div>".into();
     
     let token = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN");
-    let github_configured = token.is_some();
-
+    
     // Construction du script Git dynamique
     let repo_name = form.repository.clone();
     let mut startup_script_content = String::new();
@@ -2013,23 +2012,49 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
         startup_script: if startup_script_content.is_empty() { None } else { Some(startup_script_content) },
     };
     
-    // Inject custom config silently into cache, it will be automatically serialized to disk on first chat turn
-    crate::chat_history::update_workspace_config(&session_id, w_config);
-    // Since session might not be fully flushed yet, let's create a stub
-    if crate::chat_history::load_session(&session_id).is_none() {
-        let empty_session = crate::chat_history::ChatSession {
-            id: session_id.clone(),
-            title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
-            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
-            pinned: false,
-            github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
-            debate_config: Some(crate::chat_history::DebateConfig::default()),
-            workspace_config: None, // It's updated directly
-            turns: vec![],
-        };
-        crate::chat_history::save_session(&session_id, empty_session);
+    let session = crate::chat_history::ChatSession {
+        id: session_id.clone(),
+        title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
+        updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+        pinned: false,
+        github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
+        debate_config: Some(crate::chat_history::DebateConfig::default()),
+        workspace_config: Some(w_config),
+        turns: vec![],
+    };
+    crate::chat_history::save_history(&session);
+
+    let active_providers = r2d2_cortex::mcp_hub::list_active_providers().await;
+    let github_configured = active_providers.contains(&"github".to_string());
+    
+    if let Some(rag_toggle) = form.auto_rag {
+        if rag_toggle == "true" && repo_name != "none" {
+            let mission_id = uuid::Uuid::new_v4().to_string();
+            let new_job = VampireJob {
+                id: mission_id.clone(),
+                theme: repo_name.clone(),
+                notebook: format!("https://github.com/{}", repo_name),
+                vampire_status: "EN_ATTENTE".to_string(),
+                assimilation_status: "EN_ATTENTE".to_string(),
+                provider: "notebooklm".to_string(),
+            };
+            let mut queue = read_queue();
+            queue.insert(0, new_job);
+            write_queue(&queue);
+            
+            tokio::spawn(async move {
+                execute_assimilation(Some(mission_id.clone())).await;
+                let mut q = read_queue();
+                if let Some(j) = q.iter_mut().find(|x| x.id == mission_id) {
+                    j.vampire_status = "VAMPIRISÉ".to_string();
+                    j.assimilation_status = "ASSIMILÉ".to_string();
+                }
+                write_queue(&q);
+            });
+        }
     }
 
+    let history_html = crate::chat_history::render_history(&session);
     let roles = read_model_roles().await;
     let mut active_providers = Vec::new();
     for (id, role) in roles.roles {

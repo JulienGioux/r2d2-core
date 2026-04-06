@@ -3,7 +3,7 @@
         <button onclick="document.getElementById('new-session-modal').remove()" style="position: absolute; right: 16px; top: 16px; background: transparent; color: var(--text-tertiary); border: none; font-size: 24px; cursor: pointer;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-tertiary)'">&times;</button>
         <h2 style="margin-top: 0; color: var(--accent-color); font-weight: 500;"><i data-lucide="plus-circle" style="display: inline-block; vertical-align: middle; margin-right: 8px;"></i> Nouvelle Session & Workspace</h2>
         
-        <form hx-post="/api/chat/new" hx-target="#ag-editor-target" hx-on::before-request="if(window.TerminalManager) window.TerminalManager.hideTerminal()" hx-on::after-request="document.getElementById('new-session-modal').remove()" style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px;" onclick="event.stopPropagation()">
+        <form hx-post="/api/chat/new" hx-target="#ag-editor-target" hx-on::before-request="if(window.TerminalManager) window.TerminalManager.hideTerminal()" hx-on::after-request="document.getElementById('new-session-modal').remove(); document.getElementById('ag-terminal-section').style.display = 'flex';" style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px;" onclick="event.stopPropagation()">
             
             <div>
                 <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Nom de la session</label>
@@ -19,6 +19,11 @@
                     {% endfor %}
                 </select>
                 <small style="color: var(--text-tertiary); display: block; margin-top: 4px;">Récupéré dynamiquement depuis GitHub API.</small>
+                
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; margin-top: 12px;">
+                    <input type="checkbox" name="auto_rag" value="true" checked>
+                    <span style="color: var(--text-primary); font-size: 13px;">Auto-indexer les sources de ce dépôt au RAG de la session (Assimilation)</span>
+                </label>
             </div>
 
             <div style="display: flex; gap: 16px;">
