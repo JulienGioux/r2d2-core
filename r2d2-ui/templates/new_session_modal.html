@@ -1,0 +1,57 @@
+<div id="new-session-modal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 9999; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(5px);" onclick="if(event.target.id === 'new-session-modal') this.remove();">
+    <div class="glass-card" style="padding: 32px; width: 550px; max-width: 90vw; position: relative;">
+        <button onclick="document.getElementById('new-session-modal').remove()" style="position: absolute; right: 16px; top: 16px; background: transparent; color: var(--text-tertiary); border: none; font-size: 24px; cursor: pointer;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-tertiary)'">&times;</button>
+        <h2 style="margin-top: 0; color: var(--accent-color); font-weight: 500;"><i data-lucide="plus-circle" style="display: inline-block; vertical-align: middle; margin-right: 8px;"></i> Nouvelle Session & Workspace</h2>
+        
+        <form hx-post="/api/chat/new" hx-target="#ag-editor-target" hx-on::before-request="if(window.TerminalManager) window.TerminalManager.hideTerminal()" hx-on::after-request="document.getElementById('new-session-modal').remove()" style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px;" onclick="event.stopPropagation()">
+            
+            <div>
+                <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Nom de la session</label>
+                <input type="text" name="title" placeholder="Ex: Refactorisation Auth..." required class="raw-input" style="width: 100%; display: block; box-sizing: border-box;">
+            </div>
+
+            <div>
+                <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Dépôt Cible (Workspace)</label>
+                <select name="repository" class="raw-input" style="width: 100%; display: block; box-sizing: border-box; cursor: pointer;">
+                    <option value="none" style="background: var(--bg-surface);">-- Aucun (Workspace générique) --</option>
+                    {% for repo in repos %}
+                    <option value="{{ repo }}" style="background: var(--bg-surface);">{{ repo }}</option>
+                    {% endfor %}
+                </select>
+                <small style="color: var(--text-tertiary); display: block; margin-top: 4px;">Récupéré dynamiquement depuis GitHub API.</small>
+            </div>
+
+            <div style="display: flex; gap: 16px;">
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Action Initiale</label>
+                    <select name="git_action" class="raw-input" style="width: 100%; display: block; box-sizing: border-box; cursor: pointer;">
+                        <option value="none" style="background: var(--bg-surface);">Ne rien faire</option>
+                        <option value="clone" style="background: var(--bg-surface);">Git Clone (Environnement vierge)</option>
+                        <option value="sync" style="background: var(--bg-surface);">Git Sync / Pull (Mettre à jour)</option>
+                    </select>
+                </div>
+                <div style="flex: 1;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Méthode d'Authentification</label>
+                    <select name="auth_method" class="raw-input" style="width: 100%; display: block; box-sizing: border-box; cursor: pointer;">
+                        <option value="https" style="background: var(--bg-surface);">Bridge HTTPS + Token R2D2</option>
+                        <option value="ssh" style="background: var(--bg-surface);">SSH (Agent Utilisateur Hôte)</option>
+                    </select>
+                </div>
+            </div>
+            
+            <details style="margin-top: 12px; border: 1px solid var(--panel-border); padding: 12px; border-radius: 8px; background: rgba(0,0,0,0.1);">
+                <summary style="cursor: pointer; color: var(--text-secondary); font-size: 12px; user-select: none;">Options Avancées (OS, Shell, etc...)</summary>
+                
+                <div style="margin-top: 16px;">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-secondary); font-size: 13px;">Image conteneur Sandbox</label>
+                    <input type="text" name="base_image" value="fedora:latest" class="raw-input" style="width: 100%; display: block; box-sizing: border-box;">
+                </div>
+            </details>
+
+            <div style="margin-top: 16px;">
+                <button type="submit" class="btn-primary" style="width: 100%;">Créer le Workspace</button>
+            </div>
+        </form>
+    </div>
+    <script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>
+</div>

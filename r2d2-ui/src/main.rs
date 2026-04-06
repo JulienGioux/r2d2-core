@@ -14,6 +14,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use async_stream::stream;
 use axum::response::sse::{Event, Sse};
+// Removed ws imports
 use r2d2_blackboard::PostgresBlackboard;
 use r2d2_circadian::sensory::VibeVector;
 use r2d2_circadian::CircadianDaemon;
@@ -31,12 +32,16 @@ use tokio_stream::StreamExt;
 
 mod chat_history;
 mod logger;
+mod github_api;
+mod parser;
+mod terminal;
 
 #[derive(Clone)]
 struct AppState {
     agent: Arc<Mutex<ReasoningAgent>>,
     pending_debate_prompt: Arc<Mutex<Option<String>>>,
     current_chat_session: Arc<Mutex<String>>,
+    terminal_tx: tokio::sync::broadcast::Sender<(String, String)>,
     log_tx: tokio::sync::broadcast::Sender<String>,
     sys: Arc<Mutex<System>>,
     start_time: Instant,
@@ -88,6 +93,7 @@ struct CortexTemplate {}
 #[derive(Template)]
 #[template(path = "chat.html")]
 struct ChatTemplate {
+    session_id: String,
     history_html: String,
     #[allow(dead_code)]
     github_configured: bool,
@@ -95,6 +101,7 @@ struct ChatTemplate {
     active_sources_html: String,
     #[allow(dead_code)]
     library_repos: Vec<String>,
+    active_providers: Vec<(String, String)>,
 }
 
 #[derive(Template)]
@@ -133,6 +140,34 @@ pub struct CuratedModel {
     pub name: String,
     pub description: String,
 }
+
+#[derive(Template)]
+#[template(path = "cloud_models.html")]
+struct CloudModelsTemplate {
+    cloud_models: Vec<(String, String, String)>,
+}
+
+#[derive(Template)]
+#[template(path = "sidebar_system.html")]
+struct SidebarSystemTemplate {}
+
+#[derive(Template)]
+#[template(path = "sidebar_store.html")]
+struct SidebarStoreTemplate {
+    pub local_models: Vec<String>,
+}
+
+#[derive(Template)]
+#[template(path = "sidebar_memory.html")]
+struct SidebarMemoryTemplate {}
+
+#[derive(Template)]
+#[template(path = "sidebar_mcp.html")]
+struct SidebarMcpTemplate {}
+
+#[derive(Template)]
+#[template(path = "sidebar_settings.html")]
+struct SidebarSettingsTemplate {}
 
 #[derive(Template)]
 #[template(path = "store.html")]
@@ -217,7 +252,8 @@ struct ChatInput {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let (log_tx, _) = tokio::sync::broadcast::channel::<String>(250);
-    let broadcast_layer = logger::BroadcastLayer {
+    let (terminal_tx, _) = tokio::sync::broadcast::channel::<(String, String)>(250);
+    let broadcast_layer = crate::logger::BroadcastLayer {
         sender: log_tx.clone(),
     };
 
@@ -379,7 +415,8 @@ async fn main() -> anyhow::Result<()> {
     let shared_state = AppState {
         agent: Arc::new(Mutex::new(reasoning_agent)),
         pending_debate_prompt: Arc::new(Mutex::new(None)),
-        current_chat_session: Arc::new(Mutex::new(uuid::Uuid::new_v4().to_string())),
+        current_chat_session: Arc::new(Mutex::new("local".to_string())),
+        terminal_tx: terminal_tx.clone(),
         log_tx: log_tx.clone(),
         sys: Arc::new(Mutex::new(sys)),
         start_time: Instant::now(),
@@ -401,12 +438,20 @@ async fn main() -> anyhow::Result<()> {
         .route("/chat/status", get(get_chat_status))
         .route("/chat/history/list", get(get_history_list))
         .route("/chat/history/:id", get(load_chat_history))
+        .route("/chat/new_modal", get(get_new_session_modal))
         .route("/chat/history/:id", delete(delete_chat_session))
         .route("/chat/history/:id/rename", post(rename_chat_session))
         .route("/chat/history/:id/pin", post(pin_chat_session))
         .route("/chat/history/:id/info", get(info_chat_session))
+        .route("/chat/history/:id/debate_config", get(get_debate_config_ui))
+        .route("/chat/history/:id/debate_config", post(post_debate_config_ui))
+        .route("/chat/current/debate_config", get(get_current_debate_config))
+        .route("/chat/current/debate_config", post(post_current_debate_config))
+        .route("/chat/current/workspace_config", get(get_workspace_config_ui))
+        .route("/chat/current/workspace_config", post(post_workspace_config_ui))
         .route("/chat/new", post(new_chat_session))
         .route("/chat/stream", get(handle_sse_stream))
+        .route("/logs/tail", get(tail_logs))
         .route("/system/purge", post(system_purge))
         .route("/system/airgap", post(system_airgap_mock))
         .route("/system/heuristic", post(system_heuristic_mock))
@@ -426,20 +471,36 @@ async fn main() -> anyhow::Result<()> {
         .route("/store/download", post(store_download_model))
         .route("/store/scan", post(store_scan_hf))
         .route("/store/assign_role", post(assign_model_role))
-        .route("/store/delete", post(delete_local_hf_model));
+        .route("/store/delete", post(delete_local_hf_model))
+        .route("/ws/terminal/:session_id", get(ws_terminal_handler))
+        .route("/ws/ai_terminal/:session_id", get(ws_ai_terminal_handler));
 
     let app = Router::new()
         .route("/", get(render_index))
-        .route("/ui/dashboard", get(render_dashboard))
+        .route("/ui/sidebar/system", get(render_sidebar_system))
+        .route("/ui/sidebar/store", get(render_sidebar_store))
+        .route("/ui/sidebar/memory", get(render_sidebar_memory))
+        .route("/ui/sidebar/mcp", get(render_sidebar_mcp))
+        .route("/ui/sidebar/settings", get(render_sidebar_settings))
+        .route("/ui/editor/dashboard", get(render_dashboard))
+        .route("/ui/editor/model/:id", get(render_editor_model))
+        .route("/ui/editor/memory/:id", get(render_editor_memory))
+        .route("/ui/editor/mcp", get(render_editor_mcp))
+        .route("/ui/editor/admin", get(render_admin))
+        .route("/ui/editor/logs", get(render_editor_logs))
         .route("/ui/chat", get(render_chat))
         .route("/ui/cortex", get(render_cortex))
         .route("/ui/memory", get(render_memory))
         .route("/ui/store", get(render_store))
-        .route("/ui/admin", get(render_admin))
+        .route("/ui/store/cloud", get(render_cloud_models)) // Legacy helper
         .nest("/api", api_routes)
         .nest_service(
             "/static",
             ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("static")),
+        )
+        .nest_service(
+            "/ag-framework",
+            ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ag-vanilla-ui")),
         )
         .with_state(shared_state);
 
@@ -457,6 +518,83 @@ async fn render_index() -> impl IntoResponse {
         status: "ACTIF (Air-Gapped)",
     };
     Html(tmpl.render().unwrap())
+}
+
+async fn render_sidebar_system() -> impl IntoResponse { Html(SidebarSystemTemplate {}.render().unwrap()) }
+
+async fn render_sidebar_store(State(state): State<AppState>) -> impl IntoResponse {
+    let local_models = state.hf_models_cache.read().await.clone();
+    Html(SidebarStoreTemplate { local_models }.render().unwrap())
+}
+
+async fn render_sidebar_memory() -> impl IntoResponse { Html(SidebarMemoryTemplate {}.render().unwrap()) }
+async fn render_sidebar_mcp() -> impl IntoResponse { Html(SidebarMcpTemplate {}.render().unwrap()) }
+async fn render_sidebar_settings() -> impl IntoResponse { Html(SidebarSettingsTemplate {}.render().unwrap()) }
+
+#[derive(Template)]
+#[template(path = "editor_model.html")]
+struct ModelEditorTemplate {
+    pub id: String,
+}
+
+async fn render_editor_model(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+    Html(ModelEditorTemplate { id }.render().unwrap())
+}
+
+async fn render_editor_memory(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+    Html(format!("<div class='ag-scrollable' style='padding: 24px; color: var(--text-primary);'><h2 style='font-family: var(--font-mono); font-size: 14px; margin-bottom: 24px;'><i data-lucide='database' style='width:16px; margin-right:8px;'></i>Memory Axiom View : {}</h2><div class='glass-card' style='padding:16px; font-size: 12px; color: var(--text-secondary);'>Retrieval stream closed. Detailed axiom vector inspection is offline.</div></div><script>lucide.createIcons();</script>", id))
+}
+
+async fn render_editor_mcp() -> impl IntoResponse {
+    Html("<div class='ag-scrollable' style='padding: 24px; color: var(--text-primary);'><h2 style='font-family: var(--font-mono); font-size: 14px; margin-bottom: 24px;'><i data-lucide='plug' style='width:16px; margin-right:8px;'></i>MCP Global Configuration</h2><div class='glass-card' style='padding:16px; font-size: 12px; color: var(--text-secondary);'>Register external Model Context Protocols below.<br/><br/><i>Feature pending. Managed via store config currently.</i></div></div><script>lucide.createIcons();</script>".to_string())
+}
+
+async fn render_editor_logs() -> impl IntoResponse {
+    let template = std::fs::read_to_string("r2d2-ui/templates/logs.html").unwrap_or_else(|_| "Template Error".to_string());
+    Html(template)
+}
+
+async fn tail_logs() -> impl IntoResponse {
+    // Determine the newest log file
+    let output = std::process::Command::new("bash")
+        .arg("-c")
+        .arg("ls -1t logs/r2d2*.log 2>/dev/null | head -n 1")
+        .output()
+        .expect("Failed to execute bash snippet");
+
+    let log_file = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    let mut html_lines = String::new();
+    if log_file.is_empty() {
+         html_lines.push_str("<div>ERROR: No log file found in logs/</div>");
+    } else {
+         let tail_out = std::process::Command::new("tail")
+            .arg("-n")
+            .arg("200")
+            .arg(&log_file)
+            .output()
+            .expect("Failed to tail");
+
+         let lines = String::from_utf8_lossy(&tail_out.stdout);
+         for line in lines.lines() {
+             let mut color = "#a1a1aa";
+             if line.contains(" ERROR ") || line.contains(" 🚨 ") {
+                 color = "#ef4444";
+             } else if line.contains(" WARN ") {
+                 color = "#f59e0b";
+             } else if line.contains(" INFO ") {
+                 color = "#3b82f6";
+             } else if line.contains(" DEBUG ") {
+                 color = "#2dd4bf";
+             }
+
+             // rudimentary HTML escaping
+             let safe_line = line.replace("<", "&lt;").replace(">", "&gt;");
+             html_lines.push_str(&format!("<div style='color: {}'>{}</div>", color, safe_line));
+         }
+    }
+
+    Html(html_lines)
 }
 
 async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
@@ -647,12 +785,21 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
     final_library_repos.sort();
     final_library_repos.dedup();
 
+    let roles = read_model_roles().await;
+    let mut active_providers = Vec::new();
+    for (id, role) in roles.roles {
+        active_providers.push((id.clone(), role.clone()));
+    }
+    active_providers.sort_by(|a, b| a.1.cmp(&b.1));
+
     Html(
         ChatTemplate {
+            session_id: session_id.clone(),
             history_html,
             github_configured,
             active_sources_html,
             library_repos: final_library_repos,
+            active_providers,
         }
         .render()
         .unwrap(),
@@ -705,6 +852,15 @@ async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
     );
 
     let mut local_models = vec![];
+
+    // SOVEREIGN MODEL EXPLICIT INJECTION
+    let bitnet_role = mappings
+        .roles
+        .get("R2D2-BitNet (Sovereign)")
+        .cloned()
+        .unwrap_or_else(|| "none".to_string());
+    local_models.push(("R2D2-BitNet (Sovereign)".to_string(), bitnet_role));
+
     for m in cached_models {
         let role = mappings
             .roles
@@ -742,6 +898,11 @@ async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
     );
 
     let curated_models = vec![
+        CuratedModel {
+            id: "r2d2-bitnet-1.58b-sovereign".into(),
+            name: "R2D2-BitNet (Sovereign)".into(),
+            description: "Modèle natif local 1.58b (Ternaire) forgeant son propre savoir. S'exécute sans GPU (CPU pur).".into(),
+        },
         CuratedModel {
             id: "microsoft/Phi-3-mini-4k-instruct".into(),
             name: "Phi-3 Mini (4K)".into(),
@@ -781,6 +942,168 @@ async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
     );
 
     html_res
+}
+
+async fn render_cloud_models(State(_state): State<AppState>) -> impl IntoResponse {
+    use r2d2_cortex::security::vault::Vault;
+
+    let t0 = std::time::Instant::now();
+    let mut cloud_models = Vec::new();
+    let mappings = read_model_roles().await;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .unwrap_or_default();
+
+    // ── Gemini Discovery ──
+    match Vault::get_api_key("GEMINI_API_KEY") {
+        Some(key) if !key.is_empty() => {
+            tracing::info!(
+                "[CLOUD DISCOVERY] Clé Gemini détectée dans le Vault, interrogation de l'API..."
+            );
+            match client
+                .get(format!(
+                    "https://generativelanguage.googleapis.com/v1beta/models?key={}",
+                    key
+                ))
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        tracing::warn!(
+                            "[CLOUD DISCOVERY] Gemini API a répondu HTTP {} — vérifiez la validité de la clé.",
+                            status
+                        );
+                    } else {
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(json) => {
+                                if let Some(models) = json.get("models").and_then(|m| m.as_array())
+                                {
+                                    for m in models {
+                                        if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                                            let short_name = name.replace("models/", "");
+                                            if short_name.contains("gemini") {
+                                                let role = mappings
+                                                    .roles
+                                                    .get(&short_name)
+                                                    .cloned()
+                                                    .unwrap_or_else(|| "none".to_string());
+                                                cloud_models.push((
+                                                    short_name,
+                                                    "Gemini".to_string(),
+                                                    role,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                    tracing::info!(
+                                        "[CLOUD DISCOVERY] Gemini: {} modèles découverts.",
+                                        cloud_models.len()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[CLOUD DISCOVERY] Gemini: Réponse JSON invalide: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if e.is_timeout() {
+                        tracing::warn!("[CLOUD DISCOVERY] Gemini: Timeout après 5s — vérifiez votre connexion réseau.");
+                    } else {
+                        tracing::warn!("[CLOUD DISCOVERY] Gemini: Requête échouée: {}", e);
+                    }
+                }
+            }
+        }
+        _ => {
+            tracing::info!("[CLOUD DISCOVERY] Aucune clé GEMINI_API_KEY configurée dans le Vault.");
+        }
+    }
+
+    // ── Mistral Discovery ──
+    let gemini_count = cloud_models.len();
+    match Vault::get_api_key("MISTRAL_API_KEY") {
+        Some(key) if !key.is_empty() => {
+            tracing::info!(
+                "[CLOUD DISCOVERY] Clé Mistral détectée dans le Vault, interrogation de l'API..."
+            );
+            match client
+                .get("https://api.mistral.ai/v1/models")
+                .header("Authorization", format!("Bearer {}", key))
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let status = resp.status();
+                    if !status.is_success() {
+                        tracing::warn!(
+                            "[CLOUD DISCOVERY] Mistral API a répondu HTTP {} — vérifiez la validité de la clé.",
+                            status
+                        );
+                    } else {
+                        match resp.json::<serde_json::Value>().await {
+                            Ok(json) => {
+                                if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+                                    for m in data {
+                                        if let Some(id) = m.get("id").and_then(|i| i.as_str()) {
+                                            let role = mappings
+                                                .roles
+                                                .get(id)
+                                                .cloned()
+                                                .unwrap_or_else(|| "none".to_string());
+                                            cloud_models.push((
+                                                id.to_string(),
+                                                "Mistral".to_string(),
+                                                role,
+                                            ));
+                                        }
+                                    }
+                                    tracing::info!(
+                                        "[CLOUD DISCOVERY] Mistral: {} modèles découverts.",
+                                        cloud_models.len() - gemini_count
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "[CLOUD DISCOVERY] Mistral: Réponse JSON invalide: {}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if e.is_timeout() {
+                        tracing::warn!("[CLOUD DISCOVERY] Mistral: Timeout après 5s — vérifiez votre connexion réseau.");
+                    } else {
+                        tracing::warn!("[CLOUD DISCOVERY] Mistral: Requête échouée: {}", e);
+                    }
+                }
+            }
+        }
+        _ => {
+            tracing::info!(
+                "[CLOUD DISCOVERY] Aucune clé MISTRAL_API_KEY configurée dans le Vault."
+            );
+        }
+    }
+
+    cloud_models.sort_by(|a, b| a.0.cmp(&b.0));
+    tracing::info!(
+        "⏱️ [CLOUD DISCOVERY] TEMPS TOTAL: {:?} — {} modèles indexés.",
+        t0.elapsed(),
+        cloud_models.len()
+    );
+    Html(CloudModelsTemplate { cloud_models }.render().unwrap())
 }
 
 #[derive(serde::Deserialize)]
@@ -830,7 +1153,7 @@ async fn store_scan_hf(State(state): State<AppState>) -> impl IntoResponse {
         let models = list_local_hf_models().await;
         *cache_clone.write().await = models;
     });
-    Html("<div class='badge info' style='margin-top: 8px; margin-left: 12px; position: absolute; right: 260px; top: -4px;'><i data-lucide='loader-2' class='spin' style='width:14px'></i> Analyse de la matrice...</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'}), 2000);</script>".to_string())
+    Html("<div class='badge info' style='margin-top: 8px; margin-left: 12px; position: absolute; right: 260px; top: -4px;'><i data-lucide='loader-2' class='spin' style='width:14px'></i> Analyse de la matrice...</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#ag-editor-target', swap: 'innerHTML'}), 2000);</script>".to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -866,7 +1189,7 @@ async fn delete_local_hf_model(
     });
 
     // On notifie l'utilisateur instantanément que l'opération est relayée au démon.
-    Html("<div class='badge warning' style='margin-top:8px; width:100%; border-color: rgba(245,158,11,0.2) !important;'><i data-lucide='cpu' style='width:14px; margin-right:6px;'></i> Désinstallation programmée. Rafraîchissez dans quelques instants.</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'}), 5000);</script>".to_string())
+    Html("<div class='badge warning' style='margin-top:8px; width:100%; border-color: rgba(245,158,11,0.2) !important;'><i data-lucide='cpu' style='width:14px; margin-right:6px;'></i> Désinstallation programmée. Rafraîchissez dans quelques instants.</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {target: '#ag-editor-target', swap: 'innerHTML'}), 5000);</script>".to_string())
 }
 
 #[derive(serde::Deserialize)]
@@ -884,7 +1207,7 @@ async fn add_mcp_tool(
         .blackboard
         .add_mcp_tool(&payload.name, &payload.command, &payload.args_json)
         .await;
-    let success_msg = format!("<div class='mcp-card' style='border-color: var(--status-success);'><i data-lucide='check' style='color:var(--status-success)'></i> Configuré : {}</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {{target: '#main-content', swap: 'innerHTML'}}), 1500);</script>", payload.name);
+    let success_msg = format!("<div class='mcp-card' style='border-color: var(--status-success);'><i data-lucide='check' style='color:var(--status-success)'></i> Configuré : {}</div><script>lucide.createIcons(); setTimeout(()=> htmx.ajax('GET', '/ui/store', {{target: '#ag-editor-target', swap: 'innerHTML'}}), 1500);</script>", payload.name);
     Html(success_msg)
 }
 
@@ -901,7 +1224,7 @@ async fn toggle_mcp_tool(
                 .await;
         }
     }
-    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'});</script>"#.to_string())
+    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#ag-editor-target', swap: 'innerHTML'});</script>"#.to_string())
 }
 
 async fn delete_mcp_tool(
@@ -909,7 +1232,7 @@ async fn delete_mcp_tool(
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     let _ = state.blackboard.delete_mcp_tool(&id).await;
-    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#main-content', swap: 'innerHTML'});</script>"#.to_string())
+    Html(r#"<script>htmx.ajax('GET', '/ui/store', {target: '#ag-editor-target', swap: 'innerHTML'});</script>"#.to_string())
 }
 
 // --- Administration (Vault) ---
@@ -953,8 +1276,9 @@ async fn handle_chat(
     Form(input): Form<ChatInput>,
 ) -> impl IntoResponse {
     tracing::info!(
-        "📥 [handle_chat] Received prompt: '{}', github_sources: '{}'",
+        "📥 [handle_chat] Received prompt: '{}', provider: '{}', github_sources: '{}'",
         input.prompt,
+        input.provider,
         input.github_sources
     );
     // Handling the Consensus Stream Request locally
@@ -1006,9 +1330,57 @@ async fn handle_chat(
     }
 
     // 1. Initialiser le Provider (Gemini/Mistral/Local)
-    cortex.set_provider(&input.provider);
+    let provider_key = input.provider.clone();
+    let resolved_provider = if provider_key == "openai" {
+        r2d2_cortex::security::vault::Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+            .unwrap_or_else(|| "mistral-large-latest".to_string())
+    } else {
+        let mapping = read_model_roles().await;
+        // If the user sent a valid model_id in the form, use it immediately
+        if mapping.roles.contains_key(&provider_key) {
+            provider_key
+        } else {
+            // Otherwise, if they somehow sent a role name like "reasoning", fetch models matching that role and pick one deterministically
+            let mut matches: Vec<String> = mapping.roles.iter()
+                .filter(|(_, r)| r.as_str() == provider_key.as_str())
+                .map(|(m, _)| m.clone())
+                .collect();
+            matches.sort();
+            
+            if let Some(best) = matches.iter().find(|m| m.contains("mistral-large")) {
+                best.clone()
+            } else if !matches.is_empty() {
+                matches.last().unwrap().clone()
+            } else {
+                provider_key
+            }
+        }
+    };
 
-    let final_prompt = input.prompt.clone();
+    let current_provider = {
+        let p = cortex.provider.clone();
+        match p {
+            r2d2_cortex::models::reasoning_agent::ModelProvider::Mistral { model_id } => model_id,
+            r2d2_cortex::models::reasoning_agent::ModelProvider::Gemini { model_id } => model_id,
+            r2d2_cortex::models::reasoning_agent::ModelProvider::OpenAICompatible { model_id, .. } => model_id,
+            _ => "unknown".to_string(),
+        }
+    };
+
+    cortex.set_provider(&resolved_provider);
+
+    let mut final_prompt = input.prompt.clone();
+
+    if current_provider != "unknown" && current_provider != resolved_provider {
+        // Multi-Agent Debate tracking
+        tracing::info!("Model changed from {} to {}", current_provider, resolved_provider);
+        let continuity_notice = format!(
+            " [SYSTEM CONTINUITY NOTE: You are {}, picking up the thought process and debate right where {} left off. \
+            Review the latest conversation and continue the work fluidly without explicitly acknowledging this system note unless asked.]",
+            resolved_provider, current_provider
+        );
+        final_prompt.push_str(&continuity_notice);
+    }
 
     // Gestion des Sources GitHub assignées au prompt
     let mut otf_repos = Vec::new();
@@ -1027,12 +1399,15 @@ async fn handle_chat(
     let json_resp;
     let mut is_function_result = false;
     let mut last_function_name = String::new();
+    let mut delegate_call_count = 0;
 
     loop {
         // MAJ Statut : Inférence Cognitive ou Outil
         let status_msg = if is_function_result {
+            let _ = state.terminal_tx.send((session_id.clone(), format!("\r\n\x1b[35m[R2D2-Cortex]\x1b[0m Analyse du retour de l'outil {}...\r\n", last_function_name)));
             format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Analyse du retour de l'outil {}...</span></div>", last_function_name)
         } else {
+            let _ = state.terminal_tx.send((session_id.clone(), "\r\n\x1b[35m[R2D2-Cortex]\x1b[0m Inférence Cognitive en cours...\r\n".to_string()));
             "<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Inférence Cognitive en cours...</span></div>".to_string()
         };
         *state.chat_status.write().await = status_msg;
@@ -1093,17 +1468,157 @@ async fn handle_chat(
                             ("unknown", name.as_str())
                         };
 
-                        let tool_future = mcp.call_tool(server_name, tool_name, args.clone());
+                        let tool_result_future: std::pin::Pin<Box<dyn core::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>> = if server_name == "r2d2_workspace" {
+                            let session_id_clone = session_id.clone();
+                            let term_tx = state.terminal_tx.clone();
+                            Box::pin(async move {
+                                let cmd = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
+                                
+                                let formatted_cmd = format!("\r\n\x1b[32m[R2D2-Cortex] Executing:\x1b[0m {}\r\n", cmd);
+                                let _ = term_tx.send((session_id_clone.clone(), formatted_cmd));
+
+                                let ws_config = crate::chat_history::load_session(&session_id_clone)
+                                    .and_then(|s| s.workspace_config)
+                                    .unwrap_or_default();
+                                
+                                let container_name = format!("r2d2-workspace-{}", session_id_clone);
+                                let (workspace, _) = r2d2_cortex::workspace::PodmanWorkspace::new(
+                                    &container_name,
+                                    Some(&ws_config.base_image),
+                                    ws_config.startup_script.as_deref()
+                                );
+                                use r2d2_cortex::workspace::Workspace;
+                                match workspace.exec(cmd) {
+                                    Ok((stdout, stderr, exit_code)) => {
+                                        if !stdout.is_empty() {
+                                            let _ = term_tx.send((session_id_clone.clone(), stdout.replace('\n', "\r\n")));
+                                        }
+                                        if !stderr.is_empty() {
+                                            let _ = term_tx.send((session_id_clone.clone(), format!("\x1b[31m{}\x1b[0m", stderr.replace('\n', "\r\n"))));
+                                        }
+                                        Ok(serde_json::json!({
+                                            "stdout": stdout,
+                                            "stderr": stderr,
+                                            "exit_code": exit_code
+                                        }))
+                                    }
+                                    Err(e) => Err(anyhow::anyhow!("Workspace execution failed: {}", e))
+                                }
+                            })
+                        } else if server_name == "r2d2_cortex" && tool_name == "delegate_sub_task" {
+                            delegate_call_count += 1;
+                            if delegate_call_count > 3 {
+                                Box::pin(async move {
+                                    Ok(serde_json::json!({ "status": "error", "message": "Max recursion depth reached! Impossible de subdiviser d'avantage (Garde-Fou Récursif TTL=3). Veuillez formuler une conclusion avec les fragments actuels." }))
+                                })
+                            } else {
+                                let task_goal = args.get("task_goal").and_then(|t| t.as_str()).unwrap_or("analyze").to_string();
+                                let files_to_read: Vec<String> = args
+                                    .get("files_to_read")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                    .unwrap_or_default();
+                                
+                                let bb = std::sync::Arc::clone(&state.blackboard);
+                                Box::pin(async move {
+                                    use r2d2_cortex::agent::CognitiveAgent;
+                                    let mut embedder = r2d2_cortex::models::minilm_embedder::MiniLmEmbedderAgent::new();
+                                    if let Err(e) = embedder.load().await {
+                                        return Ok(serde_json::json!({ "status": "error", "message": format!("MiniLM Sub-Agent failed to load: {}", e) }));
+                                    }
+                                    
+                                    let goal_vec = match embedder.embed_raw(&task_goal, true).await {
+                                        Ok(v) => v,
+                                        Err(e) => return Ok(serde_json::json!({"status": "error", "message": format!("MiniLM embed error: {}", e)}))
+                                    };
+                                    
+                                    let mut final_res = String::new();
+
+                                    if !files_to_read.is_empty() {
+                                        // RAG LOCAL IN-RAM PPOUR FICHIERS CIBLES
+                                        let mut chunks = Vec::new();
+                                        for file_path in files_to_read {
+                                            // Traite les fichiers locaux dans le workspace R2D2
+                                            if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
+                                                let file_chunks = r2d2_chunker::TextChunker::chunk_text(&content, 200, 40);
+                                                for (i, text) in file_chunks.into_iter().enumerate() {
+                                                    chunks.push((format!("{}[chunk_{}]", file_path, i), text));
+                                                }
+                                            } else {
+                                                chunks.push((file_path.clone(), format!("ERROR: Fichier '{}' introuvable ou illisible.", file_path)));
+                                            }
+                                        }
+
+                                        let mut scored_chunks = Vec::new();
+                                        for (tag, text) in chunks {
+                                            if text.starts_with("ERROR:") {
+                                                scored_chunks.push((tag, text, 0.0));
+                                                continue;
+                                            }
+                                            if let Ok(vec) = embedder.embed_raw(&text, false).await {
+                                                // Cosine Similarity en RAM
+                                                let dot: f32 = goal_vec.iter().zip(vec.iter()).map(|(a, b)| a * b).sum();
+                                                let n1: f32 = goal_vec.iter().map(|a| a*a).sum::<f32>().sqrt().max(1e-8);
+                                                let n2: f32 = vec.iter().map(|a| a*a).sum::<f32>().sqrt().max(1e-8);
+                                                let sim = dot / (n1 * n2);
+                                                scored_chunks.push((tag, text, sim));
+                                            }
+                                        }
+
+                                        // Trier et garder le Top 5
+                                        scored_chunks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                                        let top_k: Vec<_> = scored_chunks.into_iter().take(5).collect();
+                                        
+                                        let summary = top_k.into_iter().map(|(tag, txt, score)| format!("=> Source: {} (Score: {:.2})\n{}", tag, score, txt)).collect::<Vec<_>>().join("\n\n---\n\n");
+                                        final_res = format!("(RAG STRICT) Le sous-agent local a filtré le code demandé pour la tâche: '{}'.\n[FRAGMENTS RAM]\n{}", task_goal, summary);
+                                    } else {
+                                        // LEGACY GLOBAL RAG (POSTGRES)
+                                        let mut vec = goal_vec;
+                                        if vec.len() == 384 { vec.resize(1024, 0.0); } // Pour le pgvector blackboard
+                                        match bb.recall_memory(pgvector::Vector::from(vec), 5).await {
+                                            Ok(frags) => {
+                                                let summary = frags.join("\n\n---\n\n");
+                                                final_res = format!("(RAG GLOBAL) Le sous-agent a scanné toute la base pour : '{}'.\n[FRAGMENTS BDD]\n{}", task_goal, summary);
+                                            },
+                                            Err(e) => {
+                                                let _ = embedder.unload().await;
+                                                return Ok(serde_json::json!({"status": "error", "message": format!("PostgresBlackboard error: {}", e)}));
+                                            }
+                                        }
+                                    }
+
+                                    let _ = embedder.unload().await;
+                                    Ok(serde_json::json!({
+                                        "status": "success",
+                                        "sub_agent_report": final_res
+                                    }))
+                                })
+                            }
+                        } else {
+                            Box::pin(mcp.call_tool(server_name, tool_name, args.clone()))
+                        };
+
                         let tool_result =
-                            tokio::time::timeout(std::time::Duration::from_secs(10), tool_future)
+                            tokio::time::timeout(std::time::Duration::from_secs(30), tool_result_future)
                                 .await;
 
                         match tool_result {
                             Ok(Ok(res)) => {
+                                let tension = state.circadian_rx.borrow().tension;
+                                let is_local = resolved_provider.as_str() == "paradox-engine" || resolved_provider.as_str() == "consensus";
+                                
+                                let max_chars = if is_local || tension > 0.85 {
+                                    1500
+                                } else if tension > 0.6 {
+                                    8000
+                                } else {
+                                    32_000
+                                };
+
                                 let mut res_str = res.to_string();
-                                if res_str.len() > 250_000 {
-                                    res_str = res_str.chars().take(250_000).collect();
-                                    res_str.push_str("... [RESULT TRUNCATED BY R2D2]");
+                                if res_str.len() > max_chars {
+                                    res_str = res_str.chars().take(max_chars).collect();
+                                    res_str.push_str(&format!("... [RESULT TRUNCATED BY R2D2: Context too large. Tension: {:.2}. Please use 'r2d2_cortex___delegate_sub_task' or chunked reading!]", tension));
                                 }
                                 current_prompt = res_str.to_string();
                                 is_function_result = true;
@@ -1146,45 +1661,129 @@ async fn handle_chat(
                 continue;
             }
             Ok(Err(e)) => {
-                json_resp = serde_json::to_string(&serde_json::json!({
-                    "content": format!("Erreur Cortex: {}", e),
-                    "source": {"ParadoxEngine": "Error"},
-                    "consensus": "Error",
-                    "id": "paradox-multiapi-error"
-                }))
-                .unwrap();
+                let err_str = format!("{:?}", e);
+                // Check if it's a Rate Limit / Quota error
+                if err_str.contains("RateLimit") || err_str.contains("429") || err_str.contains("Too Many Requests") || err_str.contains("Timeouts/Rate Limits") {
+                    let prompt_json = serde_json::to_string(&final_prompt).unwrap_or_default();
+                    let html_content = format!(r#"
+<div id="failover-box" style="margin: 20px auto; padding: 20px; border: 1px solid var(--accent-warning); border-radius: 8px; background: rgba(234, 179, 8, 0.05); max-width: 800px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
+    <div style="display: flex; gap: 16px; align-items: flex-start;">
+        <i data-lucide="alert-triangle" style="color: var(--accent-warning); width: 24px; height: 24px; margin-top: 4px;"></i>
+        <div style="flex: 1;">
+            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; text-transform: uppercase;">⚠️ Quota Épuisé pour le Modèle Courant</h4>
+            <p style="margin: 0 0 12px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">Le fournisseur actuel a bloqué la requête par manque de crédits (Erreur 429). Pour éviter d'interrompre votre workflow, le système propose de basculer sur un modèle disponible (ex: <strong id="fo-next-name" style="color:var(--text-primary);">Mistral</strong>).</p>
+            
+            <div style="background: var(--bg-void); padding: 12px; border-radius: 6px; border: 1px solid var(--panel-border); margin-bottom: 16px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="color: var(--text-tertiary);">Bascule automatique dans :</span>
+                <span id="fo-timer" style="font-family: var(--font-mono); font-size: 20px; font-weight: bold; color: var(--accent-warning);">10</span>
+            </div>
+            
+            <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                <button id="fo-btn-cancel" class="btn-secondary" style="font-size: 11px; padding: 6px 16px;">Annuler</button>
+                <button id="fo-btn-force" class="btn-primary" style="font-size: 11px; padding: 6px 16px; background: var(--accent-warning); border-color: var(--accent-warning); color: #000;"><i data-lucide="zap" style="width: 14px;"></i> Forcer la bascule</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script type="application/json" id="fo-prompt-data">{prompt_json}</script>
+<script>
+    (function() {{
+        if(typeof lucide !== 'undefined') lucide.createIcons();
+        let delay = 10;
+        let timerEl = document.getElementById('fo-timer');
+        let box = document.getElementById('failover-box');
+        let cancelBtn = document.getElementById('fo-btn-cancel');
+        let forceBtn = document.getElementById('fo-btn-force');
+        let select = document.getElementById('provider-select');
+        let currentVal = select.value;
+        let nextOpt = null;
+        for(let i=0; i<select.options.length; i++) {{
+           let opt = select.options[i];
+           if (opt.value !== 'openai' && opt.value !== 'consensus' && opt.value !== currentVal) {{
+               nextOpt = opt;
+               break; 
+           }}
+        }}
+        if(!nextOpt) {{
+            document.getElementById('fo-next-name').textContent = "aucun";
+            timerEl.parentElement.innerHTML = "<span style='color:var(--accent-warning);'>Action requise : configurez 'models.json' car aucun autre modèle n'est disponible.</span>";
+            forceBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
+            return;
+        }}
+        document.getElementById('fo-next-name').textContent = nextOpt.text.split(':')[0].trim();
+        
+        let itv;
+        function executeFO() {{
+             clearInterval(itv);
+             box.style.opacity = '0.5';
+             box.style.pointerEvents = 'none';
+             timerEl.parentElement.innerHTML = "Bascule vers " + nextOpt.text + " en cours...";
+             select.value = nextOpt.value;
+             try {{
+                 let promptVal = JSON.parse(document.getElementById('fo-prompt-data').textContent);
+                 let src = document.querySelector('input[name="github_sources"]');
+                 let srcVal = src ? src.value : "";
+                 htmx.ajax('POST', '/api/chat', {{
+                    target: '#chat-history',
+                    swap: 'beforeend',
+                    values: {{ prompt: promptVal, provider: nextOpt.value, github_sources: srcVal }}
+                 }});
+             }} catch(e) {{
+                 console.error("FO Error", e);
+             }}
+        }}
+        
+        itv = setInterval(() => {{
+             delay--;
+             timerEl.textContent = delay;
+             if(delay <= 0) executeFO();
+        }}, 1000);
+        
+        cancelBtn.onclick = function() {{
+             clearInterval(itv);
+             box.style.opacity = '0.7';
+             timerEl.parentElement.innerHTML = "Opération annulée par l'utilisateur.";
+             cancelBtn.style.display = 'none';
+             forceBtn.style.display = 'none';
+        }};
+        
+        forceBtn.onclick = function() {{ executeFO(); }};
+    }})();
+</script>
+"#);
+                    json_resp = serde_json::to_string(&serde_json::json!({
+                        "content": html_content,
+                        "source": {"ParadoxEngine": "RateLimit (Quota)"},
+                        "consensus": "Error",
+                        "id": "paradox-multiapi-error"
+                    }))
+                    .unwrap();
+                } else {
+                    json_resp = serde_json::to_string(&serde_json::json!({
+                        "content": format!("Erreur Cortex: {}", e),
+                        "source": {"ParadoxEngine": "Error"},
+                        "consensus": "Error",
+                        "id": "paradox-multiapi-error"
+                    }))
+                    .unwrap();
+                }
                 break;
             }
             Err(_) => {
                 json_resp = serde_json::to_string(&serde_json::json!({
-                    "content": "Défaillance de l'hyperviseur: Délai d'attente Cloud API expiré (> 15s). Cloud ou Proxy injoignable.",
+                    "content": format!("Défaillance de l'hyperviseur: Délai d'attente Cloud API expiré (> {}s). Cloud ou Proxy injoignable, ou l'API a été surchargée par une requête d'outil trop lourde.", timeout_duration),
                     "source": {"ParadoxEngine": "Timeout"},
                     "consensus": "Error",
-                    "id": "paradox-timeout"
+                    "id": "paradox-multiapi-timeout"
                 })).unwrap();
                 break;
             }
         };
     }
 
-    // 3. Parsing du V3 JSONAI pour extraction du discours et des Traces
-    let parsed: serde_json::Value = serde_json::from_str(&json_resp).unwrap_or(
-        serde_json::json!({ "content": json_resp, "source": {"ParadoxEngine": "Unknown"} }),
-    );
-    let raw_text = parsed["content"].as_str().unwrap_or(&json_resp).to_string();
-
-    let model_name = parsed["source"]["ParadoxEngine"]
-        .as_str()
-        .unwrap_or("Paradox Local")
-        .to_string();
-    let consensus = parsed["consensus"]
-        .as_str()
-        .unwrap_or("Unknown")
-        .to_string();
-    let latency = parsed["id"]
-        .as_str()
-        .unwrap_or("paradox-multiapi-0")
-        .replace("paradox-multiapi-", "");
+    // 3. Parsing du V3 JSONAI avec déballage récursif anti-hallucination
+    let (raw_text, model_name, consensus, latency) = crate::parser::extract_markdown(&json_resp);
 
     // 4. Compilation Markdown vers HTML "Premium" Zero-Dependency (pulldown-cmark)
     let mut options = pulldown_cmark::Options::empty();
@@ -1192,18 +1791,26 @@ async fn handle_chat(
     options.insert(pulldown_cmark::Options::ENABLE_TABLES);
     options.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
     options.insert(pulldown_cmark::Options::ENABLE_SMART_PUNCTUATION);
-    let parser = pulldown_cmark::Parser::new_ext(&raw_text, options);
-    let mut html_output = String::new();
-    pulldown_cmark::html::push_html(&mut html_output, parser);
 
-    let is_fact = parsed
-        .get("is_fact")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
-    let belief_state = parsed
-        .get("belief_state")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let html_output = if consensus == "Error" || consensus == "System" {
+        raw_text.clone()
+    } else {
+        let parser = pulldown_cmark::Parser::new_ext(&raw_text, options).map(|event| {
+            match event {
+                pulldown_cmark::Event::Html(html) | pulldown_cmark::Event::InlineHtml(html) => {
+                    // Échapper le HTML brut généré par le LLM pour ne pas exploser HTMX / l'UI
+                    pulldown_cmark::Event::Text(html)
+                }
+                _ => event,
+            }
+        });
+        let mut out = String::new();
+        pulldown_cmark::html::push_html(&mut out, parser);
+        out
+    };
+
+    let is_fact = false;
+    let belief_state = 0.0;
     let belief_pct = format!("{:.0}", belief_state * 100.0);
 
     let tmpl = ChatResponseTemplate {
@@ -1228,37 +1835,50 @@ async fn handle_chat(
     resp
 }
 
-async fn get_history_list() -> impl IntoResponse {
+async fn get_history_list(State(state): State<AppState>) -> impl IntoResponse {
     let sessions = chat_history::list_sessions();
+    let current_session_id = state.current_chat_session.lock().await.clone();
+    
     let mut html = String::new();
-    for sess in sessions {
+    let iter = sessions.into_iter().take(25); // Limit to top 25 most recent sessions
+    for sess in iter {
         let pin_icon = if sess.pinned {
             "<i data-lucide='pin' style='width: 14px; color: var(--accent-color); fill: var(--accent-color); margin-left: 4px;'></i>"
         } else {
             ""
         };
+        
+        let active_class = if sess.id == current_session_id { "active" } else { "" };
+        let active_indicator = if sess.id == current_session_id { 
+            "<i data-lucide='radio' style='width: 12px; color: #e74c3c; animation: pulse 2s infinite;'></i>" 
+        } else { 
+            "" 
+        };
 
         html.push_str(&format!(
-            "<div class='session-item' style='padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer; transition: background 0.2s; border-radius: 8px; position: relative;' onmouseover=\"this.style.background='rgba(255,255,255,0.1)'; this.querySelector('.session-actions').style.display='flex'\" onmouseout=\"this.style.background='transparent'; this.querySelector('.session-actions').style.display='none'\">\
-                <div hx-get='/api/chat/history/{}' hx-target='#main-content' style='display: flex; align-items: center; gap: 8px; width: 100%;'>\
-                    <i data-lucide='message-square' style='width: 16px; color: #888;'></i>\
-                    <strong style='color: #e0e0e0; font-size: 0.85em; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;'>{}</strong>\
+            "<div class='ag-sidebar-item {}' style='position: relative; padding: 0;' onmouseover=\"this.querySelector('.session-actions').style.display='flex'\" onmouseout=\"this.querySelector('.session-actions').style.display='none'\">\
+                <div hx-get='/api/chat/history/{}' hx-target='#ag-editor-target' class='chat-history-btn' style='display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;'>\
+                    <i data-lucide='message-square' class='chat-icon' style='width: 14px; min-width: 14px; color: #888;'></i>\
+                    <div class='spinner chat-spinner' style='width: 14px; height: 14px; min-width: 14px; display: none; border-width: 2px;'></div>\
+                    <span style='display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;'>{}</span>\
                     {}\
+                    <div style='margin-left: auto; display: flex; align-items: center;'>{}</div>\
                 </div>\
-                <div class='session-actions' style='display: none; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); gap: 4px; background: rgba(0,0,0,0.85); padding: 6px; border-radius: 6px; z-index: 10; border: 1px solid rgba(255,255,255,0.1);'>\
-                    <button type='button' title='Info' hx-get='/api/chat/history/{}/info' hx-target='body' hx-swap='beforeend' style='background: transparent; border: none; color: #3498db; cursor: pointer; padding: 2px; transition: transform 0.2s;' onmouseover=\"this.style.transform='scale(1.2)'\" onmouseout=\"this.style.transform='scale(1)'\"><i data-lucide='info' style='width: 14px; height: 14px;'></i></button>\
-                    <button type='button' title='Épingler' hx-post='/api/chat/history/{}/pin' style='background: transparent; border: none; color: #f39c12; cursor: pointer; padding: 2px; transition: transform 0.2s;' onmouseover=\"this.style.transform='scale(1.2)'\" onmouseout=\"this.style.transform='scale(1)'\"><i data-lucide='pin' style='width: 14px; height: 14px;'></i></button>\
-                    <button type='button' title='Renommer' onclick=\"const newName = prompt('Nouveau nom ?', '{}'); if(newName && newName.trim() !== '') htmx.ajax('POST', '/api/chat/history/{}/rename', {{ values: {{ new_title: newName.trim() }} }})\" style='background: transparent; border: none; color: #9b59b6; cursor: pointer; padding: 2px; transition: transform 0.2s;' onmouseover=\"this.style.transform='scale(1.2)'\" onmouseout=\"this.style.transform='scale(1)'\"><i data-lucide='edit-2' style='width: 14px; height: 14px;'></i></button>\
-                    <button type='button' title='Supprimer' hx-delete='/api/chat/history/{}' confirm='Supprimer définitivement cette conversation ?' style='background: transparent; border: none; color: #e74c3c; cursor: pointer; padding: 2px; transition: transform 0.2s;' onmouseover=\"this.style.transform='scale(1.2)'\" onmouseout=\"this.style.transform='scale(1)'\"><i data-lucide='trash' style='width: 14px; height: 14px;'></i></button>\
+                <div class='session-actions' style='display: none; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); gap: 2px; background: var(--jules-sidebar-bg); padding: 4px; border-radius: 4px; z-index: 10;'>\
+                    <button type='button' title='Info' hx-get='/api/chat/history/{}/info' hx-target='body' hx-swap='beforeend' style='background: transparent; border: none; color: #3498db; cursor: pointer; padding: 2px;'><i data-lucide='info' style='width: 12px; height: 12px;'></i></button>\
+                    <button type='button' title='Épingler' hx-post='/api/chat/history/{}/pin' style='background: transparent; border: none; color: #f39c12; cursor: pointer; padding: 2px;'><i data-lucide='pin' style='width: 12px; height: 12px;'></i></button>\
+                    <button type='button' title='Renommer' onclick=\"const newName = prompt('Nouveau nom ?', '{}'); if(newName && newName.trim() !== '') htmx.ajax('POST', '/api/chat/history/{}/rename', {{ values: {{ new_title: newName.trim() }} }})\" style='background: transparent; border: none; color: #9b59b6; cursor: pointer; padding: 2px;'><i data-lucide='edit-2' style='width: 12px; height: 12px;'></i></button>\
+                    <button type='button' title='Supprimer' hx-delete='/api/chat/history/{}' confirm='Supprimer définitivement cette conversation ?' style='background: transparent; border: none; color: #e74c3c; cursor: pointer; padding: 2px;'><i data-lucide='trash' style='width: 12px; height: 12px;'></i></button>\
                 </div>\
             </div>",
-            sess.id, sess.title.replace("<", "&lt;").replace(">", "&gt;"), pin_icon, 
+            active_class, sess.id, sess.title.replace("<", "&lt;").replace(">", "&gt;"), pin_icon, active_indicator,
             sess.id, sess.id, sess.title.replace("\"", "&quot;").replace("'", "\\'"), sess.id, sess.id
         ));
     }
     if html.is_empty() {
         html = "<div style='padding: 16px; color: #888; text-align: center; font-size: 0.85em;'>Aucune conversation</div>".into();
     }
+    html.push_str("<style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }</style>");
     html.push_str("<script>lucide.createIcons();</script>");
     Html(html)
 }
@@ -1269,6 +1889,7 @@ struct RenamePayload {
 }
 
 async fn delete_chat_session(
+    State(state): State<AppState>,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> impl IntoResponse {
     chat_history::delete_session(&id);
@@ -1330,36 +1951,107 @@ async fn info_chat_session(
     Html(html)
 }
 
-async fn new_chat_session(State(state): State<AppState>) -> impl IntoResponse {
-    *state.current_chat_session.lock().await = uuid::Uuid::new_v4().to_string();
+#[derive(Template)]
+#[template(path = "new_session_modal.html")]
+struct NewSessionTemplate {
+    repos: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct NewSessionForm {
+    pub title: String,
+    pub repository: String,
+    pub git_action: String,
+    pub auth_method: String,
+    pub base_image: String,
+}
+
+async fn get_new_session_modal() -> impl IntoResponse {
+    let repos = github_api::fetch_user_repos().await.unwrap_or_default();
+    let template = NewSessionTemplate { repos };
+    axum::response::Html(template.render().unwrap())
+}
+
+async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(form): axum::extract::Form<NewSessionForm>) -> impl IntoResponse {
+    let session_id = uuid::Uuid::new_v4().to_string();
+    *state.current_chat_session.lock().await = session_id.clone();
     state.agent.lock().await.clear_history();
-    let history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Le Cortex est en écoute de stimuli.</p></div></div>".into();
-    let github_configured =
-        r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN").is_some();
+    let history_html = "<div class='message system'><i data-lucide='terminal'></i><div class='message-content'><strong>System Initialize</strong><p>Bienvenue Chef. Démarrage de votre Workspace Isolé...</p></div></div>".into();
+    
+    let token = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN");
+    let github_configured = token.is_some();
 
-    let queue = read_queue();
-    let mut final_library_repos: Vec<String> = queue
-        .into_iter()
-        .map(|v| v.notebook)
-        .filter(|n| n.contains("/"))
-        .collect();
-
-    // Hardcoded permanent repository for the project core architecture
-    final_library_repos.push("JulienGioux/r2d2-core".to_string());
-
-    final_library_repos.sort();
-    final_library_repos.dedup();
-
-    axum::response::Html(
-        ChatTemplate {
-            history_html,
-            github_configured,
-            active_sources_html: String::new(),
-            library_repos: final_library_repos,
+    // Construction du script Git dynamique
+    let repo_name = form.repository.clone();
+    let mut startup_script_content = String::new();
+    
+    if repo_name != "none" {
+        let repo_url = if form.auth_method == "https" && token.is_some() {
+            format!("https://x-access-token:{}@github.com/{}.git", token.unwrap(), repo_name)
+        } else if form.auth_method == "https" {
+            format!("https://github.com/{}.git", repo_name) // Fallback on public clone
+        } else {
+            format!("git@github.com:{}.git", repo_name)
+        };
+        
+        match form.git_action.as_str() {
+            "clone" => {
+                startup_script_content = format!("dnf install -q -y git && git clone {}", repo_url);
+            },
+            "sync" => {
+                // Determine folder name from repo
+                let parts: Vec<&str> = repo_name.split('/').collect();
+                let folder = if parts.len() == 2 { parts[1] } else { &repo_name };
+                startup_script_content = format!("dnf install -q -y git && if [ ! -d \"{}\" ]; then\n  git clone {}\nelse\n  cd {} && git pull\nfi", folder, repo_url, folder);
+            },
+            _ => {}
         }
-        .render()
-        .unwrap(),
-    )
+    }
+    
+    let w_config = crate::chat_history::WorkspaceConfig {
+        base_image: if form.base_image.trim().is_empty() { "fedora:latest".to_string() } else { form.base_image },
+        startup_script: if startup_script_content.is_empty() { None } else { Some(startup_script_content) },
+    };
+    
+    // Inject custom config silently into cache, it will be automatically serialized to disk on first chat turn
+    crate::chat_history::update_workspace_config(&session_id, w_config);
+    // Since session might not be fully flushed yet, let's create a stub
+    if crate::chat_history::load_session(&session_id).is_none() {
+        let empty_session = crate::chat_history::ChatSession {
+            id: session_id.clone(),
+            title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
+            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            pinned: false,
+            github_sources: if repo_name != "none" { vec![repo_name] } else { vec![] },
+            debate_config: Some(crate::chat_history::DebateConfig::default()),
+            workspace_config: None, // It's updated directly
+            turns: vec![],
+        };
+        crate::chat_history::save_session(&session_id, empty_session);
+    }
+
+    let roles = read_model_roles().await;
+    let mut active_providers = Vec::new();
+    for (id, role) in roles.roles {
+        active_providers.push((id.clone(), role.clone()));
+    }
+    active_providers.sort_by(|a, b| a.1.cmp(&b.1));
+
+    let template_html = ChatTemplate {
+        session_id: session_id.clone(),
+        history_html,
+        github_configured,
+        active_sources_html: String::new(),
+        library_repos: vec![],
+        active_providers,
+    }
+    .render()
+    .unwrap();
+
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert("HX-Trigger", "chat-history-update".parse().unwrap());
+
+    (headers, axum::response::Html(template_html))
 }
 
 async fn load_chat_history(
@@ -1400,6 +2092,12 @@ async fn handle_sse_stream(
 
     let session_id = state.current_chat_session.lock().await.clone();
     let prompt_for_save = prompt.clone();
+    let session_config = crate::chat_history::load_session(&session_id).and_then(|s| s.debate_config);
+    let debate_config = session_config.map(|c| r2d2_cortex::models::reasoning_agent::DebateConfig {
+        architect_provider: c.architect_provider,
+        red_teamer_provider: c.red_teamer_provider,
+        max_rounds: c.max_rounds,
+    });
 
     let (tx, rx) = tokio::sync::mpsc::channel(10);
     let agent_arc = state.agent.clone();
@@ -1407,7 +2105,7 @@ async fn handle_sse_stream(
     tokio::spawn(async move {
         let mut agent = agent_arc.lock().await;
         agent.set_provider("consensus");
-        if let Err(e) = agent.run_debate(&prompt, tx.clone()).await {
+        if let Err(e) = agent.run_debate(&prompt, tx.clone(), debate_config).await {
             let _ = tx
                 .send(DebateEvent::SystemEvent(format!(
                     "[ERREUR CASTRATHROPHIC CORTEX]: {}",
@@ -1578,6 +2276,113 @@ async fn list_vampire_jobs() -> impl IntoResponse {
     axum::response::Html(html)
 }
 
+#[derive(serde::Deserialize)]
+pub struct DebateConfigForm {
+    pub architect_provider: String,
+    pub red_teamer_provider: String,
+    pub max_rounds: usize,
+}
+
+#[derive(Template)]
+#[template(path = "debate_config_modal.html")]
+struct DebateConfigTemplate {
+    id: String,
+    architect_provider: String,
+    red_teamer_provider: String,
+    max_rounds: usize,
+}
+
+async fn get_debate_config_ui(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let session = crate::chat_history::load_session(&id);
+    let config = session.and_then(|s| s.debate_config).unwrap_or_default();
+
+    let template = DebateConfigTemplate {
+        id,
+        architect_provider: config.architect_provider,
+        red_teamer_provider: config.red_teamer_provider,
+        max_rounds: config.max_rounds,
+    };
+
+    axum::response::Html(template.render().unwrap())
+}
+
+async fn get_current_debate_config(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let session_id = state.current_chat_session.lock().await.clone();
+    get_debate_config_ui(axum::extract::Path(session_id)).await
+}
+
+#[derive(serde::Deserialize)]
+pub struct WorkspaceConfigForm {
+    pub base_image: String,
+    pub startup_script: String,
+}
+
+#[derive(Template)]
+#[template(path = "workspace_config_modal.html")]
+struct WorkspaceConfigTemplate {
+    base_image: String,
+    startup_script: String,
+}
+
+async fn get_workspace_config_ui(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let session_id = state.current_chat_session.lock().await.clone();
+    let session = crate::chat_history::load_session(&session_id);
+    let config = session.and_then(|s| s.workspace_config).unwrap_or_default();
+
+    let template = WorkspaceConfigTemplate {
+        base_image: config.base_image,
+        startup_script: config.startup_script.unwrap_or_default(),
+    };
+
+    axum::response::Html(template.render().unwrap())
+}
+
+async fn post_workspace_config_ui(
+    State(state): State<AppState>,
+    axum::extract::Form(form): axum::extract::Form<WorkspaceConfigForm>,
+) -> impl IntoResponse {
+    let session_id = state.current_chat_session.lock().await.clone();
+    
+    let config = crate::chat_history::WorkspaceConfig {
+        base_image: if form.base_image.is_empty() { "fedora:latest".to_string() } else { form.base_image },
+        startup_script: if form.startup_script.trim().is_empty() { None } else { Some(form.startup_script) },
+    };
+    
+    crate::chat_history::update_workspace_config(&session_id, config);
+    
+    // Auto-close modal after save
+    axum::response::Html("<div id='workspace-config-modal'></div>".to_string())
+}
+
+async fn post_current_debate_config(
+    State(state): State<AppState>,
+    form: axum::extract::Form<DebateConfigForm>,
+) -> impl IntoResponse {
+    let session_id = state.current_chat_session.lock().await.clone();
+    post_debate_config_ui(axum::extract::Path(session_id), form).await
+}
+
+async fn post_debate_config_ui(
+    axum::extract::Path(id): axum::extract::Path<String>,
+    axum::extract::Form(form): axum::extract::Form<DebateConfigForm>,
+) -> impl IntoResponse {
+    let config = crate::chat_history::DebateConfig {
+        architect_provider: form.architect_provider,
+        red_teamer_provider: form.red_teamer_provider,
+        max_rounds: form.max_rounds,
+    };
+    crate::chat_history::update_debate_config(&id, config);
+    
+    // Auto-close modal after save
+    axum::response::Html("<div id='debate-config-modal'></div>".to_string())
+}
+
 async fn add_vampire_job(Form(payload): Form<AddJobPayload>) -> impl IntoResponse {
     let mut queue = read_queue();
     queue.push(VampireJob {
@@ -1733,7 +2538,7 @@ async fn set_admin_keys(Form(params): Form<KeyUpdateParams>) -> axum::response::
     r2d2_cortex::security::vault::Vault::set_api_key(&params.provider, &params.api_key);
     axum::response::Html(
         r#"<script>
-        htmx.ajax('GET', '/ui/admin', {target: '#main-content', swap: 'innerHTML'});
+        htmx.ajax('GET', '/ui/editor/admin', {target: '#ag-editor-target', swap: 'innerHTML'});
     </script>"#
             .to_string(),
     )
@@ -1874,4 +2679,119 @@ mod tests {
         let res = system_heuristic_mock(Query(params)).await.into_response();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
     }
+
+    #[test]
+    fn test_vault_key_resolution_in_memory() {
+        use r2d2_cortex::security::vault::Vault;
+        // Le Vault doit pouvoir stocker et récupérer une clé en RAM (mode paranoïaque)
+        Vault::set_in_memory_key("TEST_CLOUD_KEY", "sk-test-12345");
+        let key = Vault::get_api_key("TEST_CLOUD_KEY");
+        assert!(
+            key.is_some(),
+            "Le Vault doit trouver la clé injectée en RAM"
+        );
+        assert_eq!(key.unwrap(), "sk-test-12345");
+        // Nettoyage
+        Vault::set_in_memory_key("TEST_CLOUD_KEY", "");
+        let key_after = Vault::get_api_key("TEST_CLOUD_KEY");
+        assert!(
+            key_after.is_none() || key_after.as_deref() == Some(""),
+            "La clé doit être révoquée après nettoyage"
+        );
+    }
+
+    #[test]
+    fn test_gemini_model_name_parsing() {
+        // Simule le parsing de la réponse Gemini API
+        let json_str = r#"{"models":[{"name":"models/gemini-2.5-flash","displayName":"Gemini 2.5 Flash"},{"name":"models/gemini-3-flash-preview","displayName":"Gemini 3 Flash"},{"name":"models/text-bison-001","displayName":"PaLM 2"}]}"#;
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let models = json.get("models").unwrap().as_array().unwrap();
+        let mut gemini_names: Vec<String> = Vec::new();
+        for m in models {
+            if let Some(name) = m.get("name").and_then(|n| n.as_str()) {
+                let short = name.replace("models/", "");
+                if short.contains("gemini") {
+                    gemini_names.push(short);
+                }
+            }
+        }
+        assert_eq!(
+            gemini_names.len(),
+            2,
+            "Seuls les modèles 'gemini' doivent être retenus"
+        );
+        assert!(gemini_names.contains(&"gemini-2.5-flash".to_string()));
+        assert!(gemini_names.contains(&"gemini-3-flash-preview".to_string()));
+    }
+
+    #[test]
+    fn test_mistral_model_parsing() {
+        // Simule le parsing de la réponse Mistral API
+        let json_str = r#"{"data":[{"id":"mistral-large-latest","object":"model"},{"id":"mistral-small-latest","object":"model"},{"id":"codestral-latest","object":"model"}]}"#;
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+        let data = json.get("data").unwrap().as_array().unwrap();
+        let ids: Vec<&str> = data
+            .iter()
+            .filter_map(|m| m.get("id").and_then(|i| i.as_str()))
+            .collect();
+        assert_eq!(ids.len(), 3, "Tous les modèles Mistral doivent être parsés");
+        assert!(ids.contains(&"mistral-large-latest"));
+        assert!(ids.contains(&"codestral-latest"));
+    }
+
+    #[test]
+    fn test_cloud_models_template_renders_empty() {
+        use askama::Template;
+        let tpl = CloudModelsTemplate {
+            cloud_models: vec![],
+        };
+        let html = tpl.render().unwrap();
+        assert!(
+            html.contains("Aucun mod"),
+            "Le template vide doit afficher le message 'aucun modèle'"
+        );
+    }
+
+    #[test]
+    fn test_cloud_models_template_renders_with_data() {
+        use askama::Template;
+        let tpl = CloudModelsTemplate {
+            cloud_models: vec![
+                (
+                    "gemini-2.5-flash".to_string(),
+                    "Gemini".to_string(),
+                    "reasoning".to_string(),
+                ),
+                (
+                    "mistral-large-latest".to_string(),
+                    "Mistral".to_string(),
+                    "none".to_string(),
+                ),
+            ],
+        };
+        let html = tpl.render().unwrap();
+        assert!(
+            html.contains("gemini-2.5-flash"),
+            "Le template doit contenir le nom du modèle Gemini"
+        );
+        assert!(
+            html.contains("mistral-large-latest"),
+            "Le template doit contenir le nom du modèle Mistral"
+        );
+        assert!(
+            html.contains("Gemini"),
+            "Le template doit afficher le badge provider Gemini"
+        );
+    }
+}
+
+pub async fn ws_terminal_handler(State(_state): State<AppState>, axum::extract::Path(session_id): axum::extract::Path<String>, ws: axum::extract::ws::WebSocketUpgrade) -> axum::response::Response {
+    tracing::info!("📡 [WS] Demande d'upgrade WebSocket pour session: {}", session_id);
+    ws.on_upgrade(move |socket| crate::terminal::handle_terminal_socket(socket, session_id))
+}
+
+pub async fn ws_ai_terminal_handler(State(state): State<AppState>, axum::extract::Path(session_id): axum::extract::Path<String>, ws: axum::extract::ws::WebSocketUpgrade) -> axum::response::Response {
+    tracing::info!("📡 [WS] Demande d'upgrade WebSocket (AI) pour session: {}", session_id);
+    let terminal_rx = state.terminal_tx.subscribe();
+    ws.on_upgrade(move |socket| crate::terminal::handle_ai_terminal_socket(socket, session_id, terminal_rx))
 }
