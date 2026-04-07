@@ -1,5 +1,5 @@
+use crate::error::CortexError;
 use crate::mcp_client::McpClient;
-use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -44,7 +44,7 @@ pub struct McpHub {
 }
 
 impl McpHub {
-    pub async fn new(configs: Vec<McpServerConfig>) -> Result<Self> {
+    pub async fn new(configs: Vec<McpServerConfig>) -> Result<Self, CortexError> {
         let mut clients = HashMap::new();
         let mut gemini_tools_cache = Vec::new();
 
@@ -133,7 +133,7 @@ impl McpHub {
         server_name: &str,
         tool_name: &str,
         arguments: serde_json::Value,
-    ) -> Result<serde_json::Value> {
+    ) -> Result<serde_json::Value, CortexError> {
         let lock = self.clients.lock().await;
         if let Some(client) = lock.get(server_name) {
             client.call_tool(tool_name, arguments).await
@@ -144,10 +144,10 @@ impl McpHub {
             if let Some(key) = matched_key {
                 lock.get(key).unwrap().call_tool(tool_name, arguments).await
             } else {
-                Err(anyhow::anyhow!(
+                Err(CortexError::McpDaemonFault(format!(
                     "MCP Server '{}' not found or failed to initialize",
                     server_name
-                ))
+                )))
             }
         }
     }

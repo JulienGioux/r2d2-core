@@ -1872,7 +1872,11 @@ async fn handle_chat(
                                 })
                             }
                         } else {
-                            Box::pin(mcp.call_tool(server_name, tool_name, args.clone()))
+                            Box::pin(async move {
+                                mcp.call_tool(server_name, tool_name, args.clone())
+                                    .await
+                                    .map_err(|e| anyhow::anyhow!(e))
+                            })
                         };
 
                         let tool_result = tokio::time::timeout(

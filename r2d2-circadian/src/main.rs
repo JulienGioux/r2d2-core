@@ -2,7 +2,7 @@ use anyhow::Result;
 use r2d2_blackboard::PostgresBlackboard;
 use r2d2_circadian::CircadianDaemon;
 use r2d2_cortex::{
-    agent::AgentError,
+    error::CortexError,
     models::{
         audio_agent::AudioAgent, bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent,
         reasoning_agent::ReasoningAgent, vision_agent::VisionAgentLlava,
@@ -70,7 +70,7 @@ async fn main() -> Result<()> {
     cortex
         .activate("Paradox-MultiAPI Router")
         .await
-        .map_err(|e: AgentError| anyhow::anyhow!(e))?;
+        .map_err(|e: CortexError| anyhow::anyhow!(e))?;
 
     // 4. Instanciation du Métabolisme (Polling = 60 secondes pour les tests)
     // Seuil de tolérance à l'entropie = 0.85 (Demande User)

@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod catalog;
+pub mod error;
 pub mod mcp_client;
 pub mod mcp_hub;
 pub mod memory;
@@ -16,7 +17,9 @@ pub mod store;
 pub mod training;
 pub mod workspace;
 
-pub use agent::{AgentError, CognitiveAgent};
+pub use error::CortexError;
+
+pub use agent::CognitiveAgent;
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};
 pub use registry::CortexRegistry;
 pub use store::{BertTopology, ModelStore};

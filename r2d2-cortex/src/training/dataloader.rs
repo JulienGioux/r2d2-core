@@ -18,9 +18,10 @@ impl JsonAiDataloader {
         tokenizer_path: &Path,
         batch_tx: mpsc::Sender<TrainingBatch>,
         recycle_rx: mpsc::Receiver<TrainingBatch>,
-    ) -> anyhow::Result<Self> {
-        let tokenizer = Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("Erreur Tokenizer: {}", e))?;
+    ) -> Result<Self, crate::error::CortexError> {
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| {
+            crate::error::CortexError::TokenizerError(format!("Erreur Tokenizer: {}", e))
+        })?;
 
         Ok(Self {
             tokenizer,
@@ -33,7 +34,10 @@ impl JsonAiDataloader {
     /// Lit ligne par ligne, convertit en Tensors et pousse dans la file d'attente MPSC.
     /// L'appel suspension `send().await` garantit la pureté de la **Backpressure**.
     #[instrument(skip(self), name = "stream_dataset")]
-    pub async fn stream_dataset(&mut self, dataset_path: &Path) -> anyhow::Result<()> {
+    pub async fn stream_dataset(
+        &mut self,
+        dataset_path: &Path,
+    ) -> Result<(), crate::error::CortexError> {
         info!("📖 Ouverture du flux de données : {:?}", dataset_path);
 
         let file = tokio::fs::File::open(dataset_path).await?;
@@ -71,10 +75,9 @@ impl JsonAiDataloader {
             }
 
             // --- 1. Tokenisation ---
-            let encoding = self
-                .tokenizer
-                .encode(payload, true)
-                .map_err(|e| anyhow::anyhow!("Tokenization error : {}", e))?;
+            let encoding = self.tokenizer.encode(payload, true).map_err(|e| {
+                crate::error::CortexError::TokenizerError(format!("Tokenization error : {}", e))
+            })?;
 
             let tokens = encoding.get_ids().to_vec();
 

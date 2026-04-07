@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
-use anyhow::Result;
+use crate::error::CortexError;
 use tracing::{info, instrument};
 
 use candle_core::Device;
@@ -55,7 +55,7 @@ impl ModelStore {
 
     /// Extrait (ou charge si c'est la première fois) les poids inertes d'un modèle Sémantique (Bert).
     #[instrument(skip(self))]
-    pub async fn checkout_bert(&self, id: &str) -> Result<BertTopology> {
+    pub async fn checkout_bert(&self, id: &str) -> Result<BertTopology, CortexError> {
         {
             let lock = self.bert_topologies.read().await;
             if let Some(topology) = lock.get(id) {
@@ -73,7 +73,10 @@ impl ModelStore {
         // S'il est vide, `ApiBuilder` utilisera l'accès public par défaut, garantissant le Zero-Config.
         let token = crate::security::vault::Vault::get_api_key("HF_TOKEN");
 
-        let api = ApiBuilder::new().with_token(token).build()?;
+        let api = ApiBuilder::new()
+            .with_token(token)
+            .build()
+            .map_err(|e| CortexError::ComponentDecouplingError(e.to_string()))?;
 
         let repo = api.repo(Repo::with_revision(
             desc.repo_id.to_string(),
@@ -82,11 +85,17 @@ impl ModelStore {
         ));
 
         info!("   [MODEL-STORE] Résolution des poids Safetensors...");
-        let model_file = repo.get(desc.weights_file).await?;
+        let model_file = repo.get(desc.weights_file).await.map_err(|e| {
+            CortexError::ComponentDecouplingError(format!("HF Hub Fetch weights failed: {}", e))
+        })?;
 
         info!("   [MODEL-STORE] Résolution du dictionnaire Tokenizer...");
-        let tokenizer_file = repo.get(desc.tokenizer_file.unwrap()).await?;
-        let config_file = repo.get(desc.config_file.unwrap()).await?;
+        let tokenizer_file = repo.get(desc.tokenizer_file.unwrap()).await.map_err(|e| {
+            CortexError::ComponentDecouplingError(format!("HF Hub Fetch tokenizer failed: {}", e))
+        })?;
+        let config_file = repo.get(desc.config_file.unwrap()).await.map_err(|e| {
+            CortexError::ComponentDecouplingError(format!("HF Hub Fetch config failed: {}", e))
+        })?;
 
         info!(
             "   [MODEL-STORE] Montage de la structure Tensorielle sur {:?}...",
@@ -94,15 +103,19 @@ impl ModelStore {
         );
 
         let tokenizer = Tokenizer::from_file(tokenizer_file)
-            .map_err(|e| anyhow::anyhow!("Erreur Tokenizer: {}", e))?;
+            .map_err(|e| CortexError::TokenizerError(format!("Erreur Tokenizer: {}", e)))?;
 
         let config_str = std::fs::read_to_string(config_file)?;
         let config: Config = serde_json::from_str(&config_str)?;
 
-        let vb =
-            unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], DTYPE, &self.device) }?;
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_file], DTYPE, &self.device) }
+            .map_err(|e| {
+                CortexError::ComponentDecouplingError(format!("VarBuilder error: {}", e))
+            })?;
 
-        let model = BertModel::load(vb, &config)?;
+        let model = BertModel::load(vb, &config).map_err(|e| {
+            CortexError::ComponentDecouplingError(format!("BertModel load error: {}", e))
+        })?;
 
         let topology = BertTopology {
             model: Arc::new(model),

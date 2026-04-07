@@ -13,7 +13,7 @@ pub mod registry;
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
 use r2d2_cortex::{
-    agent::AgentError,
+    error::CortexError,
     models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent},
     CortexRegistry,
 };
@@ -55,7 +55,7 @@ impl McpGateway {
         cortex
             .activate("Multilingual-E5-Small")
             .await
-            .map_err(|e: AgentError| anyhow::anyhow!(e))?;
+            .map_err(|e: CortexError| anyhow::anyhow!(e))?;
 
         Ok(Self {
             validator: ParadoxSolver::new(),

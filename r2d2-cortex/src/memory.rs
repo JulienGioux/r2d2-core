@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::CortexError;
 use bytemuck::try_cast_slice;
 use memmap2::Mmap;
 use serde::Deserialize;
@@ -23,13 +23,20 @@ pub struct SemanticMemory {
 
 impl SemanticMemory {
     /// Charge la mémoire sémantique
-    pub fn load<P: AsRef<Path>>(bin_path: P, meta_path: P) -> Result<Self> {
-        let bin_file = File::open(bin_path).context("Failed to open knowledge.bin")?;
-        let mmap = unsafe { Mmap::map(&bin_file).context("Failed to mmap knowledge.bin")? };
+    pub fn load<P: AsRef<Path>>(bin_path: P, meta_path: P) -> Result<Self, CortexError> {
+        let bin_file = File::open(bin_path)
+            .map_err(|e| CortexError::Database(format!("Failed to open knowledge.bin: {}", e)))?;
+        let mmap = unsafe {
+            Mmap::map(&bin_file).map_err(|e| {
+                CortexError::Database(format!("Failed to mmap knowledge.bin: {}", e))
+            })?
+        };
 
-        let meta_file = File::open(meta_path).context("Failed to open knowledge_meta.json")?;
+        let meta_file = File::open(meta_path).map_err(|e| {
+            CortexError::Database(format!("Failed to open knowledge_meta.json: {}", e))
+        })?;
         let metadata: Vec<ChunkMeta> =
-            serde_json::from_reader(meta_file).context("Failed to parse knowledge_meta.json")?;
+            serde_json::from_reader(meta_file).map_err(CortexError::Serialization)?;
 
         Ok(Self {
             mmap: Arc::new(mmap),
@@ -55,17 +62,17 @@ impl SemanticMemory {
 
     /// Recherche les K chunks les plus pertinents via Similarité Cosinus
     /// La requête doit avoir été vectorisée (embed) par MiniLmEmbedder.
-    pub fn search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<String>> {
+    pub fn search(&self, query_vec: &[f32], top_k: usize) -> Result<Vec<String>, CortexError> {
         if query_vec.len() != 384 {
-            anyhow::bail!(
+            return Err(CortexError::ComponentDecouplingError(format!(
                 "Semantic query memory mismatch. Expected 384 dimensions, got {}",
                 query_vec.len()
-            );
+            )));
         }
 
         // Zero copy cast : Les octets du fichier mappé vers des f32
         let db_vecs: &[f32] = try_cast_slice(&self.mmap)
-            .map_err(|e| anyhow::anyhow!("Bytemuck cast fail: {:?}", e))?;
+            .map_err(|e| CortexError::TensorCastFail(format!("{:?}", e)))?;
 
         // Norme de la requête
         let q_norm = query_vec

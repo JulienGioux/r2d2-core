@@ -3,7 +3,7 @@
 //! Extrait physiquement les flux OGG/WAV en échantillons Float32 Mono (16kHz).
 //! Requis pour la projection Mel-Spectrogram de l'agent Whisper.
 
-use anyhow::{anyhow, Result};
+use crate::error::CortexError;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error;
@@ -12,7 +12,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 
-pub fn decode_audio_to_pcm(path: &str) -> Result<Vec<f32>> {
+pub fn decode_audio_to_pcm(path: &str) -> Result<Vec<f32>, CortexError> {
     let file = std::fs::File::open(path)?;
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -29,7 +29,7 @@ pub fn decode_audio_to_pcm(path: &str) -> Result<Vec<f32>> {
 
     let probed = symphonia::default::get_probe()
         .format(&hint, mss, &fmt_opts, &meta_opts)
-        .map_err(|e| anyhow!("Erreur Probe Symphonia: {:?}", e))?;
+        .map_err(|e| CortexError::ComponentDecouplingError(format!("Erreur Probe Symphonia: {:?}", e)))?;
 
     let mut format = probed.format;
 
@@ -37,12 +37,12 @@ pub fn decode_audio_to_pcm(path: &str) -> Result<Vec<f32>> {
         .tracks()
         .iter()
         .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
-        .ok_or_else(|| anyhow!("Aucune piste audio exploitable trouvée."))?;
+        .ok_or_else(|| CortexError::ComponentDecouplingError("Aucune piste audio exploitable trouvée.".into()))?;
 
     let dec_opts: DecoderOptions = Default::default();
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &dec_opts)
-        .map_err(|e| anyhow!("Erreur Codec Symphonia: {:?}", e))?;
+        .map_err(|e| CortexError::ComponentDecouplingError(format!("Erreur Codec Symphonia: {:?}", e)))?;
 
     let track_id = track.id;
     let mut sample_buf = None;

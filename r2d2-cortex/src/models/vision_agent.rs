@@ -1,5 +1,6 @@
-use crate::agent::{AgentError, CognitiveAgent};
+use crate::agent::CognitiveAgent;
 use crate::catalog::{CognitiveSense, CortexCatalog};
+use crate::error::CortexError;
 use async_trait::async_trait;
 use std::time::Instant;
 use tracing::{info, instrument};
@@ -30,11 +31,11 @@ impl CircuitBreaker {
         }
     }
 
-    pub fn check(&mut self) -> Result<(), AgentError> {
+    pub fn check(&mut self) -> Result<(), CortexError> {
         if self.failures >= self.threshold {
             if let Some(last) = self.last_failure {
                 if last.elapsed() < self.reset_timeout {
-                    return Err(AgentError::InferenceError(
+                    return Err(CortexError::InferenceError(
                         "Circuit Breaker OPEN: Trop d'échecs sur VisionAgent LLaVA".to_string(),
                     ));
                 } else {
@@ -90,9 +91,13 @@ impl VisionAgentLlava {
     }
 
     /// Boucle d'analye d'image : extraction CLIP puis génération textuelle
-    async fn analyze_image(&mut self, _prompt: &str) -> Result<String, AgentError> {
+    async fn analyze_image(&mut self, _prompt: &str) -> Result<String, CortexError> {
         self.circuit_breaker.check()?;
-        let _engine = self.engine.as_ref().cloned().ok_or(AgentError::NotActive)?;
+        let _engine = self
+            .engine
+            .as_ref()
+            .cloned()
+            .ok_or(CortexError::NotActive)?;
 
         info!("-> Traitement visuel dans Pipeline Llava");
 
@@ -109,12 +114,12 @@ impl VisionAgentLlava {
             .await
             .map_err(|e| {
                 self.circuit_breaker.record_failure();
-                AgentError::InferenceError(format!("Vision Gateway Local inaccessible : {}", e))
+                CortexError::InferenceError(format!("Vision Gateway Local inaccessible : {}", e))
             })?;
 
         if !res.status().is_success() {
             self.circuit_breaker.record_failure();
-            return Err(AgentError::InferenceError(
+            return Err(CortexError::InferenceError(
                 "Status d'Inférence visuelle en échec".to_string(),
             ));
         }
@@ -138,7 +143,7 @@ impl CognitiveAgent for VisionAgentLlava {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Vision);
         self.name = format!(
             "VisionAgent-Llava-{}",
@@ -153,7 +158,7 @@ impl CognitiveAgent for VisionAgentLlava {
         let api = hf_hub::api::tokio::ApiBuilder::new()
             .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
             .build()
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+            .map_err(|e| CortexError::LoadError(e.to_string()))?;
         let repo = api.repo(hf_hub::Repo::with_revision(
             desc.repo_id.to_string(),
             hf_hub::RepoType::Model,
@@ -164,10 +169,10 @@ impl CognitiveAgent for VisionAgentLlava {
         let tokenizer_file = repo
             .get(desc.tokenizer_file.unwrap_or("tokenizer.json"))
             .await
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+            .map_err(|e| CortexError::LoadError(e.to_string()))?;
 
         let tokenizer = tokenizers::Tokenizer::from_file(&tokenizer_file)
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+            .map_err(|e| CortexError::LoadError(e.to_string()))?;
 
         // [BLUEPRINT] : Chargement du model_file (VarBuilder) et preprocessor config.
         // let vb = VarBuilder::from_mmaped_safetensors(...)
@@ -187,7 +192,7 @@ impl CognitiveAgent for VisionAgentLlava {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         info!(
             "   [CORTEX] Drop de l'Engine et Tenseurs VRAM pour '{}'.",
             self.name
@@ -202,9 +207,9 @@ impl CognitiveAgent for VisionAgentLlava {
     }
 
     #[instrument(skip_all, name = "VisionAgentLlava::generate_thought")]
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
         if !self.is_active() {
-            return Err(AgentError::NotActive);
+            return Err(CortexError::NotActive);
         }
         let start = Instant::now();
         info!("👁️ VisionAgent-LLaVA démarre la pipeline visuelle...");

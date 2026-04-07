@@ -1,8 +1,8 @@
-use anyhow::Result;
+use crate::error::CortexError;
 
 pub trait Workspace {
     /// Executes a shell command inside the workspace and returns (stdout, stderr, exit_code)
-    fn exec(&self, cmd: &str) -> Result<(String, String, i32)>;
+    fn exec(&self, cmd: &str) -> Result<(String, String, i32), CortexError>;
 }
 
 pub struct PodmanWorkspace {
@@ -68,7 +68,7 @@ impl PodmanWorkspace {
 }
 
 impl Workspace for PodmanWorkspace {
-    fn exec(&self, cmd: &str) -> Result<(String, String, i32)> {
+    fn exec(&self, cmd: &str) -> Result<(String, String, i32), CortexError> {
         let output = std::process::Command::new("podman")
             .arg("exec")
             .arg(&self.container_name)

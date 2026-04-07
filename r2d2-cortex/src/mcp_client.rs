@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use crate::error::CortexError;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,10 +12,10 @@ pub enum McpCommand {
     CallTool {
         name: String,
         arguments: Value,
-        reply: oneshot::Sender<Result<Value>>,
+        reply: oneshot::Sender<Result<Value, CortexError>>,
     },
     ListTools {
-        reply: oneshot::Sender<Result<Value>>,
+        reply: oneshot::Sender<Result<Value, CortexError>>,
     },
 }
 
@@ -29,7 +29,7 @@ impl McpClient {
         command: &str,
         args: &[String],
         envs: HashMap<String, String>,
-    ) -> Result<Self> {
+    ) -> Result<Self, CortexError> {
         let (tx, mut rx) = mpsc::channel::<McpCommand>(32);
 
         let mut actual_command = command.to_string();
@@ -57,10 +57,21 @@ impl McpClient {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::inherit()) // Route stderr to the main console for tracing
             .spawn()
-            .context(format!("Failed to spawn MCP Server '{}'", command))?;
+            .map_err(|e| {
+                CortexError::McpInitializationError(format!(
+                    "Failed to spawn MCP Server '{}': {}",
+                    command, e
+                ))
+            })?;
 
-        let mut stdin = child.stdin.take().ok_or(anyhow!("Missing stdin"))?;
-        let stdout = child.stdout.take().ok_or(anyhow!("Missing stdout"))?;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| CortexError::McpInitializationError("Missing stdin".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| CortexError::McpInitializationError("Missing stdout".into()))?;
         let mut reader = BufReader::new(stdout).lines();
 
         // Perform MCP Handshake
@@ -87,7 +98,10 @@ impl McpClient {
                     if let Ok(res) = serde_json::from_str::<Value>(&line) {
                         if res.get("id").and_then(|i| i.as_u64()) == Some(1) {
                             if res.get("error").is_some() {
-                                return Err(anyhow!("MCP Initialization Error: {}", res));
+                                return Err(CortexError::McpInitializationError(format!(
+                                    "MCP Initialization Error: {}",
+                                    res
+                                )));
                             }
 
                             // Send initialized notification
@@ -108,23 +122,26 @@ impl McpClient {
                         tracing::debug!("Ignoring unparseable line during init: {}", line);
                     }
                 } else {
-                    return Err(anyhow!("MCP Daemon exited before initialization"));
+                    return Err(CortexError::McpInitializationError(
+                        "MCP Daemon exited before initialization".into(),
+                    ));
                 }
             }
-            Ok::<(), anyhow::Error>(())
+            Ok::<(), CortexError>(())
         };
 
         match tokio::time::timeout(std::time::Duration::from_secs(60), handshake_future).await {
             Ok(Ok(_)) => {},
             Ok(Err(e)) => return Err(e),
-            Err(_) => return Err(anyhow!("MCP Daemon Handshake Timeout: The process '{}' failed to answer 'initialize' within 60s. Is the daemon downloading packages or running correctly?", command)),
+            Err(_) => return Err(CortexError::McpInitializationError(format!("MCP Daemon Handshake Timeout: The process '{}' failed to answer 'initialize' within 60s. Is the daemon downloading packages or running correctly?", command))),
         }
 
         let next_id = Arc::new(AtomicUsize::new(2));
 
         // Start Actor Loop
         tokio::spawn(async move {
-            let mut pending_calls: HashMap<usize, oneshot::Sender<Result<Value>>> = HashMap::new();
+            let mut pending_calls: HashMap<usize, oneshot::Sender<Result<Value, CortexError>>> =
+                HashMap::new();
 
             loop {
                 tokio::select! {
@@ -146,7 +163,7 @@ impl McpClient {
 
                                 if let Err(e) = stdin.write_all(req_str.as_bytes()).await {
                                     tracing::error!("[McpClient] Pipe write error: {}", e);
-                                    let _ = reply.send(Err(anyhow::anyhow!("Pipe broken: {}", e)));
+                                    let _ = reply.send(Err(CortexError::McpDaemonFault(format!("Pipe broken: {}", e))));
                                     break;
                                 }
                                 let _ = stdin.flush().await;
@@ -164,7 +181,7 @@ impl McpClient {
 
                                 if let Err(e) = stdin.write_all(req_str.as_bytes()).await {
                                     tracing::error!("[McpClient] Pipe write error: {}", e);
-                                    let _ = reply.send(Err(anyhow::anyhow!("Pipe broken: {}", e)));
+                                    let _ = reply.send(Err(CortexError::McpDaemonFault(format!("Pipe broken: {}", e))));
                                     break;
                                 }
                                 let _ = stdin.flush().await;
@@ -187,7 +204,7 @@ impl McpClient {
                                         if let Some(id) = id_val.as_u64() {
                                             if let Some(reply) = pending_calls.remove(&(id as usize)) {
                                                 if let Some(err) = val.get("error") {
-                                                    let _ = reply.send(Err(anyhow::anyhow!("{}", err)));
+                                                    let _ = reply.send(Err(CortexError::McpDaemonFault(format!("{}", err))));
                                                 } else {
                                                     let content = val.get("result").unwrap_or(&json!({})).clone();
                                                     let _ = reply.send(Ok(content));
@@ -213,7 +230,9 @@ impl McpClient {
             // RAII Cleanup
             tracing::info!("🛡️ [McpClient] Reaping MCP Daemon zombie process...");
             for (_, reply) in pending_calls {
-                let _ = reply.send(Err(anyhow::anyhow!("Daemon crashed mid-request")));
+                let _ = reply.send(Err(CortexError::McpDaemonFault(
+                    "Daemon crashed mid-request".into(),
+                )));
             }
             let _ = child.kill().await;
             let _ = child.wait().await;
@@ -222,7 +241,7 @@ impl McpClient {
         Ok(Self { tx })
     }
 
-    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
+    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value, CortexError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(McpCommand::CallTool {
@@ -231,22 +250,22 @@ impl McpClient {
                 reply: reply_tx,
             })
             .await
-            .map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
+            .map_err(|_| CortexError::McpDaemonFault("McpDaemon thread is dead".into()))?;
 
         reply_rx
             .await
-            .map_err(|_| anyhow::anyhow!("McpDaemon dropped the response"))?
+            .map_err(|_| CortexError::McpDaemonFault("McpDaemon dropped the response".into()))?
     }
 
-    pub async fn list_tools(&self) -> Result<Value> {
+    pub async fn list_tools(&self) -> Result<Value, CortexError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.tx
             .send(McpCommand::ListTools { reply: reply_tx })
             .await
-            .map_err(|_| anyhow::anyhow!("McpDaemon thread is dead"))?;
+            .map_err(|_| CortexError::McpDaemonFault("McpDaemon thread is dead".into()))?;
 
         reply_rx
             .await
-            .map_err(|_| anyhow::anyhow!("McpDaemon dropped the response"))?
+            .map_err(|_| CortexError::McpDaemonFault("McpDaemon dropped the response".into()))?
     }
 }

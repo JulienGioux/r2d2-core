@@ -1,4 +1,5 @@
-use crate::agent::{AgentError, CognitiveAgent};
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use async_trait::async_trait;
 use candle_core::{DType, Device};
 use candle_nn::VarBuilder;
@@ -48,7 +49,7 @@ impl CognitiveAgent for BitNetAgent {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         info!("🔌 [CORTEX] Chargement structurel du modèle natif R2D2-BitNet (1.58-bit)...");
 
         let config = BitNetConfig::default();
@@ -82,7 +83,7 @@ impl CognitiveAgent for BitNetAgent {
                         match vb_res {
                             Ok(vb) => (vb, tokenizer),
                             Err(e) => {
-                                return Err(AgentError::LoadError(format!(
+                                return Err(CortexError::LoadError(format!(
                                     "Erreur Mmap Safetensors : {}",
                                     e
                                 )));
@@ -90,7 +91,7 @@ impl CognitiveAgent for BitNetAgent {
                         }
                     }
                     Err(e) => {
-                        return Err(AgentError::LoadError(format!(
+                        return Err(CortexError::LoadError(format!(
                             "Impossible de télécharger les poids depuis HuggingFace : {}",
                             e
                         )));
@@ -98,7 +99,7 @@ impl CognitiveAgent for BitNetAgent {
                 }
             }
             Err(e) => {
-                return Err(AgentError::LoadError(format!(
+                return Err(CortexError::LoadError(format!(
                     "API HF inaccessible : {}",
                     e
                 )));
@@ -106,7 +107,7 @@ impl CognitiveAgent for BitNetAgent {
         };
 
         let model = BitNetModel::<InferenceWeights>::load_inference(vb, &config)
-            .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage BitNet: {}", e)))?;
+            .map_err(|e| CortexError::LoadError(format!("Erreur d'ancrage BitNet: {}", e)))?;
 
         self.model = Some(Arc::new(model));
         self.tokenizer = tokenizer.map(Arc::new);
@@ -115,50 +116,69 @@ impl CognitiveAgent for BitNetAgent {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         info!("   [CORTEX] Purge de la structure R2D2-BitNet.");
         self.model = None;
         Ok(())
     }
 
     #[instrument(skip(self, prompt))]
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
         let model = self
             .model
             .as_ref()
             .map(Arc::clone)
-            .ok_or(AgentError::NotActive)?;
+            .ok_or(CortexError::NotActive)?;
         let tokenizer = self
             .tokenizer
             .as_ref()
             .map(Arc::clone)
-            .ok_or(AgentError::NotActive)?;
+            .ok_or(CortexError::NotActive)?;
         let device = self.device.clone();
 
         let prompt_str = prompt.to_string();
 
         tokio::task::spawn_blocking(move || {
-            info!("🧠 [BitNet] Réflexion Autorégressive sur le prompt (spawn_blocking)...");
+            let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || -> Result<String, CortexError> {
+                    info!("🧠 [BitNet] Réflexion Autorégressive sur le prompt (spawn_blocking)...");
 
-            let encoding = tokenizer.encode(prompt_str, false).map_err(|e| {
-                AgentError::InferenceError(format!("Tokenizer encode error: {}", e))
-            })?;
+                    let encoding = tokenizer.encode(prompt_str, false).map_err(|e| {
+                        CortexError::InferenceError(format!("Tokenizer encode error: {}", e))
+                    })?;
 
-            let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
+                    let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
 
-            // Limite de 512 tokens générés
-            let generated_ids = model
-                .generate(&prompt_tokens, 512, &device)
-                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+                    // Limite de 512 tokens générés
+                    let generated_ids = model
+                        .generate(&prompt_tokens, 512, &device)
+                        .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-            // Reconstruction textuelle réelle via BPE tokenizer
-            let generated_text = tokenizer.decode(&generated_ids, true).map_err(|e| {
-                AgentError::InferenceError(format!("Tokenizer decode error: {}", e))
-            })?;
+                    // Reconstruction textuelle réelle via BPE tokenizer
+                    let generated_text = tokenizer.decode(&generated_ids, true).map_err(|e| {
+                        CortexError::InferenceError(format!("Tokenizer decode error: {}", e))
+                    })?;
 
-            Ok(generated_text)
+                    Ok(generated_text)
+                },
+            ));
+
+            match panic_res {
+                Ok(result) => result,
+                Err(err_payload) => {
+                    let msg = if let Some(s) = err_payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = err_payload.downcast_ref::<String>() {
+                        s.to_string()
+                    } else {
+                        "Unknown panic payload".to_string()
+                    };
+                    tracing::error!("🚨 PANIC INTERCEPTÉE dans BitNetEngine ! Motif: {}", msg);
+                    Err(CortexError::InferencePanic(msg))
+                }
+            }
         })
         .await
-        .map_err(|e| AgentError::InferenceError(format!("Thread local panic: {}", e)))?
+        .map_err(|_| CortexError::InferenceError("Thread pool tokio expiré".to_string()))?
     }
 }

@@ -1,5 +1,5 @@
-use crate::agent::{AgentError, CognitiveAgent};
-use anyhow::Result;
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
 use tracing::{info, instrument, warn};
@@ -41,12 +41,12 @@ impl CortexRegistry {
     /// Réveille un agent spécifique (le charge en RAM)
     /// et désactive OBLIGATOIREMENT les autres pour purger la mémoire.
     #[instrument(skip(self))]
-    pub async fn activate(&self, target_name: &str) -> Result<(), AgentError> {
+    pub async fn activate(&self, target_name: &str) -> Result<(), CortexError> {
         let mut registry = self.agents.write().await;
 
         if !registry.contains_key(target_name) {
             warn!("Agent {} introuvable dans la bibliothèque.", target_name);
-            return Err(AgentError::LoadError(format!(
+            return Err(CortexError::LoadError(format!(
                 "Agent inconnu: {}",
                 target_name
             )));
@@ -83,17 +83,17 @@ impl CortexRegistry {
         &self,
         target_name: &str,
         prompt: &str,
-    ) -> Result<String, AgentError> {
+    ) -> Result<String, CortexError> {
         let mut registry = self.agents.write().await;
 
         if let Some(agent) = registry.get_mut(target_name) {
             if !agent.is_active() {
-                return Err(AgentError::NotActive);
+                return Err(CortexError::NotActive);
             }
             // L'agent génère le texte mathématiquement
             agent.generate_thought(prompt).await
         } else {
-            Err(AgentError::LoadError("Agent inconnu".to_string()))
+            Err(CortexError::LoadError("Agent inconnu".to_string()))
         }
     }
 }
@@ -125,12 +125,12 @@ mod tests {
             &self.name
         }
 
-        async fn load(&mut self) -> Result<(), AgentError> {
+        async fn load(&mut self) -> Result<(), CortexError> {
             self.active = true;
             Ok(())
         }
 
-        async fn unload(&mut self) -> Result<(), AgentError> {
+        async fn unload(&mut self) -> Result<(), CortexError> {
             self.active = false;
             Ok(())
         }
@@ -139,9 +139,9 @@ mod tests {
             self.active
         }
 
-        async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+        async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
             if !self.active {
-                return Err(AgentError::NotActive);
+                return Err(CortexError::NotActive);
             }
             Ok(format!("Mocked Thought: {}", prompt))
         }

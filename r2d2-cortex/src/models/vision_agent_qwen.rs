@@ -1,4 +1,5 @@
-use crate::agent::{AgentError, CognitiveAgent};
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use async_trait::async_trait;
 use std::time::Instant;
 use tracing::{info, instrument};
@@ -36,7 +37,7 @@ impl CognitiveAgent for VisionAgentQwen {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         info!(
             "🔌 [CORTEX] Activation Poids-Lourds de l'agent '{}'",
             self.name
@@ -49,7 +50,7 @@ impl CognitiveAgent for VisionAgentQwen {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         info!(
             "   [CORTEX] Drop inconditionnel des Tenseurs RAM pour '{}'.",
             self.name
@@ -63,9 +64,9 @@ impl CognitiveAgent for VisionAgentQwen {
     }
 
     #[instrument(skip_all, name = "VisionAgentQwen::generate_thought")]
-    async fn generate_thought(&mut self, _prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, _prompt: &str) -> Result<String, CortexError> {
         if !self.is_active() {
-            return Err(AgentError::NotActive);
+            return Err(CortexError::NotActive);
         }
         let start = Instant::now();
         info!("👁️ VisionAgent-QWEN démarre l'ingestion asynchrone...");

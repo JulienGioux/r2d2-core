@@ -1,5 +1,5 @@
-use crate::agent::{AgentError, CognitiveAgent};
-use anyhow::Result;
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use async_trait::async_trait;
 use tracing::{info, instrument};
 
@@ -46,7 +46,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         info!(
             "🔌 [CORTEX] Extraction des tenseurs inertes depuis le Store pour '{}'",
             self.name
@@ -57,7 +57,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
             .store
             .checkout_bert(&self.name)
             .await
-            .map_err(|e| AgentError::LoadError(e.to_string()))?;
+            .map_err(|e| CortexError::LoadError(e.to_string()))?;
 
         // Ancrage local (l'Agent devient opérationnel mais n'own plus les tenseurs)
         self.topology = Some(topo);
@@ -69,7 +69,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         info!(
             "   [CORTEX] Drop inconditionnel des vues RAM pour '{}'.",
             self.name
@@ -82,7 +82,7 @@ impl CognitiveAgent for MiniLmEmbedderAgent {
         self.topology.is_some()
     }
 
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
         let vec_f32 = self.embed_raw(prompt, true).await?;
         // Format R2D2: On exporte sous format JSON array
         let str_export = serde_json::to_string(&vec_f32).unwrap();
@@ -97,9 +97,9 @@ impl MiniLmEmbedderAgent {
         &mut self,
         prompt: &str,
         is_query: bool,
-    ) -> Result<Vec<f32>, AgentError> {
+    ) -> Result<Vec<f32>, CortexError> {
         if !self.is_active() {
-            return Err(AgentError::NotActive);
+            return Err(CortexError::NotActive);
         }
 
         let topology = self.topology.as_ref().unwrap();
@@ -111,7 +111,7 @@ impl MiniLmEmbedderAgent {
 
         let tokens = tokenizer
             .encode(e5_prompt, true)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+            .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
         let mut token_ids = tokens.get_ids().to_vec();
 
@@ -123,22 +123,41 @@ impl MiniLmEmbedderAgent {
             token_ids[511] = sep_token;
         }
 
-        let token_tensor = Tensor::new(token_ids.as_slice(), &self.device)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?
-            .unsqueeze(0)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+        let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+            || -> Result<Vec<f32>, CortexError> {
+                let token_tensor = Tensor::new(token_ids.as_slice(), &self.device)
+                    .map_err(|e| CortexError::InferenceError(e.to_string()))?
+                    .unsqueeze(0)
+                    .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-        let token_type_ids = token_tensor.zeros_like().unwrap();
+                let token_type_ids = token_tensor.zeros_like().unwrap();
 
-        let embeddings = model
-            .forward(&token_tensor, &token_type_ids, None)
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+                let embeddings = model
+                    .forward(&token_tensor, &token_type_ids, None)
+                    .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-        let cls_embedding = embeddings
-            .i((0, 0, ..))
-            .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+                let cls_embedding = embeddings
+                    .i((0, 0, ..))
+                    .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-        let vec_f32: Vec<f32> = cls_embedding.to_vec1().unwrap();
+                Ok(cls_embedding.to_vec1().unwrap())
+            },
+        ));
+
+        let vec_f32 = match panic_res {
+            Ok(result) => result?,
+            Err(err_payload) => {
+                let msg = if let Some(s) = err_payload.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = err_payload.downcast_ref::<String>() {
+                    s.to_string()
+                } else {
+                    "Unknown panic payload".to_string()
+                };
+                tracing::error!("🚨 PANIC INTERCEPTÉE dans MiniLmEmbedder ! Motif: {}", msg);
+                return Err(CortexError::InferencePanic(msg));
+            }
+        };
 
         if vec_f32.len() < 1024 {
             // E5 sort 384 dimensions. Pgvector exige parfois 1024.

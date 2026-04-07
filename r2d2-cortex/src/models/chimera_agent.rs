@@ -1,4 +1,5 @@
-use crate::agent::{AgentError, CognitiveAgent};
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use async_trait::async_trait;
 use candle_core::Device;
 use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
@@ -59,7 +60,7 @@ impl CognitiveAgent for ChimeraAgent {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         info!("🔌 [CORTEX] Chargement structurel du Moteur V2 R2D2-Chimera...");
 
         let config = self.config.clone();
@@ -76,16 +77,16 @@ impl CognitiveAgent for ChimeraAgent {
                     &self.device,
                 )
             }
-            .map_err(|e| AgentError::LoadError(format!("VarBuilder failure: {}", e)))?;
+            .map_err(|e| CortexError::LoadError(format!("VarBuilder failure: {}", e)))?;
 
             ChimeraModel::new_qat(&config, vb)
-                .map_err(|e| AgentError::LoadError(format!("Instanciation QAT échouée: {}", e)))?
+                .map_err(|e| CortexError::LoadError(format!("Instanciation QAT échouée: {}", e)))?
         } else {
             info!(
                 "   [Chimera] chimera_qat.safetensors introuvable. Fallback Graphe Mock (CI/UX)..."
             );
             ChimeraModel::new_mocked(&config, &self.device)
-                .map_err(|e| AgentError::LoadError(format!("Erreur Mock Chimera: {}", e)))?
+                .map_err(|e| CortexError::LoadError(format!("Erreur Mock Chimera: {}", e)))?
         };
 
         // 2. Initialisation du Tokenizer Llama3 depuis HF (car on teste bien le décodage)
@@ -118,19 +119,19 @@ impl CognitiveAgent for ChimeraAgent {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         info!("   [CORTEX] Purge de la structure R2D2-Chimera.");
         self.model = None;
         Ok(())
     }
 
     #[instrument(skip(self, prompt))]
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
         let model = self
             .model
             .as_ref()
             .map(Arc::clone)
-            .ok_or(AgentError::NotActive)?;
+            .ok_or(CortexError::NotActive)?;
 
         // Si on n'a pas de tokenizer officiel, on va pas crasher le mock, on renverra le prompt.
         let tokenizer = self.tokenizer.as_ref().map(Arc::clone);
@@ -139,32 +140,51 @@ impl CognitiveAgent for ChimeraAgent {
         let prompt_str = prompt.to_string();
 
         tokio::task::spawn_blocking(move || {
-            info!("🧠 [Chimera] Réflexion State-Space Continue (spawn_blocking)...");
+            let panic_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+                || -> Result<String, CortexError> {
+                    info!("🧠 [Chimera] Réflexion State-Space Continue (spawn_blocking)...");
 
-            let prompt_tokens: Vec<u32> = if let Some(tok) = &tokenizer {
-                let encoding = tok.encode(prompt_str.clone(), false).map_err(|e| {
-                    AgentError::InferenceError(format!("Tokenizer encode error: {}", e))
-                })?;
-                encoding.get_ids().to_vec()
-            } else {
-                vec![0, 1, 2] // Fallback dummy IDs
-            };
+                    let prompt_tokens: Vec<u32> = if let Some(tok) = &tokenizer {
+                        let encoding = tok.encode(prompt_str.clone(), false).map_err(|e| {
+                            CortexError::InferenceError(format!("Tokenizer encode error: {}", e))
+                        })?;
+                        encoding.get_ids().to_vec()
+                    } else {
+                        vec![0, 1, 2] // Fallback dummy IDs
+                    };
 
-            // Limite de max 50 tokens (C'est un mock, pas besoin de surcharger le CPU)
-            let generated_ids = model
-                .generate(&prompt_tokens, 50, &device)
-                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+                    // Limite de max 50 tokens (C'est un mock, pas besoin de surcharger le CPU)
+                    let generated_ids = model
+                        .generate(&prompt_tokens, 50, &device)
+                        .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-            if let Some(tok) = &tokenizer {
-                let generated_text = tok.decode(&generated_ids, true).map_err(|e| {
-                    AgentError::InferenceError(format!("Tokenizer decode error: {}", e))
-                })?;
-                Ok(generated_text)
-            } else {
-                Ok(format!("(Mock Decode) IDs: {:?}", generated_ids))
+                    if let Some(tok) = &tokenizer {
+                        let generated_text = tok.decode(&generated_ids, true).map_err(|e| {
+                            CortexError::InferenceError(format!("Tokenizer decode error: {}", e))
+                        })?;
+                        Ok(generated_text)
+                    } else {
+                        Ok(format!("(Mock Decode) IDs: {:?}", generated_ids))
+                    }
+                },
+            ));
+
+            match panic_res {
+                Ok(result) => result,
+                Err(err_payload) => {
+                    let msg = if let Some(s) = err_payload.downcast_ref::<&str>() {
+                        s.to_string()
+                    } else if let Some(s) = err_payload.downcast_ref::<String>() {
+                        s.to_string()
+                    } else {
+                        "Unknown panic payload".to_string()
+                    };
+                    tracing::error!("🚨 PANIC INTERCEPTÉE dans ChimeraAgent ! Motif: {}", msg);
+                    Err(CortexError::InferencePanic(msg))
+                }
             }
         })
         .await
-        .map_err(|e| AgentError::InferenceError(format!("Thread local panic: {}", e)))?
+        .map_err(|_| CortexError::InferenceError("Thread pool tokio expiré".to_string()))?
     }
 }

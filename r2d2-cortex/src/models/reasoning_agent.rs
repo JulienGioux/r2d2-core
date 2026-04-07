@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use std::time::Instant;
 use tracing::{info, instrument, warn};
 
-use crate::agent::{AgentError, CognitiveAgent};
+use crate::agent::CognitiveAgent;
+use crate::error::CortexError;
 use crate::memory::SemanticMemory;
 use crate::models::minilm_embedder::MiniLmEmbedderAgent;
 use crate::security::vault::Vault;
@@ -128,9 +129,9 @@ impl ReasoningAgent {
         system_prompt: &str,
         history: &[ChatMessage],
         inject_tools: bool,
-    ) -> Result<GeminiResponse, AgentError> {
+    ) -> Result<GeminiResponse, CortexError> {
         let api_key = Vault::get_api_key("GEMINI_API_KEY").ok_or_else(|| {
-            AgentError::InferenceError(
+            CortexError::InferenceError(
                 "Clef GEMINI_API_KEY non definie dans le Vault !".to_string(),
             )
         })?;
@@ -237,7 +238,7 @@ impl ReasoningAgent {
         loop {
             // Pattern 'Zero-Dependency': On clone la requête reqwest non-consommée
             let req_clone = req_builder.try_clone().ok_or_else(|| {
-                AgentError::InferenceError("Impossible de cloner la requête Gemini".into())
+                CortexError::InferenceError("Impossible de cloner la requête Gemini".into())
             })?;
 
             match req_clone.send().await {
@@ -248,13 +249,13 @@ impl ReasoningAgent {
                     if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     {
                         if retries >= 4 {
-                            return Err(AgentError::InferenceError(format!(
+                            return Err(CortexError::InferenceError(format!(
                                 "Gemini API Timeout/RateLimit exhaust: {}",
                                 res.text().await.unwrap_or_default()
                             )));
                         }
                     } else if !status.is_success() {
-                        return Err(AgentError::InferenceError(format!(
+                        return Err(CortexError::InferenceError(format!(
                             "Cloud API Reject: {}",
                             res.text().await.unwrap_or_default()
                         )));
@@ -276,7 +277,7 @@ impl ReasoningAgent {
                                     "R2D2-ERROR: Structure Gemini non conforme. Full Response = {}",
                                     json_body
                                 );
-                                return Err(AgentError::InferenceError(format!(
+                                return Err(CortexError::InferenceError(format!(
                                     "Inférence bloquée par l'API (Raison: {})",
                                     finish_reason
                                 )));
@@ -313,7 +314,7 @@ impl ReasoningAgent {
                 Err(e) => {
                     let is_ephemeral = e.is_timeout() || e.is_connect();
                     if !is_ephemeral || retries >= 4 {
-                        return Err(AgentError::InferenceError(format!("Erreur HTTP: {}", e)));
+                        return Err(CortexError::InferenceError(format!("Erreur HTTP: {}", e)));
                     }
                     warn!("Réseau Gemini éphémère ({}). Retry {}/4", e, retries + 1);
                 }
@@ -332,7 +333,7 @@ impl ReasoningAgent {
         has_tools: bool,
         override_url: Option<&str>,
         override_model_name: Option<&str>,
-    ) -> Result<GeminiResponse, AgentError> {
+    ) -> Result<GeminiResponse, CortexError> {
         let api_key = Vault::get_api_key("UNIVERSAL_API_KEY")
             .unwrap_or_else(|| Vault::get_api_key("MISTRAL_API_KEY").unwrap_or_default());
 
@@ -437,7 +438,7 @@ impl ReasoningAgent {
 
         loop {
             let req_clone = req_builder.try_clone().ok_or_else(|| {
-                AgentError::InferenceError("Impossible de cloner la requete OpenAI".into())
+                CortexError::InferenceError("Impossible de cloner la requete OpenAI".into())
             })?;
 
             match req_clone.send().await {
@@ -446,14 +447,14 @@ impl ReasoningAgent {
                     if status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
                     {
                         if retries >= 4 {
-                            return Err(AgentError::InferenceError(format!(
+                            return Err(CortexError::InferenceError(format!(
                                 "OpenAI-Compatible API Timeouts/Rate Limits exhausted: {} (URL: {})",
                                 res.text().await.unwrap_or_default(),
                                 url
                             )));
                         }
                     } else if !status.is_success() {
-                        return Err(AgentError::InferenceError(format!(
+                        return Err(CortexError::InferenceError(format!(
                             "OpenAI-Compatible API Reject: {} (URL: {})",
                             res.text().await.unwrap_or_default(),
                             url
@@ -500,7 +501,7 @@ impl ReasoningAgent {
                 Err(e) => {
                     let is_ephemeral = e.is_timeout() || e.is_connect();
                     if !is_ephemeral || retries >= 4 {
-                        return Err(AgentError::InferenceError(format!(
+                        return Err(CortexError::InferenceError(format!(
                             "Erreur HTTP OpenAI-Compatible: {}",
                             e
                         )));
@@ -515,7 +516,7 @@ impl ReasoningAgent {
         }
     }
 
-    pub async fn run_crucible_distillation(&mut self, prompt: &str) -> Result<String, AgentError> {
+    pub async fn run_crucible_distillation(&mut self, prompt: &str) -> Result<String, CortexError> {
         let system_prompt = "Tu es R2D2, l'Architecte de rang mondial. Raisonne de manière critique, exhaustive, avec un Chain-of-Thought explicite.";
         info!("🔥 [CRUCIBLE] Ingestion de la seed: {}", prompt);
 
@@ -536,7 +537,7 @@ impl ReasoningAgent {
         let v1_text = match v1_text_res {
             GeminiResponse::Text(t) => t,
             _ => {
-                return Err(AgentError::InferenceError(
+                return Err(CortexError::InferenceError(
                     "Crucible doesn't support tools".to_string(),
                 ))
             }
@@ -568,7 +569,7 @@ impl ReasoningAgent {
             let mistral_critique = match mistral_critique_res {
                 GeminiResponse::Text(t) => t,
                 _ => {
-                    return Err(AgentError::InferenceError(
+                    return Err(CortexError::InferenceError(
                         "Crucible doesn't support tools".to_string(),
                     ))
                 }
@@ -611,7 +612,7 @@ impl ReasoningAgent {
             let gemini_defense = match gemini_defense_res {
                 GeminiResponse::Text(t) => t,
                 _ => {
-                    return Err(AgentError::InferenceError(
+                    return Err(CortexError::InferenceError(
                         "Crucible doesn't support tools".to_string(),
                     ))
                 }
@@ -648,7 +649,7 @@ impl ReasoningAgent {
         &mut self,
         prompt: &str,
         tx: tokio::sync::mpsc::Sender<DebateEvent>,
-    ) -> Result<(), AgentError> {
+    ) -> Result<(), CortexError> {
         let _ = tx
             .send(DebateEvent::SystemEvent(
                 "Démarrage du processus de Débat (Consensus Itératif)...".to_string(),
@@ -707,7 +708,7 @@ impl ReasoningAgent {
         {
             GeminiResponse::Text(t) => t,
             _ => {
-                return Err(AgentError::InferenceError(
+                return Err(CortexError::InferenceError(
                     "Debate Mode doesn't support tools yet".to_string(),
                 ))
             }
@@ -778,7 +779,7 @@ impl ReasoningAgent {
             let mistral_critique = match mistral_critique_res {
                 GeminiResponse::Text(t) => t,
                 _ => {
-                    return Err(AgentError::InferenceError(
+                    return Err(CortexError::InferenceError(
                         "Debate doesn't support tools".to_string(),
                     ))
                 }
@@ -844,7 +845,7 @@ impl ReasoningAgent {
             {
                 GeminiResponse::Text(t) => t,
                 _ => {
-                    return Err(AgentError::InferenceError(
+                    return Err(CortexError::InferenceError(
                         "Debate doesn't support tools".to_string(),
                     ))
                 }
@@ -886,9 +887,9 @@ impl ReasoningAgent {
         github_sources: &[String],
         is_tool_response: bool,
         tool_name: &str,
-    ) -> Result<AgenticControlFlow, AgentError> {
+    ) -> Result<AgenticControlFlow, CortexError> {
         if !self.is_active() || self.http_client.is_none() {
-            return Err(AgentError::NotActive);
+            return Err(CortexError::NotActive);
         }
 
         let start = Instant::now();
@@ -1152,13 +1153,13 @@ impl CognitiveAgent for ReasoningAgent {
     }
 
     #[instrument(skip(self))]
-    async fn load(&mut self) -> Result<(), AgentError> {
+    async fn load(&mut self) -> Result<(), CortexError> {
         info!("🔌 [ReasoningAgent] Booting ParadoxEngine (Cloud API Router Mode)...");
 
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(180))
             .build()
-            .map_err(|e| AgentError::LoadError(format!("Reqwest build failed: {}", e)))?;
+            .map_err(|e| CortexError::LoadError(format!("Reqwest build failed: {}", e)))?;
 
         self.http_client = Some(client);
 
@@ -1198,7 +1199,7 @@ impl CognitiveAgent for ReasoningAgent {
         Ok(())
     }
 
-    async fn unload(&mut self) -> Result<(), AgentError> {
+    async fn unload(&mut self) -> Result<(), CortexError> {
         warn!("🔻 [ReasoningAgent] Deactivating ParadoxEngine Router...");
         self.http_client = None;
         if let Some(mut embedder) = self.embedder.take() {
@@ -1213,13 +1214,13 @@ impl CognitiveAgent for ReasoningAgent {
     }
 
     #[instrument(skip_all, name = "ReasoningAgent::generate_thought")]
-    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
         let flow = self
             .generate_thought_agentic(prompt, &[], false, "")
             .await?;
         match flow {
             crate::models::reasoning_agent::AgenticControlFlow::Completed(jsonai) => Ok(jsonai),
-            _ => Err(AgentError::InferenceError(
+            _ => Err(CortexError::InferenceError(
                 "Function calls not supported in synchronous interface".into(),
             )),
         }

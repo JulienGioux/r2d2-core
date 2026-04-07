@@ -60,8 +60,12 @@ impl DreamSimulator {
             .await
         {
             Ok(json_str) => json_str,
+            Err(r2d2_cortex::error::CortexError::InferencePanic(ref msg)) => {
+                warn!("🚨 [MCTS] Défaillance critique interceptée (Panic FFI isolée par Bulkhead) : {}", msg);
+                return Ok(()); // On protège le Démon Circadien de la contagion
+            }
             Err(e) => {
-                warn!("Hallucination ou Timeout de BitNet : {}", e);
+                warn!("Hallucination ou Timeout de l'Agent : {}", e);
                 return Ok(()); // On ne crashe pas la boucle MCTS, on skip
             }
         };
