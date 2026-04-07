@@ -2414,14 +2414,15 @@ async fn new_chat_session(
     let mut startup_script_content = String::new();
 
     if repo_name != "none" {
-        let repo_url = if form.auth_method == "https" && token.is_some() {
-            format!(
-                "https://x-access-token:{}@github.com/{}.git",
-                token.unwrap(),
-                repo_name
-            )
-        } else if form.auth_method == "https" {
-            format!("https://github.com/{}.git", repo_name) // Fallback on public clone
+        let repo_url = if form.auth_method == "https" {
+            if let Some(tok) = &token {
+                format!(
+                    "https://x-access-token:{}@github.com/{}.git",
+                    tok, repo_name
+                )
+            } else {
+                format!("https://github.com/{}.git", repo_name) // Fallback on public clone
+            }
         } else {
             format!("git@github.com:{}.git", repo_name)
         };
@@ -3475,7 +3476,6 @@ struct ForgeStatusResponse {
     epoch: usize,
 }
 
-#[axum::debug_handler]
 async fn get_forge_status(State(state): State<AppState>) -> impl IntoResponse {
     let mut guard = state.forge_state.lock().await;
 
@@ -3506,7 +3506,6 @@ async fn get_forge_status(State(state): State<AppState>) -> impl IntoResponse {
     }
 }
 
-#[axum::debug_handler]
 async fn start_forge(State(state): State<AppState>) -> impl IntoResponse {
     let mut guard = state.forge_state.lock().await;
 
