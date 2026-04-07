@@ -3,11 +3,53 @@
 // Doctrine: Sélection Top-K des experts pour zéro surcharge RAM.
 
 use candle_core::{Result, Tensor};
+use candle_nn::{Init, Linear, Module, VarBuilder};
 use rayon::prelude::*;
 
 /// Trait représentant un "Expert" asymétrique (Ex: Un bloc BitFFN ou BitLinear)
 pub trait Expert {
     fn forward(&self, x: &Tensor) -> Result<Tensor>;
+}
+
+/// 🧠 BitFFN (Feed-Forward Réel)
+/// Topologie SwiGLU destinée à être ternarisée localement lors du QAT-Scratch.
+pub struct BitFFN {
+    w1: Linear,
+    w2: Linear,
+    w3: Linear,
+}
+
+impl BitFFN {
+    pub fn new(hidden_dim: usize, intermediate_size: usize, vb: VarBuilder) -> Result<Self> {
+        let span = tracing::span!(tracing::Level::DEBUG, "bitffn_init");
+        let _enter = span.enter();
+
+        let stdev = (2.0 / (hidden_dim + intermediate_size) as f64).sqrt();
+        let init_xav = Init::Randn { mean: 0.0, stdev };
+
+        // Extraction explicite avec XavierNormal pour QAT
+        let w1_w = vb.get_with_hints((intermediate_size, hidden_dim), "w1.weight", init_xav)?;
+        let w2_w = vb.get_with_hints((hidden_dim, intermediate_size), "w2.weight", init_xav)?;
+        let w3_w = vb.get_with_hints((intermediate_size, hidden_dim), "w3.weight", init_xav)?;
+
+        // Zero-Bias par doctrine "MatMul-Free"
+        let w1 = Linear::new(w1_w, None);
+        let w2 = Linear::new(w2_w, None);
+        let w3 = Linear::new(w3_w, None);
+
+        Ok(Self { w1, w2, w3 })
+    }
+}
+
+impl Expert for BitFFN {
+    fn forward(&self, x: &Tensor) -> Result<Tensor> {
+        // SwiGLU: (x * W1) & Silu * (x * W3) -> * W2
+        let hidden = self.w1.forward(x)?;
+        let swish = candle_nn::ops::silu(&hidden)?;
+        let gate = self.w3.forward(x)?;
+        let gated = swish.broadcast_mul(&gate)?;
+        self.w2.forward(&gated)
+    }
 }
 
 pub struct SparseMoe {
@@ -27,6 +69,43 @@ impl SparseMoe {
             gate_weights: gate_w,
             experts,
         }
+    }
+
+    /// 🚀 Initalisation "QAT-Scratch" avec VarBuilder
+    pub fn new_qat(
+        hidden_dim: usize,
+        num_experts: usize,
+        top_k: usize,
+        vb: VarBuilder,
+    ) -> Result<Self> {
+        // Le routeur
+        let gate_w = vb.get_with_hints(
+            (num_experts, hidden_dim),
+            "gate_weights",
+            Init::Randn {
+                mean: 0.0,
+                stdev: 1.0 / (hidden_dim as f64).sqrt(),
+            },
+        )?;
+
+        let mut experts: Vec<Box<dyn Expert + Send + Sync>> = Vec::with_capacity(num_experts);
+        let intermediate_size = hidden_dim * 4; // Ratio FFN classique
+
+        for i in 0..num_experts {
+            let expert_vb = vb.pp(format!("expert_{i}"));
+            experts.push(Box::new(BitFFN::new(
+                hidden_dim,
+                intermediate_size,
+                expert_vb,
+            )?));
+        }
+
+        Ok(Self {
+            num_experts,
+            top_k,
+            gate_weights: gate_w,
+            experts,
+        })
     }
 
     /// Routeur Top-1 par jeton : Calcule les probabilités MatMul-Free, groupe les jetons

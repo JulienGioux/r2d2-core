@@ -13,7 +13,7 @@ impl Expert for SsmExpertAdapter {
         // Mode Inférence Directe:
         // En vrai Mamba multi-tours, on garde l'état caché (KV Cache équivalent).
         // Ici, on valide la traversée Mathématique sans état initial (h_{t-1} = None).
-        let (y_t, _h_t) = self.block.forward(x, None)?;
+        let (y_t, _h_t) = self.block.forward_scan(x, None)?;
         Ok(y_t)
     }
 }
@@ -30,15 +30,7 @@ fn test_chimera_full_pipeline_integration() -> Result<()> {
     let hadamard = HadamardLayer::new(dim);
 
     // B. Création des Experts Mamba (MatMul-Free)
-    let a_matrix = Tensor::new(
-        &[
-            [1.0f32, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-            [0.0, 0.0, -1.0, 0.0],
-            [0.0, 0.0, 0.0, -1.0],
-        ],
-        &Device::Cpu,
-    )?;
+    let a_matrix = Tensor::new(&[1.0f32, 1.0, -1.0, -1.0], &Device::Cpu)?;
 
     let b_matrix = Tensor::ones((4, 4), candle_core::DType::F32, &Device::Cpu)?;
     let c_matrix = Tensor::ones((4, 4), candle_core::DType::F32, &Device::Cpu)?;

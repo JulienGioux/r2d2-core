@@ -2,6 +2,7 @@ use crate::hadamard::HadamardLayer;
 use crate::moe::{Expert, SparseMoe};
 use crate::ssm::SsmBlock;
 use candle_core::{Device, IndexOp, Result, Tensor, D};
+use candle_nn::{Init, VarBuilder};
 use tracing::{info, instrument};
 
 /// ⚙️ Paramétrage du Modèle R2D2-Chimera
@@ -57,12 +58,12 @@ pub struct ChimeraBlock {
 }
 
 impl ChimeraBlock {
-    pub fn forward(&self, x: &Tensor, prev_state: Option<&Tensor>) -> Result<(Tensor, Tensor)> {
+    pub fn forward(&self, x: &Tensor, prev_state: Option<Vec<f32>>) -> Result<(Tensor, Vec<f32>)> {
         // 1. Stabilisation Quantique
         let h1 = self.hadamard.forward(x)?;
 
-        // 2. Continuous State Space (BitMamba)
-        let (ssm_out, new_state) = self.ssm.forward(&h1, prev_state)?;
+        // 2. Continuous State Space (BitMamba) MLGRU
+        let (ssm_out, new_state) = self.ssm.forward_scan(&h1, prev_state)?;
 
         // 3. Routage dynamique
         let out = self.moe.forward(&ssm_out)?;
@@ -101,8 +102,8 @@ impl ChimeraModel {
 
             let hadamard = HadamardLayer::new(dim);
 
-            // SSM Projections mockées = 1 ou -1
-            let a = Tensor::ones((dim, dim), candle_core::DType::F32, device)?;
+            // SSM Projections mockées
+            let a = Tensor::ones(dim, candle_core::DType::F32, device)?;
             let b = Tensor::ones((dim, dim), candle_core::DType::F32, device)?;
             let c = Tensor::ones((dim, dim), candle_core::DType::F32, device)?;
             let ssm = SsmBlock::new(dim, a, b, c);
@@ -141,42 +142,100 @@ impl ChimeraModel {
         })
     }
 
+    /// 🚀 Initalisation "QAT-Scratch" avec VarBuilder (Haute-Précision FP32 latente)
+    /// Utilisera XavierNormal pour les matrices denses.
+    #[instrument(skip_all)]
+    pub fn new_qat(config: &ChimeraConfig, vb: VarBuilder) -> Result<Self> {
+        info!(
+            "Instanciation de la topologie Inférence ChimeraModel (QAT-Scratch) [{}] layers",
+            config.num_hidden_layers
+        );
+
+        let stdev = 1.0 / (config.hidden_size as f64).sqrt();
+        let init_xavier = Init::Randn { mean: 0.0, stdev };
+
+        let mut layers = Vec::with_capacity(config.num_hidden_layers);
+
+        for i in 0..config.num_hidden_layers {
+            let vb_layer = vb.pp(format!("layer_{i}"));
+
+            let hadamard = HadamardLayer::new(config.hidden_size);
+
+            // SSM & MoE prendront le VarBuilder pour initialiser proprement (HiPPO & Xavier)
+            let ssm = SsmBlock::new_qat(config.hidden_size, vb_layer.pp("ssm"))?;
+            let moe = SparseMoe::new_qat(
+                config.hidden_size,
+                config.num_experts,
+                config.top_k,
+                vb_layer.pp("moe"),
+            )?;
+
+            layers.push(ChimeraBlock { hadamard, ssm, moe });
+        }
+
+        // Embedding réel (sera initialisé avec XavierNormal)
+        let embed = vb.get_with_hints(
+            (config.vocab_size, config.hidden_size),
+            "embed",
+            init_xavier,
+        )?;
+
+        let lm_head = vb.get_with_hints(
+            (config.vocab_size, config.hidden_size),
+            "lm_head",
+            init_xavier,
+        )?;
+
+        Ok(Self {
+            config: config.clone(),
+            layers,
+            embed_mock: embed,
+            lm_head_mock: lm_head,
+        })
+    }
+
     /// Propagation avant sur une séquence de tokens
     #[instrument(skip_all)]
     pub fn forward(
         &self,
         tokens: &Tensor,
-        prev_states: Option<&Vec<Tensor>>,
-    ) -> Result<(Tensor, Vec<Tensor>)> {
+        mut prev_states: Option<Vec<Vec<f32>>>,
+    ) -> Result<(Tensor, Vec<Vec<f32>>)> {
         // Pseudo embedding: On récupère la ligne de `embed_mock` correspondant au Token
         let token_ids = tokens.flatten_all()?.to_vec1::<u32>()?;
         let mut embed_vectors = Vec::new();
         for &id in &token_ids {
-            // Sécurité anti-crash
             let safe_id = if (id as usize) < self.config.vocab_size {
                 id as usize
             } else {
                 0
             };
             let row = self.embed_mock.i((safe_id, ..))?;
-            embed_vectors.push(row.unsqueeze(0)?); // shape [1, hidden_size]
+            embed_vectors.push(row.unsqueeze(0)?);
         }
 
-        let mut x = Tensor::cat(&embed_vectors, 0)?; // shape [seq_len, hidden_size]
+        let mut x = Tensor::cat(&embed_vectors, 0)?;
 
-        let mut next_states = Vec::new();
+        let mut next_states = Vec::with_capacity(self.layers.len());
 
         for (i, layer) in self.layers.iter().enumerate() {
-            let prev_s = prev_states.and_then(|states| states.get(i));
+            // Take ownership of the layer state to recycle its allocation
+            let prev_s = if let Some(ref mut states_vec) = prev_states {
+                if i < states_vec.len() {
+                    let extracted = std::mem::take(&mut states_vec[i]);
+                    Some(extracted)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             let (out_x, new_s) = layer.forward(&x, prev_s)?;
             x = out_x;
             next_states.push(new_s);
         }
 
-        // Pseudo LM Head (Dot product avec lm_head_mock)
-        // x shape: [seq_len, hidden_size]
-        // lm_head_mock: [vocab_size, hidden_size]
-        // x * lm_head_mock.T => [seq_len, vocab_size]
         let logits = x.matmul(&self.lm_head_mock.t()?)?;
 
         Ok((logits, next_states))
@@ -190,25 +249,22 @@ impl ChimeraModel {
         max_tokens: usize,
         device: &Device,
     ) -> Result<Vec<u32>> {
-        info!("🔮 Démarrage de la boucle Chimera Autorégressive (SSM Cache)");
+        info!("🔮 Démarrage de la boucle Chimera Autorégressive (SSM Cache O(1))");
         let mut context = prompt_tokens.to_vec();
 
-        // Le cache Mamba : L'état H_t précédent pour chaque couche.
-        let mut ssm_states: Option<Vec<Tensor>> = None;
+        // Le cache vec recyclé !
+        let mut ssm_states: Option<Vec<Vec<f32>>> = None;
 
-        // Pré-fill : Processer le prompt entier
         if !context.is_empty() {
             let context_tensor = Tensor::new(context.as_slice(), device)?;
             let (logits, states) = self.forward(&context_tensor, None)?;
             ssm_states = Some(states);
 
-            // Pour être rigoureux, en greedy decoding, on prend le argmax du dernier token du prompt
             let seq_len = logits.dim(0)?;
             let next_token_logits = logits.i((seq_len - 1, ..))?;
             let next_token = next_token_logits.argmax(D::Minus1)?.to_scalar::<u32>()?;
             context.push(next_token);
         } else {
-            // Par défaut, générer à partir du token 0 s'il n'y a pas de prompt
             context.push(0);
         }
 
@@ -216,7 +272,9 @@ impl ChimeraModel {
             let last_token = *context.last().unwrap();
             let token_tensor = Tensor::new(&[last_token], device)?;
 
-            let (logits, states) = self.forward(&token_tensor, ssm_states.as_ref())?;
+            // On prend ownership du tuple ssm_states via .take() pour le recycler (Zero-Memory leak)
+            let passed_states = ssm_states.take();
+            let (logits, states) = self.forward(&token_tensor, passed_states)?;
             ssm_states = Some(states);
 
             let next_token = logits.i((0, ..))?.argmax(D::Minus1)?.to_scalar::<u32>()?;
