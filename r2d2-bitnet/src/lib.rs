@@ -1,10 +1,14 @@
 pub mod attention;
 pub mod bitlinear;
+pub mod chimera;
 pub mod ffn;
+pub mod hadamard;
 pub mod model;
+pub mod moe;
 pub mod packer;
 pub mod quantization;
 pub mod rmsnorm;
+pub mod ssm;
 pub mod ternary;
 pub mod training;
 pub mod transformer;
@@ -12,6 +16,7 @@ pub mod weights;
 
 pub use attention::BitSelfAttention;
 pub use bitlinear::BitLinear;
+pub use chimera::{ChimeraConfig, ChimeraModel};
 pub use ffn::BitFFN;
 pub use model::{BitNetConfig, BitNetModel};
 pub use packer::BitNetPacker;

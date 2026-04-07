@@ -2,6 +2,7 @@
 
 pub mod audio_agent;
 pub mod bitnet_agent;
+pub mod chimera_agent;
 pub mod minilm_embedder;
 pub mod paradox_engine;
 pub mod reasoning_agent;

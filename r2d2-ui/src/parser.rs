@@ -5,17 +5,21 @@ use serde_json::Value;
 pub fn extract_markdown(json_resp: &str) -> (String, String, String, String) {
     let mut current_json = json_resp.to_string();
     let mut final_content = current_json.clone();
-    
+
     // Fallback meta values
     let mut model_name = "Paradox Local".to_string();
     let mut consensus = "Unknown".to_string();
     let mut latency = "paradox-multiapi-0".to_string();
-    
+
     let mut depth = 0;
     while let Ok(parsed) = serde_json::from_str::<Value>(&current_json) {
         if depth == 0 {
             // Unpack main envelope attributes
-            if let Some(source) = parsed.get("source").and_then(|s| s.get("ParadoxEngine")).and_then(|s| s.as_str()) {
+            if let Some(source) = parsed
+                .get("source")
+                .and_then(|s| s.get("ParadoxEngine"))
+                .and_then(|s| s.as_str())
+            {
                 model_name = source.to_string();
             }
             if let Some(c) = parsed.get("consensus").and_then(|c| c.as_str()) {
@@ -45,7 +49,7 @@ pub fn extract_markdown(json_resp: &str) -> (String, String, String, String) {
             break; // No content field, stop unpacking
         }
     }
-    
+
     (final_content, model_name, consensus, latency)
 }
 
@@ -86,7 +90,7 @@ mod tests {
         assert_eq!(consensus, "CloudDistillation");
         assert_eq!(latency, "9999");
     }
-    
+
     #[test]
     fn test_raw_string_fallback() {
         let payload = "Just some text, not JSON.";

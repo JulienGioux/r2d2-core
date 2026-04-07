@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="ag-scrollable" style="padding: 24px; color: var(--text-primary);">
+    <h2 style="font-family: var(--font-mono); font-size: 18px; margin-bottom: 24px;">
+        <i data-lucide="hammer" style="width:20px; margin-right:8px; color: var(--accent-orange);"></i> 
+        Sovereign Forge : BitNet QAT
+    </h2>
+
+    <div class="glass-card" style="padding:24px; margin-bottom: 24px;">
+        <h3 style="font-size: 14px; margin-bottom: 12px; color: var(--text-secondary);">
+            <i data-lucide="settings-2" style="width: 14px; margin-right: 8px;"></i>
+            Configuration du Modèle
+        </h3>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                <span style="font-size: 11px; opacity: 0.7;">PARAMÈTRE</span><br/>
+                <strong>Topologie</strong>
+            </div>
+            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                <span style="font-size: 11px; opacity: 0.7;">VALEUR</span><br/>
+                <strong style="color: var(--accent-orange);">1.58-bit Ternary (BitLinear)</strong>
+            </div>
+            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                <span style="font-size: 11px; opacity: 0.7;">PARAMÈTRE</span><br/>
+                <strong>Source de Données</strong>
+            </div>
+            <div style="background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px;">
+                <span style="font-size: 11px; opacity: 0.7;">VALEUR</span><br/>
+                <strong style="color: var(--accent-purple);">payloads.jsonl (Local)</strong>
+            </div>
+        </div>
+
+        <button 
+            hx-post="/api/forge/start" 
+            hx-target="#forge-alert"
+            style="background: var(--accent-orange); color: #fff; padding: 12px 24px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; display: flex; align-items: center;">
+            <i data-lucide="zap" style="width: 16px; margin-right: 8px;"></i>
+            Lancer l'Apprentissage Souverain
+        </button>
+        <div id="forge-alert" style="margin-top: 12px; font-size: 12px; color: var(--accent-green);"></div>
+    </div>
+
+    <!-- Live Telemetry via HTMX Auto-Polling -->
+    <div class="glass-card" style="padding:24px;">
+        <h3 style="font-size: 14px; margin-bottom: 16px; color: var(--text-secondary);">
+            <i data-lucide="activity" style="width: 14px; margin-right: 8px;"></i>
+            Télémétrie en Ligne (Two-Stage AdamW)
+        </h3>
+
+        <div 
+            hx-get="/api/forge/status" 
+            hx-trigger="every 1s" 
+            hx-swap="innerHTML"
+            style="display: flex; gap: 24px;"
+            hx-on:htmx:after-process="
+                // Custom parser to map the JSON response into HTML UI
+                const text = this.innerHTML;
+                try {
+                    const data = JSON.parse(text);
+                    let color = (data.status === 'active') ? 'var(--accent-green)' : 
+                               (data.status === 'finished') ? 'var(--accent-blue)' : 'var(--text-secondary)';
+                    
+                    this.innerHTML = `
+                        <div style='flex: 1; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border-left: 3px solid ${color};'>
+                            <div style='font-size: 11px; opacity: 0.7;'>STATUT</div>
+                            <div style='font-size: 20px; font-family: var(--font-mono); font-weight: bold; text-transform: uppercase;'>${data.status}</div>
+                        </div>
+                        <div style='flex: 1; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border-left: 3px solid var(--accent-purple);'>
+                            <div style='font-size: 11px; opacity: 0.7;'>ÉPOQUE / BATCH</div>
+                            <div style='font-size: 24px; font-family: var(--font-mono); font-weight: bold;'>${data.epoch}</div>
+                        </div>
+                        <div style='flex: 1; background: rgba(0,0,0,0.3); padding: 16px; border-radius: 8px; border-left: 3px solid var(--accent-orange);'>
+                            <div style='font-size: 11px; opacity: 0.7;'>CROSS-ENTROPY LOSS</div>
+                            <div style='font-size: 24px; font-family: var(--font-mono); font-weight: bold;'>${data.loss.toFixed(4)}</div>
+                        </div>
+                    `;
+                    lucide.createIcons();
+                } catch(e) {
+                    // Raw string
+                }
+            "
+        >
+            <div style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center;">
+                <i data-lucide="loader" class="feather-spin" style="width: 14px; margin-right: 8px;"></i>
+                En attente de connexion avec le Démon...
+            </div>
+        </div>
+    </div>
+</div>
+<script>lucide.createIcons();</script>
+{% endblock %}

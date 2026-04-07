@@ -1,0 +1,152 @@
+use crate::agent::{AgentError, CognitiveAgent};
+use async_trait::async_trait;
+use candle_core::Device;
+use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
+use std::sync::Arc;
+use tokenizers::Tokenizer;
+use tracing::{info, instrument};
+
+/// Agent IA Natif de 2ème Génération : R2D2-Chimera (BitMamba/MoE 1.58-bit)
+///
+/// Ce modèle abandonne le graphe Transformer quadratique au profit
+/// d'un Espace d'État (SSM) infini et d'un Routage MoE, garantissant
+/// un traitement MatMul-Free O(N) théorique.
+pub struct ChimeraAgent {
+    name: String,
+    device: Device,
+    model: Option<Arc<ChimeraModel>>,
+    tokenizer: Option<Arc<Tokenizer>>,
+    config: ChimeraConfig,
+}
+
+impl ChimeraAgent {
+    /// Par défaut, instancie le profil Réduit pour valider le code sans exploser la RAM.
+    pub fn new() -> Self {
+        Self {
+            name: "R2D2-Chimera-Native-Mocked".to_string(),
+            device: Device::Cpu,
+            model: None,
+            tokenizer: None,
+            config: ChimeraConfig::reduced(),
+        }
+    }
+
+    pub fn with_gigamodel() -> Self {
+        Self {
+            name: "R2D2-Chimera-Native-3B".to_string(),
+            device: Device::Cpu,
+            model: None,
+            tokenizer: None,
+            config: ChimeraConfig::b1_58_3b(),
+        }
+    }
+}
+
+impl Default for ChimeraAgent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl CognitiveAgent for ChimeraAgent {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_active(&self) -> bool {
+        self.model.is_some()
+    }
+
+    #[instrument(skip(self))]
+    async fn load(&mut self) -> Result<(), AgentError> {
+        info!("🔌 [CORTEX] Chargement structurel du Moteur V2 R2D2-Chimera...");
+
+        let config = self.config.clone();
+
+        info!("   [Chimera] Création du Mock Graphe Local...");
+
+        // 1. Initialisation de l'architecture mathématique pure (Mock des tenseurs)
+        let model = ChimeraModel::new_mocked(&config, &self.device)
+            .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage Chimera: {}", e)))?;
+
+        // 2. Initialisation du Tokenizer Llama3 depuis HF (car on teste bien le décodage)
+        let api_result = hf_hub::api::tokio::ApiBuilder::new()
+            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
+            .build();
+
+        let tokenizer = match api_result {
+            Ok(api) => {
+                let repo = api.model("1bitLLM/bitnet_b1_58-3B".to_string());
+                let tok_res = repo.get("tokenizer.json").await;
+                if let Ok(tok_path) = tok_res {
+                    Tokenizer::from_file(&tok_path).ok()
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        };
+
+        if tokenizer.is_none() {
+            tracing::warn!("Tokenizer HuggingFace introuvable, Inférence restreinte.");
+        }
+
+        self.model = Some(Arc::new(model));
+        self.tokenizer = tokenizer.map(Arc::new);
+
+        info!("✅ [CORTEX] Topologie R2D2-Chimera instanciée avec succès en RAM.");
+
+        Ok(())
+    }
+
+    async fn unload(&mut self) -> Result<(), AgentError> {
+        info!("   [CORTEX] Purge de la structure R2D2-Chimera.");
+        self.model = None;
+        Ok(())
+    }
+
+    #[instrument(skip(self, prompt))]
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, AgentError> {
+        let model = self
+            .model
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or(AgentError::NotActive)?;
+
+        // Si on n'a pas de tokenizer officiel, on va pas crasher le mock, on renverra le prompt.
+        let tokenizer = self.tokenizer.as_ref().map(Arc::clone);
+
+        let device = self.device.clone();
+        let prompt_str = prompt.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            info!("🧠 [Chimera] Réflexion State-Space Continue (spawn_blocking)...");
+
+            let prompt_tokens: Vec<u32> = if let Some(tok) = &tokenizer {
+                let encoding = tok.encode(prompt_str.clone(), false).map_err(|e| {
+                    AgentError::InferenceError(format!("Tokenizer encode error: {}", e))
+                })?;
+                encoding.get_ids().to_vec()
+            } else {
+                vec![0, 1, 2] // Fallback dummy IDs
+            };
+
+            // Limite de max 50 tokens (C'est un mock, pas besoin de surcharger le CPU)
+            let generated_ids = model
+                .generate(&prompt_tokens, 50, &device)
+                .map_err(|e| AgentError::InferenceError(e.to_string()))?;
+
+            if let Some(tok) = &tokenizer {
+                let generated_text = tok.decode(&generated_ids, true).map_err(|e| {
+                    AgentError::InferenceError(format!("Tokenizer decode error: {}", e))
+                })?;
+                Ok(generated_text)
+            } else {
+                Ok(format!("(Mock Decode) IDs: {:?}", generated_ids))
+            }
+        })
+        .await
+        .map_err(|e| AgentError::InferenceError(format!("Thread local panic: {}", e)))?
+    }
+}

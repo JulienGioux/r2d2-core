@@ -108,11 +108,18 @@ impl ReasoningAgent {
     }
 
     pub fn set_provider(&mut self, format: &str) {
-        self.provider = match format {
-            "gemini" => ModelProvider::GeminiFlash,
-            "universal" | "mistral" | "openai" | "ollama" => ModelProvider::OpenAICompatible,
-            "consensus" => ModelProvider::Consensus,
-            _ => ModelProvider::ParadoxLocal,
+        self.provider = if format.starts_with("gemini") {
+            ModelProvider::GeminiFlash
+        } else if format.starts_with("mistral")
+            || format.starts_with("universal")
+            || format.starts_with("openai")
+            || format.starts_with("ollama")
+        {
+            ModelProvider::OpenAICompatible
+        } else if format == "consensus" {
+            ModelProvider::Consensus
+        } else {
+            ModelProvider::ParadoxLocal
         };
     }
 
@@ -190,7 +197,24 @@ impl ReasoningAgent {
         if inject_tools {
             let mcp_lock = self.mcp_hub.lock().await;
             if let Some(mcp) = &*mcp_lock {
-                let dynamic_tools = mcp.get_gemini_tools();
+                let mut dynamic_tools = mcp.get_gemini_tools();
+
+                // Add Sovereign Tools unconditionally
+                dynamic_tools.push(json!({
+                    "name": "r2d2_workspace___run_command",
+                    "description": "Exécute une commande shell isolée dans le conteneur du workspace courant et retourne le stdout/stderr. Doit être privilégié avant toute modification de fichier.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "La commande Bash/Shell à exécuter"
+                            }
+                        },
+                        "required": ["command"]
+                    }
+                }));
+
                 if !dynamic_tools.is_empty() {
                     payload["tools"] = json!([
                         {
@@ -306,16 +330,20 @@ impl ReasoningAgent {
         system_prompt: &str,
         history: &[ChatMessage],
         has_tools: bool,
+        override_url: Option<&str>,
+        override_model_name: Option<&str>,
     ) -> Result<GeminiResponse, AgentError> {
         let api_key = Vault::get_api_key("UNIVERSAL_API_KEY")
             .unwrap_or_else(|| Vault::get_api_key("MISTRAL_API_KEY").unwrap_or_default());
 
-        let mut url = Vault::get_api_key("UNIVERSAL_API_BASE").unwrap_or_else(|| {
-            if Vault::get_api_key("MISTRAL_API_KEY").is_some() {
-                "https://api.mistral.ai/v1".to_string()
-            } else {
-                "http://localhost:11434/v1".to_string()
-            }
+        let mut url = override_url.map(|s| s.to_string()).unwrap_or_else(|| {
+            Vault::get_api_key("UNIVERSAL_API_BASE").unwrap_or_else(|| {
+                if Vault::get_api_key("MISTRAL_API_KEY").is_some() {
+                    "https://api.mistral.ai/v1".to_string()
+                } else {
+                    "http://localhost:11434/v1".to_string()
+                }
+            })
         });
 
         // Ensure /chat/completions suffix
@@ -345,8 +373,12 @@ impl ReasoningAgent {
             }
         }
 
-        let model_name = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
-            .unwrap_or_else(|| "mistral-large-latest".to_string());
+        let model_name = override_model_name
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+                    .unwrap_or_else(|| "mistral-large-latest".to_string())
+            });
 
         let mut payload = json!({
             "model": model_name,
@@ -357,7 +389,24 @@ impl ReasoningAgent {
         if has_tools {
             let mcp_lock = self.mcp_hub.lock().await;
             if let Some(mcp) = &*mcp_lock {
-                let dynamic_tools = mcp.get_gemini_tools();
+                let mut dynamic_tools = mcp.get_gemini_tools();
+
+                // Add Sovereign Tools unconditionally
+                dynamic_tools.push(json!({
+                    "name": "r2d2_workspace___run_command",
+                    "description": "Exécute une commande shell isolée dans le conteneur du workspace courant et retourne le stdout/stderr. Doit être privilégié avant toute modification de fichier.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": {
+                                "type": "string",
+                                "description": "La commande Bash/Shell à exécuter"
+                            }
+                        },
+                        "required": ["command"]
+                    }
+                }));
+
                 if !dynamic_tools.is_empty() {
                     let mut openai_tools = Vec::new();
                     for dt in dynamic_tools {
@@ -514,7 +563,7 @@ impl ReasoningAgent {
                 iteration
             );
             let mistral_critique_res = self
-                .call_openai_compatible(system_prompt, &mistral_history, false)
+                .call_openai_compatible(system_prompt, &mistral_history, false, None, None)
                 .await?;
             let mistral_critique = match mistral_critique_res {
                 GeminiResponse::Text(t) => t,
@@ -724,7 +773,7 @@ impl ReasoningAgent {
                 )))
                 .await;
             let mistral_critique_res = self
-                .call_openai_compatible(&system_prompt, &mistral_history, false)
+                .call_openai_compatible(&system_prompt, &mistral_history, false, None, None)
                 .await?;
             let mistral_critique = match mistral_critique_res {
                 GeminiResponse::Text(t) => t,
@@ -872,10 +921,10 @@ impl ReasoningAgent {
         let mut allowed_repos_instruction = String::new();
         if !github_sources.is_empty() {
             allowed_repos_instruction = format!(
-                "\n\nL'utilisateur a explicitement ajouté ces dépôts GitHub au contexte : {:?}.\n\
-                 POUVOIR SPECIAL ACTIF : Tu disposes d'outils (Function Calling) pour interagir avec ces dépôts.\n\
-                 Dès que l'utilisateur te pose une question sur son code, tu DOIS appeler tes outils de recherche ou de lecture de fichiers au travers de l'API native JSON 'Function Calling'.\n\
-                 N'imagine pas le contenu des fichiers et ne simule jamais de code Python type `print(outil(...))`.",
+                "\n\nL'utilisateur te fournit explicitement l'accès à ces ressources ou chemins locaux : {:?}.\n\
+                 POUVOIR SPECIAL ACTIF : Tu disposes d'outils (Function Calling) pour explorer et interagir avec ces éléments.\n\
+                 Privilégie ABSOLUMENT l'outil 'r2d2_workspace___run_command' (tes mains dans le terminal local) pour opérer (ex: `ls <chemin>`, ou `cat <fichier>`).\n\
+                 N'imagine pas le contenu des fichiers et ne simule jamais de code de type `print(outil(...))`.",
                  github_sources
             );
         }
@@ -890,7 +939,8 @@ impl ReasoningAgent {
              \n\
              == REGLE DE REPONSE ==\n\
              - Tu dois interagir avec le Chef de manière organique et directe.\n\
-             - Si tu as besoin d'informations (Github, Système...), INVOQUE TES OUTILS (Function Call) SANS RETENUE ni hésitation.\n\
+             - Si tu as besoin d'informations, INVOQUE TES OUTILS (Function Call) SANS RETENUE ni hésitation.\n\
+             - Le dépôt courant est cloné localement ! Comporte-toi comme un ingénieur Unix (utilise `pwd`, `ls`, `cat` via `r2d2_workspace___run_command` en priorité absolue).\n\
              - N'utilise jamais de formatage texte bash ou python pour simuler des actions.",
              context,
              allowed_repos_instruction
@@ -949,7 +999,7 @@ impl ReasoningAgent {
                 }
                 match self.provider {
                     ModelProvider::GeminiFlash => {
-                        let has_tools = !github_sources.is_empty();
+                        let has_tools = true; // R2D2 Sovereign Tools (Workspace, etc.) must always be active
                         match self
                             .call_gemini(&system_prompt, &self.history, has_tools)
                             .await?
@@ -978,9 +1028,15 @@ impl ReasoningAgent {
                         }
                     }
                     ModelProvider::OpenAICompatible => {
-                        let has_tools = !github_sources.is_empty();
+                        let has_tools = true; // R2D2 Sovereign Tools (Workspace, etc.) must always be active
                         match self
-                            .call_openai_compatible(&system_prompt, &self.history, has_tools)
+                            .call_openai_compatible(
+                                &system_prompt,
+                                &self.history,
+                                has_tools,
+                                None,
+                                None,
+                            )
                             .await?
                         {
                             GeminiResponse::FunctionCall { name, args } => {
@@ -1016,8 +1072,34 @@ impl ReasoningAgent {
                             .to_string(),
                     ),
                     ModelProvider::ParadoxLocal => {
-                        let text = format!("**[MOCK LOCAL]** Chef, la Brique VII 'ParadoxEngine 1.58b' Bare-Metal nécessite des poids GGUF pour inférer. Pour l'heure, ceci est un échafaudage d'attente zero-dependency.\n\nMemoire Recall: {} ...", context);
-                        ("ParadoxLocal (Mock)".to_string(), "MockSynthesis", text)
+                        let has_tools = true; // R2D2 Sovereign Tools (Workspace, etc.) must always be active
+                        let local_model = Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+                            .unwrap_or_else(|| "llama3".to_string());
+
+                        match self
+                            .call_openai_compatible(
+                                &system_prompt,
+                                &self.history,
+                                has_tools,
+                                Some("http://localhost:11434/v1"),
+                                Some(&local_model),
+                            )
+                            .await?
+                        {
+                            GeminiResponse::FunctionCall { name, args } => {
+                                self.history.push(ChatMessage {
+                                    role: MessageRole::FunctionCall,
+                                    text: serde_json::to_string(&args).unwrap_or_default(),
+                                    function_name: Some(name.clone()),
+                                });
+                                return Ok(AgenticControlFlow::FunctionCallRequest { name, args });
+                            }
+                            GeminiResponse::Text(t) => (
+                                format!("ParadoxLocal (Ollama:{})", local_model),
+                                "EdgeLocalSynthesis",
+                                t,
+                            ),
+                        }
                     }
                 }
             }

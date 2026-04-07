@@ -4,14 +4,14 @@
 
 L'intégralité du traitement tensoriel s'effectue sans aucune unité arithmétique de multiplication flottante (FPU), permettant à l'Agent Cognitif de fonctionner avec un rendement énergétique et mémoire optimal (Edge AI).
 
-## 🚀 Architecture Topologique
+## 🚀 Architecture Topologique (Le Moteur "Chimera V2")
 
-Le moteur est construit de zéro ("from scratch") en Rust (Zero-Trust Memory) et s'articule autour de quatre primitives fondamentales :
+Le moteur a été repensé "from scratch" en Rust (Zero-Trust Memory) pour fusionner 3 technologies ultra-performantes, sans FPU, en exploitant l'auto-vectorisation (AVX-512) et le Multi-threading CPU via `Rayon` :
 
-- **`BitLinear`** : Le cœur du réseau. Remplace la matrice de poids Dense classique par une matrice packagée où chaque poids prend la valeur `{-1, 0, 1}`. L'opération matricielle est transformée en une pure addition/soustraction SIMD "Logic-Only".
-- **`BitSelfAttention`** : Mécanisme d'attention Multi-Head. Les projections `Q, K, V` s'effectuent via les couches `BitLinear`.
-- **`BitFFN` (SwiGLU)** : Réseau Feed-Forward ternarisé pour la propagation non linéaire.
-- **`BitTransformerBlock`** : Un bloc complet combinant Attention, FFN et Normalisation (RMSNorm).
+- **`ssm.rs` (BitMamba)** : Oubliez la complexité quadratique ($O(N^2)$) des Transformers d'Attention. BitMamba utilise une méthode par Espaces d'États avec projection Poids-Ternaires. Complètement indépendant en mémoire, aucune allocation superflue (Zéro OOM).
+- **`moe.rs` (Sparse Mixture of Experts)** : Le Scatter/Gather ultime. Un routeur Top-K qui active dynamiquement le bon chemin neuronal par jeton. L'algorithme "Zéro-Bloat" permet d'avoir 100 milliards de paramètres ternaires sur le côté, mais une consommation RAM statique infime à l'appel.
+- **`hadamard.rs` (Stabilisateur Quantique)** : Intégration de la Fast Walsh-Hadamard Transform (FWHT), agissant comme un dôme lisseur sur les activations aberrantes ("Outliers"), indispensable pour que BitMamba conserve son exactitude en ternaire sans crash de dérivation.
+- **`BitLinear`** (Legacy Support) : Couche linéaire dense avec packaging scalaire ternaire.
 
 ## 💡 Le Paradigme 1.58-bit (AbsMean Quantization)
 

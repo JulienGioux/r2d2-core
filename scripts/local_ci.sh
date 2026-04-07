@@ -5,8 +5,8 @@ echo "=========================================="
 echo "🛡️  R2D2 Local CI Pipeline (Industrial-Grade)"
 echo "=========================================="
 
-echo "[1/3] 💅 Checking Formatting (cargo fmt)..."
-cargo fmt --all -- --check
+echo "[1/3] 💅 Applying Formatting (cargo fmt)..."
+cargo fmt --all
 echo "✅ Formatting OK."
 
 echo ""

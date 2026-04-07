@@ -153,6 +153,18 @@ impl McpHub {
     }
 }
 
+pub struct ProviderStatus {
+    pub name: String,
+    pub status: String,
+}
+
+pub async fn health_check() -> Vec<ProviderStatus> {
+    // Just wrap list_active_providers for now
+    // Wait, list_active_providers() returns Vec<String> probably?
+    // Let's implement health_check stub
+    vec![]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,16 +256,4 @@ mod tests {
             .pointer("/properties/nested_object/properties/inner/default")
             .is_none());
     }
-}
-
-pub struct ProviderStatus {
-    pub name: String,
-    pub status: String,
-}
-
-pub async fn health_check() -> Vec<ProviderStatus> {
-    // Just wrap list_active_providers for now
-    // Wait, list_active_providers() returns Vec<String> probably?
-    // Let's implement health_check stub
-    vec![]
 }

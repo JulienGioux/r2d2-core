@@ -1,6 +1,3 @@
-use anyhow::Result;
-use r2d2_sensory::stimulus::Stimulus;
-
 /// Un utilitaire pour le chunking dynamique de textes pour le RAG
 pub struct TextChunker;
 
@@ -20,7 +17,8 @@ impl TextChunker {
                 let mut search_idx = end;
                 while search_idx > i && search_idx > end - overlap {
                     // Respecter les frontières sémantiques basiques (fin de phrase ou de ligne)
-                    if words[search_idx - 1].ends_with('.') || words[search_idx - 1].ends_with('\n') {
+                    if words[search_idx - 1].ends_with('.') || words[search_idx - 1].ends_with('\n')
+                    {
                         end = search_idx;
                         break;
                     }

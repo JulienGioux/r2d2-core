@@ -5,7 +5,7 @@ use axum::{
     routing::{delete, get, post},
     Form, Router,
 };
-use serde::Deserialize;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,6 +15,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use async_stream::stream;
 use axum::response::sse::{Event, Sse};
 // Removed ws imports
+use r2d2_bitnet::training::batch::TrainingState;
 use r2d2_blackboard::PostgresBlackboard;
 use r2d2_circadian::sensory::VibeVector;
 use r2d2_circadian::CircadianDaemon;
@@ -31,13 +32,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
 mod chat_history;
-mod logger;
 mod github_api;
+mod logger;
 mod parser;
 mod terminal;
 
 #[derive(Clone)]
-struct AppState {
+pub struct AppState {
     agent: Arc<Mutex<ReasoningAgent>>,
     pending_debate_prompt: Arc<Mutex<Option<String>>>,
     current_chat_session: Arc<Mutex<String>>,
@@ -49,12 +50,13 @@ struct AppState {
     blackboard: Arc<PostgresBlackboard>,
     hf_models_cache: Arc<tokio::sync::RwLock<Vec<String>>>,
     chat_status: Arc<tokio::sync::RwLock<String>>,
+    forge_state: Arc<tokio::sync::Mutex<Option<tokio::sync::watch::Receiver<TrainingState>>>>,
 }
 
 #[derive(Template)]
 #[template(path = "base.html")]
 struct IndexTemplate {
-    status: &'static str,
+    _status: &'static str,
 }
 
 #[derive(Template)]
@@ -89,6 +91,10 @@ struct DashboardTemplate {
 #[derive(Template)]
 #[template(path = "cortex.html")]
 struct CortexTemplate {}
+
+#[derive(Template)]
+#[template(path = "forge.html")]
+struct ForgeTemplate {}
 
 #[derive(Template)]
 #[template(path = "chat.html")]
@@ -227,7 +233,7 @@ pub async fn list_local_hf_models() -> Vec<String> {
 }
 
 #[derive(Template)]
-#[template(path = "chat_response.html")]
+#[template(path = "chat_response.html", escape = "none")]
 struct ChatResponseTemplate {
     mcp_feedback: String,
     prompt: String,
@@ -239,14 +245,15 @@ struct ChatResponseTemplate {
     is_fact: bool,
     belief_state: f64,
     belief_pct: String,
+    is_history: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(serde::Deserialize)]
 struct ChatInput {
     provider: String,
     prompt: String,
     #[serde(default)]
-    github_sources: String,
+    context_resource_item: Vec<String>,
 }
 
 #[tokio::main]
@@ -424,6 +431,7 @@ async fn main() -> anyhow::Result<()> {
         blackboard: blackboard.clone(),
         hf_models_cache: Arc::new(tokio::sync::RwLock::new(Vec::new())),
         chat_status: Arc::new(tokio::sync::RwLock::new(String::new())),
+        forge_state: Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     let cache_clone = shared_state.hf_models_cache.clone();
@@ -436,25 +444,45 @@ async fn main() -> anyhow::Result<()> {
         .route("/widgets/status", get(get_status_widget))
         .route("/chat", post(handle_chat))
         .route("/chat/status", get(get_chat_status))
+        .route(
+            "/chat/:id/assimilation_status",
+            get(get_chat_assimilation_status),
+        )
         .route("/chat/history/list", get(get_history_list))
         .route("/chat/history/:id", get(load_chat_history))
         .route("/chat/new_modal", get(get_new_session_modal))
         .route("/chat/history/:id", delete(delete_chat_session))
+        .route("/workspace/delete/:id", delete(delete_workspace_container))
         .route("/chat/history/:id/rename", post(rename_chat_session))
         .route("/chat/history/:id/pin", post(pin_chat_session))
         .route("/chat/history/:id/info", get(info_chat_session))
         .route("/chat/history/:id/debate_config", get(get_debate_config_ui))
-        .route("/chat/history/:id/debate_config", post(post_debate_config_ui))
-        .route("/chat/current/debate_config", get(get_current_debate_config))
-        .route("/chat/current/debate_config", post(post_current_debate_config))
-        .route("/chat/current/workspace_config", get(get_workspace_config_ui))
-        .route("/chat/current/workspace_config", post(post_workspace_config_ui))
+        .route(
+            "/chat/history/:id/debate_config",
+            post(post_debate_config_ui),
+        )
+        .route(
+            "/chat/current/debate_config",
+            get(get_current_debate_config),
+        )
+        .route(
+            "/chat/current/debate_config",
+            post(post_current_debate_config),
+        )
+        .route(
+            "/chat/current/workspace_config",
+            get(get_workspace_config_ui),
+        )
+        .route(
+            "/chat/current/workspace_config",
+            post(post_workspace_config_ui),
+        )
         .route("/chat/new", post(new_chat_session))
         .route("/chat/stream", get(handle_sse_stream))
         .route("/logs/tail", get(tail_logs))
         .route("/system/purge", post(system_purge))
-        .route("/system/airgap", post(system_airgap_mock))
-        .route("/system/heuristic", post(system_heuristic_mock))
+        .route("/system/airgap", post(system_airgap_toggle))
+        .route("/system/heuristic", post(system_heuristic_update))
         .route("/admin/vampire/queue/list", get(list_vampire_jobs))
         .route("/admin/vampire/queue/add", post(add_vampire_job))
         .route("/admin/vampire/queue/delete/:id", post(delete_vampire_job))
@@ -473,7 +501,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/store/assign_role", post(assign_model_role))
         .route("/store/delete", post(delete_local_hf_model))
         .route("/ws/terminal/:session_id", get(ws_terminal_handler))
-        .route("/ws/ai_terminal/:session_id", get(ws_ai_terminal_handler));
+        .route("/ws/ai_terminal/:session_id", get(ws_ai_terminal_handler))
+        .route("/forge/start", post(start_forge))
+        .route("/forge/status", get(get_forge_status));
 
     let app = Router::new()
         .route("/", get(render_index))
@@ -490,6 +520,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/ui/editor/logs", get(render_editor_logs))
         .route("/ui/chat", get(render_chat))
         .route("/ui/cortex", get(render_cortex))
+        .route("/ui/forge", get(render_forge))
         .route("/ui/memory", get(render_memory))
         .route("/ui/store", get(render_store))
         .route("/ui/store/cloud", get(render_cloud_models)) // Legacy helper
@@ -500,7 +531,9 @@ async fn main() -> anyhow::Result<()> {
         )
         .nest_service(
             "/ag-framework",
-            ServeDir::new(std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ag-vanilla-ui")),
+            ServeDir::new(
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ag-vanilla-ui"),
+            ),
         )
         .with_state(shared_state);
 
@@ -515,21 +548,29 @@ async fn main() -> anyhow::Result<()> {
 
 async fn render_index() -> impl IntoResponse {
     let tmpl = IndexTemplate {
-        status: "ACTIF (Air-Gapped)",
+        _status: "ACTIF (Air-Gapped)",
     };
     Html(tmpl.render().unwrap())
 }
 
-async fn render_sidebar_system() -> impl IntoResponse { Html(SidebarSystemTemplate {}.render().unwrap()) }
+async fn render_sidebar_system() -> impl IntoResponse {
+    Html(SidebarSystemTemplate {}.render().unwrap())
+}
 
 async fn render_sidebar_store(State(state): State<AppState>) -> impl IntoResponse {
     let local_models = state.hf_models_cache.read().await.clone();
     Html(SidebarStoreTemplate { local_models }.render().unwrap())
 }
 
-async fn render_sidebar_memory() -> impl IntoResponse { Html(SidebarMemoryTemplate {}.render().unwrap()) }
-async fn render_sidebar_mcp() -> impl IntoResponse { Html(SidebarMcpTemplate {}.render().unwrap()) }
-async fn render_sidebar_settings() -> impl IntoResponse { Html(SidebarSettingsTemplate {}.render().unwrap()) }
+async fn render_sidebar_memory() -> impl IntoResponse {
+    Html(SidebarMemoryTemplate {}.render().unwrap())
+}
+async fn render_sidebar_mcp() -> impl IntoResponse {
+    Html(SidebarMcpTemplate {}.render().unwrap())
+}
+async fn render_sidebar_settings() -> impl IntoResponse {
+    Html(SidebarSettingsTemplate {}.render().unwrap())
+}
 
 #[derive(Template)]
 #[template(path = "editor_model.html")]
@@ -537,11 +578,15 @@ struct ModelEditorTemplate {
     pub id: String,
 }
 
-async fn render_editor_model(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn render_editor_model(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     Html(ModelEditorTemplate { id }.render().unwrap())
 }
 
-async fn render_editor_memory(axum::extract::Path(id): axum::extract::Path<String>) -> impl IntoResponse {
+async fn render_editor_memory(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
     Html(format!("<div class='ag-scrollable' style='padding: 24px; color: var(--text-primary);'><h2 style='font-family: var(--font-mono); font-size: 14px; margin-bottom: 24px;'><i data-lucide='database' style='width:16px; margin-right:8px;'></i>Memory Axiom View : {}</h2><div class='glass-card' style='padding:16px; font-size: 12px; color: var(--text-secondary);'>Retrieval stream closed. Detailed axiom vector inspection is offline.</div></div><script>lucide.createIcons();</script>", id))
 }
 
@@ -550,7 +595,8 @@ async fn render_editor_mcp() -> impl IntoResponse {
 }
 
 async fn render_editor_logs() -> impl IntoResponse {
-    let template = std::fs::read_to_string("r2d2-ui/templates/logs.html").unwrap_or_else(|_| "Template Error".to_string());
+    let template = std::fs::read_to_string("r2d2-ui/templates/logs.html")
+        .unwrap_or_else(|_| "Template Error".to_string());
     Html(template)
 }
 
@@ -566,32 +612,35 @@ async fn tail_logs() -> impl IntoResponse {
 
     let mut html_lines = String::new();
     if log_file.is_empty() {
-         html_lines.push_str("<div>ERROR: No log file found in logs/</div>");
+        html_lines.push_str("<div>ERROR: No log file found in logs/</div>");
     } else {
-         let tail_out = std::process::Command::new("tail")
+        let tail_out = std::process::Command::new("tail")
             .arg("-n")
             .arg("200")
             .arg(&log_file)
             .output()
             .expect("Failed to tail");
 
-         let lines = String::from_utf8_lossy(&tail_out.stdout);
-         for line in lines.lines() {
-             let mut color = "#a1a1aa";
-             if line.contains(" ERROR ") || line.contains(" 🚨 ") {
-                 color = "#ef4444";
-             } else if line.contains(" WARN ") {
-                 color = "#f59e0b";
-             } else if line.contains(" INFO ") {
-                 color = "#3b82f6";
-             } else if line.contains(" DEBUG ") {
-                 color = "#2dd4bf";
-             }
+        let lines = String::from_utf8_lossy(&tail_out.stdout);
+        for line in lines.lines() {
+            let mut color = "#a1a1aa";
+            if line.contains(" ERROR ") || line.contains(" 🚨 ") {
+                color = "#ef4444";
+            } else if line.contains(" WARN ") {
+                color = "#f59e0b";
+            } else if line.contains(" INFO ") {
+                color = "#3b82f6";
+            } else if line.contains(" DEBUG ") {
+                color = "#2dd4bf";
+            }
 
-             // rudimentary HTML escaping
-             let safe_line = line.replace("<", "&lt;").replace(">", "&gt;");
-             html_lines.push_str(&format!("<div style='color: {}'>{}</div>", color, safe_line));
-         }
+            // rudimentary HTML escaping
+            let safe_line = line.replace("<", "&lt;").replace(">", "&gt;");
+            html_lines.push_str(&format!(
+                "<div style='color: {}'>{}</div>",
+                color, safe_line
+            ));
+        }
     }
 
     Html(html_lines)
@@ -624,15 +673,42 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
     let memory_vectors_count = agent.memory_vectors_count();
     let active_agents_count = if agent.is_active() { 3 } else { 0 };
 
-    // Extracted / Mocked Deep Telemetry
-    let vram_limit_gb = "3.5".to_string();
-    let vram_used_gb = if agent.is_active() {
-        "0.8".to_string()
-    } else {
-        "0.0".to_string()
-    }; // BitNet 1.58b weight size approx
-    let vram_percent = if agent.is_active() { 22 } else { 0 };
-    let active_model = "r2d2_bitnet_1_58b".to_string();
+    // Fetch VRAM via nvidia-smi if available
+    let out = std::process::Command::new("nvidia-smi")
+        .args([
+            "--query-gpu=memory.total,memory.used",
+            "--format=csv,noheader,nounits",
+        ])
+        .output();
+    let mut vram_limit_gb = "0.0".to_string();
+    let mut vram_used_gb = "0.0".to_string();
+    let mut vram_percent = 0;
+
+    if let Ok(cmd_result) = out {
+        if cmd_result.status.success() {
+            let stdout = String::from_utf8_lossy(&cmd_result.stdout);
+            if let Some(parts) = stdout.split('\n').next() {
+                let vals: Vec<&str> = parts.split(',').collect();
+                if vals.len() == 2 {
+                    if let (Ok(total), Ok(used)) =
+                        (vals[0].trim().parse::<f64>(), vals[1].trim().parse::<f64>())
+                    {
+                        let total_gb = total / 1024.0;
+                        let used_gb = used / 1024.0;
+                        vram_limit_gb = format!("{:.1}", total_gb);
+                        vram_used_gb = format!("{:.1}", used_gb);
+                        if total > 0.0 {
+                            vram_percent = ((used / total) * 100.0) as i32;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let active_model = r2d2_cortex::security::vault::Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+        .unwrap_or_else(|| "mistral-large-latest".to_string());
+
     let inference_tps = if agent.is_active() { 45.2 } else { 0.0 };
     let scale_factor = 2.45; // Beta quantization factor
 
@@ -686,26 +762,55 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                 let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
                 let r = repo.replace("github-async://", "");
                 active_sources_html.push_str(&format!(
-                    "<div id=\"{}\" class=\"context-pill context-pill-async\">\
-                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
-                        <span>{} (Async Queued)</span>\
-                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
-                            <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
+                    "<div id=\"{}\" class=\"context-pill border-glow\" style=\"display:flex; align-items:center; gap:8px; padding: 6px 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 6px;\">\
+                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px; color: var(--text-secondary);\"></i>\
+                        <span style=\"flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;\">{} (Async Queued)</span>\
+                        <i data-lucide=\"brain\" style=\"width: 14px; height: 14px; margin: 0 4px; color: var(--text-tertiary);\"></i>\
+                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"path\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\" style=\"background:none; border:none; cursor:pointer; padding: 0; outline: none; display: flex; align-items: center;\">\
+                            <i data-lucide=\"x\" style=\"width: 14px; height: 14px; color:var(--text-tertiary);\"></i>\
                         </button>\
-                        <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
-                    </div>", id_val, r, repo, id_val, repo));
+                        <input type=\"hidden\" name=\"context_resource_item\" value=\"{}|{}|grey\">\
+                    </div>", id_val, r, repo, id_val, "github", repo));
             } else {
                 let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
                 active_sources_html.push_str(&format!(
-                    "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
-                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
-                        <span>{} (Cognitive Tool)</span>\
-                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
-                            <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
+                    "<div id=\"{}\" class=\"context-pill border-glow\" style=\"display:flex; align-items:center; gap:8px; padding: 6px 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 6px;\">\
+                        <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px; color: var(--text-secondary);\"></i>\
+                        <span style=\"flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;\">{} (Cognitive Tool)</span>\
+                        <i data-lucide=\"brain\" style=\"width: 14px; height: 14px; margin: 0 4px; color: var(--text-tertiary);\"></i>\
+                        <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"path\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\" style=\"background:none; border:none; cursor:pointer; padding: 0; outline: none; display: flex; align-items: center;\">\
+                            <i data-lucide=\"x\" style=\"width: 14px; height: 14px; color:var(--text-tertiary);\"></i>\
                         </button>\
-                        <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
-                    </div>", id_val, repo, repo, id_val, repo));
+                        <input type=\"hidden\" name=\"context_resource_item\" value=\"{}|{}|grey\">\
+                    </div>", id_val, repo, repo, id_val, "github", repo));
             }
+        }
+
+        for res in &session.context_resources {
+            let id_val = format!("ctx-{}", uuid::Uuid::new_v4().simple());
+            let lucide_icon = match res.res_type.as_str() {
+                "github" => "github",
+                "folder" => "folder",
+                "web" => "globe",
+                _ => "file",
+            };
+            let brain_color_style = match res.priority.as_str() {
+                "green" => "color: #2ecc71;", // RAG Vector
+                "gold" => "color: #f39c12; text-shadow: 0 0 5px rgba(243, 156, 18, 0.5);", // Prioritized System
+                _ => "color: var(--text-tertiary);", // Grey MCP
+            };
+            active_sources_html.push_str(&format!(
+                "<div id=\"{}\" class=\"context-pill border-glow\" style=\"display:flex; align-items:center; gap:8px; padding: 6px 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 6px;\">\
+                    <i data-lucide=\"{}\" style=\"width: 14px; height: 14px; color: var(--text-secondary);\"></i>\
+                    <span style=\"flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;\">{}</span>\
+                    <i data-lucide=\"brain\" style=\"width: 14px; height: 14px; margin: 0 4px; {}\"></i>\
+                    <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"path\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\" style=\"background:none; border:none; cursor:pointer; padding: 0; outline: none; display: flex; align-items: center;\">\
+                        <i data-lucide=\"x\" style=\"width: 14px; height: 14px; color:var(--text-tertiary);\"></i>\
+                    </button>\
+                    <input type=\"hidden\" name=\"context_resource_item\" value=\"{}|{}|{}\">\
+                </div>",
+                id_val, lucide_icon, res.path, brain_color_style, res.path, id_val, res.res_type, res.path, res.priority
+            ));
         }
 
         let mut i = 0;
@@ -757,6 +862,7 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                         belief_pct,
                         belief_state,
                         is_fact,
+                        is_history: true,
                     }
                     .render()
                     .unwrap(),
@@ -779,8 +885,14 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
         .filter(|n| n.contains("/"))
         .collect();
 
-    // Hardcoded permanent repository for the project core architecture
-    final_library_repos.push("JulienGioux/r2d2-core".to_string());
+    // Use working directory to seed the architecture workspace context securely
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let core_repo = cwd
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "r2d2-core".to_string());
+
+    final_library_repos.push(core_repo);
 
     final_library_repos.sort();
     final_library_repos.dedup();
@@ -1262,8 +1374,23 @@ async fn render_admin() -> impl IntoResponse {
     Html(AdminTemplate { keys }.render().unwrap())
 }
 
-async fn system_purge() -> impl IntoResponse {
-    Html(r#"<div style='color: #2ecc71; padding: 12px; border: 1px solid #2ecc71; border-radius: 4px; background: rgba(46, 204, 113, 0.1);'><i data-lucide='check' style='display:inline-block; vertical-align:middle;'></i> VRAM Purgée (Mock). Cache nettoyé.</div><script>lucide.createIcons(); setTimeout(()=>document.querySelector(".dashboard-grid").innerHTML="", 3000);</script>"#.to_string())
+async fn system_purge(State(state): State<AppState>) -> impl IntoResponse {
+    let mut agent = state.agent.lock().await;
+    let _ = agent.unload().await;
+
+    // Attempt local Ollama unload
+    let local_model = r2d2_cortex::security::vault::Vault::get_api_key("UNIVERSAL_MODEL_NAME")
+        .unwrap_or_else(|| "llama3".to_string());
+    let _ = reqwest::Client::new()
+        .post("http://localhost:11434/api/generate")
+        .json(&serde_json::json!({"model": local_model, "keep_alive": 0}))
+        .send()
+        .await;
+
+    // Softly flush OS RAM buffers (WSL limits)
+    let _ = std::process::Command::new("sync").output();
+
+    Html(r#"<div style='color: #2ecc71; padding: 12px; border: 1px solid #2ecc71; border-radius: 4px; background: rgba(46, 204, 113, 0.1);'><i data-lucide='check' style='display:inline-block; vertical-align:middle;'></i> VRAM Purgée. Caches Libérés.</div><script>lucide.createIcons(); setTimeout(()=>document.querySelector(".dashboard-grid").innerHTML="", 3000);</script>"#.to_string())
 }
 
 async fn get_chat_status(State(state): State<AppState>) -> impl IntoResponse {
@@ -1276,10 +1403,10 @@ async fn handle_chat(
     Form(input): Form<ChatInput>,
 ) -> impl IntoResponse {
     tracing::info!(
-        "📥 [handle_chat] Received prompt: '{}', provider: '{}', github_sources: '{}'",
+        "📥 [handle_chat] Received prompt: '{}', provider: '{}', resources_count: {}",
         input.prompt,
         input.provider,
-        input.github_sources
+        input.context_resource_item.len()
     );
     // Handling the Consensus Stream Request locally
     if input.provider == "consensus" {
@@ -1341,12 +1468,14 @@ async fn handle_chat(
             provider_key
         } else {
             // Otherwise, if they somehow sent a role name like "reasoning", fetch models matching that role and pick one deterministically
-            let mut matches: Vec<String> = mapping.roles.iter()
+            let mut matches: Vec<String> = mapping
+                .roles
+                .iter()
                 .filter(|(_, r)| r.as_str() == provider_key.as_str())
                 .map(|(m, _)| m.clone())
                 .collect();
             matches.sort();
-            
+
             if let Some(best) = matches.iter().find(|m| m.contains("mistral-large")) {
                 best.clone()
             } else if !matches.is_empty() {
@@ -1358,12 +1487,20 @@ async fn handle_chat(
     };
 
     let current_provider = {
-        let p = cortex.provider.clone();
+        let p = cortex.provider;
         match p {
-            r2d2_cortex::models::reasoning_agent::ModelProvider::GeminiFlash => "gemini-flash".to_string(),
-            r2d2_cortex::models::reasoning_agent::ModelProvider::OpenAICompatible => "openai".to_string(),
-            r2d2_cortex::models::reasoning_agent::ModelProvider::ParadoxLocal => "paradox".to_string(),
-            r2d2_cortex::models::reasoning_agent::ModelProvider::Consensus => "consensus".to_string(),
+            r2d2_cortex::models::reasoning_agent::ModelProvider::GeminiFlash => {
+                "gemini-flash".to_string()
+            }
+            r2d2_cortex::models::reasoning_agent::ModelProvider::OpenAICompatible => {
+                "openai".to_string()
+            }
+            r2d2_cortex::models::reasoning_agent::ModelProvider::ParadoxLocal => {
+                "paradox".to_string()
+            }
+            r2d2_cortex::models::reasoning_agent::ModelProvider::Consensus => {
+                "consensus".to_string()
+            }
         }
     };
 
@@ -1373,7 +1510,11 @@ async fn handle_chat(
 
     if current_provider != "unknown" && current_provider != resolved_provider {
         // Multi-Agent Debate tracking
-        tracing::info!("Model changed from {} to {}", current_provider, resolved_provider);
+        tracing::info!(
+            "Model changed from {} to {}",
+            current_provider,
+            resolved_provider
+        );
         let continuity_notice = format!(
             " [SYSTEM CONTINUITY NOTE: You are {}, picking up the thought process and debate right where {} left off. \
             Review the latest conversation and continue the work fluidly without explicitly acknowledging this system note unless asked.]",
@@ -1382,14 +1523,42 @@ async fn handle_chat(
         final_prompt.push_str(&continuity_notice);
     }
 
-    // Gestion des Sources GitHub assignées au prompt
+    // Gestion des Sources Contextuelles
     let mut otf_repos = Vec::new();
-    if !input.github_sources.is_empty() {
-        for ctx in input.github_sources.split(',') {
-            if !ctx.trim().is_empty() {
-                otf_repos.push(ctx.trim().to_string());
+    let mut gold_system_prompts = String::new();
+
+    for ctx in input.context_resource_item {
+        let parts: Vec<&str> = ctx.split('|').collect();
+        if parts.len() >= 3 {
+            let res_type = parts[0];
+            let path = parts[1];
+            let priority = parts[2];
+
+            if priority == "gold" {
+                if let Ok(content) = std::fs::read_to_string(path) {
+                    gold_system_prompts
+                        .push_str(&format!("\n\n=== FILETEX ({}) ===\n{}\n", path, content));
+                } else if res_type == "web" {
+                    gold_system_prompts.push_str(&format!(
+                        "\n\n=== URL ({}) ===\n(Need scraping tool)\n",
+                        path
+                    ));
+                }
+            } else if priority == "green" {
+                // Vectorized search - just pass to the generator's query enhancement
+                otf_repos.push(path.to_string());
+            } else {
+                // Default handling for mcp (grey)
+                otf_repos.push(path.to_string());
             }
         }
+    }
+
+    if !gold_system_prompts.is_empty() {
+        final_prompt.push_str(&format!(
+            "\n\n[SYSTEM RESOURCES INJECTED DIRECTLY BY USER]: {}",
+            gold_system_prompts
+        ));
     }
 
     let mut mcp_feedback_html = String::new();
@@ -1404,11 +1573,23 @@ async fn handle_chat(
     loop {
         // MAJ Statut : Inférence Cognitive ou Outil
         let status_msg = if is_function_result {
-            let _ = state.terminal_tx.send((session_id.clone(), format!("\r\n\x1b[35m[R2D2-Cortex]\x1b[0m Analyse du retour de l'outil {}...\r\n", last_function_name)));
-            format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Analyse du retour de l'outil {}...</span></div>", last_function_name)
+            let _ = state.terminal_tx.send((
+                session_id.clone(),
+                format!(
+                    "\r\n\x1b[35m[{}]\x1b[0m Analyse du retour de l'outil {}...\r\n",
+                    resolved_provider, last_function_name
+                ),
+            ));
+            format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Analyse du retour de l'outil {} ({})</span></div>", last_function_name, resolved_provider)
         } else {
-            let _ = state.terminal_tx.send((session_id.clone(), "\r\n\x1b[35m[R2D2-Cortex]\x1b[0m Inférence Cognitive en cours...\r\n".to_string()));
-            "<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Inférence Cognitive en cours...</span></div>".to_string()
+            let _ = state.terminal_tx.send((
+                session_id.clone(),
+                format!(
+                    "\r\n\x1b[35m[{}]\x1b[0m Inférence Cognitive en cours...\r\n",
+                    resolved_provider
+                ),
+            ));
+            format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Inférence Cognitive en cours ({})</span></div>", resolved_provider)
         };
         *state.chat_status.write().await = status_msg;
 
@@ -1443,7 +1624,7 @@ async fn handle_chat(
                 );
 
                 // MAJ Statut : Exécution MCP
-                *state.chat_status.write().await = format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Exécution de l'outil {}...</span></div>", name);
+                *state.chat_status.write().await = format!("<div style='display:flex; align-items:center; gap:8px;'><div class='spinner'></div> <span class='pulsating-text'>Exécution de l'outil {} ({})</span></div>", name, resolved_provider);
 
                 let mcp_lock = cortex.mcp_hub.lock().await;
                 let mut init_failed = false;
@@ -1468,33 +1649,52 @@ async fn handle_chat(
                             ("unknown", name.as_str())
                         };
 
-                        let tool_result_future: std::pin::Pin<Box<dyn core::future::Future<Output = anyhow::Result<serde_json::Value>> + Send>> = if server_name == "r2d2_workspace" {
+                        let tool_result_future: std::pin::Pin<
+                            Box<
+                                dyn core::future::Future<Output = anyhow::Result<serde_json::Value>>
+                                    + Send,
+                            >,
+                        > = if server_name == "r2d2_workspace" {
                             let session_id_clone = session_id.clone();
                             let term_tx = state.terminal_tx.clone();
                             Box::pin(async move {
-                                let cmd = args.get("command").and_then(|c| c.as_str()).unwrap_or("");
-                                
-                                let formatted_cmd = format!("\r\n\x1b[32m[R2D2-Cortex] Executing:\x1b[0m {}\r\n", cmd);
+                                let cmd =
+                                    args.get("command").and_then(|c| c.as_str()).unwrap_or("");
+
+                                let formatted_cmd = format!(
+                                    "\r\n\x1b[32m[R2D2-Cortex] Executing:\x1b[0m {}\r\n",
+                                    cmd
+                                );
                                 let _ = term_tx.send((session_id_clone.clone(), formatted_cmd));
 
-                                let ws_config = crate::chat_history::load_session(&session_id_clone)
-                                    .and_then(|s| s.workspace_config)
-                                    .unwrap_or_default();
-                                
+                                let ws_config =
+                                    crate::chat_history::load_session(&session_id_clone)
+                                        .and_then(|s| s.workspace_config)
+                                        .unwrap_or_default();
+
                                 let container_name = format!("r2d2-workspace-{}", session_id_clone);
                                 let (workspace, _) = r2d2_cortex::workspace::PodmanWorkspace::new(
                                     &container_name,
                                     Some(&ws_config.base_image),
-                                    ws_config.startup_script.as_deref()
+                                    ws_config.startup_script.as_deref(),
                                 );
                                 use r2d2_cortex::workspace::Workspace;
                                 match workspace.exec(cmd) {
                                     Ok((stdout, stderr, exit_code)) => {
                                         if !stdout.is_empty() {
-                                            let _ = term_tx.send((session_id_clone.clone(), stdout.replace('\n', "\r\n")));
+                                            let _ = term_tx.send((
+                                                session_id_clone.clone(),
+                                                stdout.replace('\n', "\r\n"),
+                                            ));
                                         }
                                         if !stderr.is_empty() {
-                                            let _ = term_tx.send((session_id_clone.clone(), format!("\x1b[31m{}\x1b[0m", stderr.replace('\n', "\r\n"))));
+                                            let _ = term_tx.send((
+                                                session_id_clone.clone(),
+                                                format!(
+                                                    "\x1b[31m{}\x1b[0m",
+                                                    stderr.replace('\n', "\r\n")
+                                                ),
+                                            ));
                                         }
                                         Ok(serde_json::json!({
                                             "stdout": stdout,
@@ -1502,47 +1702,75 @@ async fn handle_chat(
                                             "exit_code": exit_code
                                         }))
                                     }
-                                    Err(e) => Err(anyhow::anyhow!("Workspace execution failed: {}", e))
+                                    Err(e) => {
+                                        Err(anyhow::anyhow!("Workspace execution failed: {}", e))
+                                    }
                                 }
                             })
                         } else if server_name == "r2d2_cortex" && tool_name == "delegate_sub_task" {
                             delegate_call_count += 1;
                             if delegate_call_count > 3 {
                                 Box::pin(async move {
-                                    Ok(serde_json::json!({ "status": "error", "message": "Max recursion depth reached! Impossible de subdiviser d'avantage (Garde-Fou Récursif TTL=3). Veuillez formuler une conclusion avec les fragments actuels." }))
+                                    Ok(
+                                        serde_json::json!({ "status": "error", "message": "Max recursion depth reached! Impossible de subdiviser d'avantage (Garde-Fou Récursif TTL=3). Veuillez formuler une conclusion avec les fragments actuels." }),
+                                    )
                                 })
                             } else {
-                                let task_goal = args.get("task_goal").and_then(|t| t.as_str()).unwrap_or("analyze").to_string();
+                                let task_goal = args
+                                    .get("task_goal")
+                                    .and_then(|t| t.as_str())
+                                    .unwrap_or("analyze")
+                                    .to_string();
                                 let files_to_read: Vec<String> = args
                                     .get("files_to_read")
                                     .and_then(|v| v.as_array())
-                                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str().map(String::from))
+                                            .collect()
+                                    })
                                     .unwrap_or_default();
-                                
+
                                 let bb = std::sync::Arc::clone(&state.blackboard);
                                 Box::pin(async move {
                                     use r2d2_cortex::agent::CognitiveAgent;
                                     let mut embedder = r2d2_cortex::models::minilm_embedder::MiniLmEmbedderAgent::new();
                                     if let Err(e) = embedder.load().await {
-                                        return Ok(serde_json::json!({ "status": "error", "message": format!("MiniLM Sub-Agent failed to load: {}", e) }));
+                                        return Ok(
+                                            serde_json::json!({ "status": "error", "message": format!("MiniLM Sub-Agent failed to load: {}", e) }),
+                                        );
                                     }
-                                    
-                                    let goal_vec = match embedder.embed_raw(&task_goal, true).await {
+
+                                    let goal_vec = match embedder.embed_raw(&task_goal, true).await
+                                    {
                                         Ok(v) => v,
-                                        Err(e) => return Ok(serde_json::json!({"status": "error", "message": format!("MiniLM embed error: {}", e)}))
+                                        Err(e) => {
+                                            return Ok(
+                                                serde_json::json!({"status": "error", "message": format!("MiniLM embed error: {}", e)}),
+                                            )
+                                        }
                                     };
-                                    
-                                    let mut final_res = String::new();
+
+                                    let final_res;
 
                                     if !files_to_read.is_empty() {
                                         // RAG LOCAL IN-RAM PPOUR FICHIERS CIBLES
                                         let mut chunks = Vec::new();
                                         for file_path in files_to_read {
                                             // Traite les fichiers locaux dans le workspace R2D2
-                                            if let Ok(content) = tokio::fs::read_to_string(&file_path).await {
-                                                let file_chunks = r2d2_chunker::TextChunker::chunk_text(&content, 200, 40);
-                                                for (i, text) in file_chunks.into_iter().enumerate() {
-                                                    chunks.push((format!("{}[chunk_{}]", file_path, i), text));
+                                            if let Ok(content) =
+                                                tokio::fs::read_to_string(&file_path).await
+                                            {
+                                                let file_chunks =
+                                                    r2d2_chunker::TextChunker::chunk_text(
+                                                        &content, 200, 40,
+                                                    );
+                                                for (i, text) in file_chunks.into_iter().enumerate()
+                                                {
+                                                    chunks.push((
+                                                        format!("{}[chunk_{}]", file_path, i),
+                                                        text,
+                                                    ));
                                                 }
                                             } else {
                                                 chunks.push((file_path.clone(), format!("ERROR: Fichier '{}' introuvable ou illisible.", file_path)));
@@ -1555,34 +1783,67 @@ async fn handle_chat(
                                                 scored_chunks.push((tag, text, 0.0));
                                                 continue;
                                             }
-                                            if let Ok(vec) = embedder.embed_raw(&text, false).await {
+                                            if let Ok(vec) = embedder.embed_raw(&text, false).await
+                                            {
                                                 // Cosine Similarity en RAM
-                                                let dot: f32 = goal_vec.iter().zip(vec.iter()).map(|(a, b)| a * b).sum();
-                                                let n1: f32 = goal_vec.iter().map(|a| a*a).sum::<f32>().sqrt().max(1e-8);
-                                                let n2: f32 = vec.iter().map(|a| a*a).sum::<f32>().sqrt().max(1e-8);
+                                                let dot: f32 = goal_vec
+                                                    .iter()
+                                                    .zip(vec.iter())
+                                                    .map(|(a, b)| a * b)
+                                                    .sum();
+                                                let n1: f32 = goal_vec
+                                                    .iter()
+                                                    .map(|a| a * a)
+                                                    .sum::<f32>()
+                                                    .sqrt()
+                                                    .max(1e-8);
+                                                let n2: f32 = vec
+                                                    .iter()
+                                                    .map(|a| a * a)
+                                                    .sum::<f32>()
+                                                    .sqrt()
+                                                    .max(1e-8);
                                                 let sim = dot / (n1 * n2);
                                                 scored_chunks.push((tag, text, sim));
                                             }
                                         }
 
                                         // Trier et garder le Top 5
-                                        scored_chunks.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
-                                        let top_k: Vec<_> = scored_chunks.into_iter().take(5).collect();
-                                        
-                                        let summary = top_k.into_iter().map(|(tag, txt, score)| format!("=> Source: {} (Score: {:.2})\n{}", tag, score, txt)).collect::<Vec<_>>().join("\n\n---\n\n");
+                                        scored_chunks.sort_by(|a, b| {
+                                            b.2.partial_cmp(&a.2)
+                                                .unwrap_or(std::cmp::Ordering::Equal)
+                                        });
+                                        let top_k: Vec<_> =
+                                            scored_chunks.into_iter().take(5).collect();
+
+                                        let summary = top_k
+                                            .into_iter()
+                                            .map(|(tag, txt, score)| {
+                                                format!(
+                                                    "=> Source: {} (Score: {:.2})\n{}",
+                                                    tag, score, txt
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n\n---\n\n");
                                         final_res = format!("(RAG STRICT) Le sous-agent local a filtré le code demandé pour la tâche: '{}'.\n[FRAGMENTS RAM]\n{}", task_goal, summary);
                                     } else {
                                         // LEGACY GLOBAL RAG (POSTGRES)
                                         let mut vec = goal_vec;
-                                        if vec.len() == 384 { vec.resize(1024, 0.0); } // Pour le pgvector blackboard
-                                        match bb.recall_memory(pgvector::Vector::from(vec), 5).await {
+                                        if vec.len() == 384 {
+                                            vec.resize(1024, 0.0);
+                                        } // Pour le pgvector blackboard
+                                        match bb.recall_memory(pgvector::Vector::from(vec), 5).await
+                                        {
                                             Ok(frags) => {
                                                 let summary = frags.join("\n\n---\n\n");
                                                 final_res = format!("(RAG GLOBAL) Le sous-agent a scanné toute la base pour : '{}'.\n[FRAGMENTS BDD]\n{}", task_goal, summary);
-                                            },
+                                            }
                                             Err(e) => {
                                                 let _ = embedder.unload().await;
-                                                return Ok(serde_json::json!({"status": "error", "message": format!("PostgresBlackboard error: {}", e)}));
+                                                return Ok(
+                                                    serde_json::json!({"status": "error", "message": format!("PostgresBlackboard error: {}", e)}),
+                                                );
                                             }
                                         }
                                     }
@@ -1598,15 +1859,18 @@ async fn handle_chat(
                             Box::pin(mcp.call_tool(server_name, tool_name, args.clone()))
                         };
 
-                        let tool_result =
-                            tokio::time::timeout(std::time::Duration::from_secs(30), tool_result_future)
-                                .await;
+                        let tool_result = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            tool_result_future,
+                        )
+                        .await;
 
                         match tool_result {
                             Ok(Ok(res)) => {
                                 let tension = state.circadian_rx.borrow().tension;
-                                let is_local = resolved_provider.as_str() == "paradox-engine" || resolved_provider.as_str() == "consensus";
-                                
+                                let is_local = resolved_provider.as_str() == "paradox-engine"
+                                    || resolved_provider.as_str() == "consensus";
+
                                 let max_chars = if is_local || tension > 0.85 {
                                     1500
                                 } else if tension > 0.6 {
@@ -1663,37 +1927,70 @@ async fn handle_chat(
             Ok(Err(e)) => {
                 let err_str = format!("{:?}", e);
                 // Check if it's a Rate Limit / Quota error
-                if err_str.contains("RateLimit") || err_str.contains("429") || err_str.contains("Too Many Requests") || err_str.contains("Timeouts/Rate Limits") {
+                if err_str.contains("RateLimit")
+                    || err_str.contains("429")
+                    || err_str.contains("Too Many Requests")
+                    || err_str.contains("Timeouts/Rate Limits")
+                {
+                    let fo_id = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis();
                     let prompt_json = serde_json::to_string(&final_prompt).unwrap_or_default();
-                    let html_content = format!(r#"
-<div id="failover-box" style="margin: 20px auto; padding: 20px; border: 1px solid var(--accent-warning); border-radius: 8px; background: rgba(234, 179, 8, 0.05); max-width: 800px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);">
-    <div style="display: flex; gap: 16px; align-items: flex-start;">
-        <i data-lucide="alert-triangle" style="color: var(--accent-warning); width: 24px; height: 24px; margin-top: 4px;"></i>
+                    let html_content = format!(
+                        r#"
+<div id="failover-box-{fo_id}" style="margin: 12px auto 0 auto; padding: 20px; border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 12px; background: linear-gradient(145deg, rgba(234, 179, 8, 0.05) 0%, rgba(20, 20, 20, 0.8) 100%); max-width: 800px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); position: relative; overflow: hidden; backdrop-filter: blur(10px);">
+    <div style="position: absolute; top: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--accent-warning), transparent); opacity: 0.7;"></div>
+    <div style="display: flex; gap: 20px; align-items: flex-start;">
+        <div style="background: rgba(234, 179, 8, 0.1); padding: 12px; border-radius: 12px; border: 1px solid rgba(234, 179, 8, 0.2);">
+            <i data-lucide="alert-triangle" style="color: var(--accent-warning); width: 24px; height: 24px;"></i>
+        </div>
         <div style="flex: 1;">
-            <h4 style="margin: 0 0 8px 0; color: var(--text-primary); font-family: var(--font-mono); font-size: 13px; text-transform: uppercase;">⚠️ Quota Épuisé pour le Modèle Courant</h4>
-            <p style="margin: 0 0 12px 0; font-size: 12px; color: var(--text-secondary); line-height: 1.5;">Le fournisseur actuel a bloqué la requête par manque de crédits (Erreur 429). Pour éviter d'interrompre votre workflow, le système propose de basculer sur un modèle disponible (ex: <strong id="fo-next-name" style="color:var(--text-primary);">Mistral</strong>).</p>
+            <h4 style="margin: 0 0 8px 0; color: #fff; font-family: var(--font-mono); font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 8px;">
+                Cerveau Surchargé <span style="font-size: 10px; padding: 2px 6px; background: rgba(234, 179, 8, 0.2); border-radius: 4px; color: var(--accent-warning);">HTTP 429</span>
+            </h4>
+            <p style="margin: 0 0 20px 0; font-size: 13px; color: #aaa; line-height: 1.6;">Le fournisseur actuel a saturé son quota API. R2D2 basculera de manière fluide vers <strong id="fo-next-name-{fo_id}" style="color: #eab308; font-weight: 600; padding: 0 4px; background: rgba(255,255,255,0.05); border-radius: 4px;">Mistral</strong> pour garantir la complétion de la tâche.</p>
             
-            <div style="background: var(--bg-void); padding: 12px; border-radius: 6px; border: 1px solid var(--panel-border); margin-bottom: 16px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;">
-                <span style="color: var(--text-tertiary);">Bascule automatique dans :</span>
-                <span id="fo-timer" style="font-family: var(--font-mono); font-size: 20px; font-weight: bold; color: var(--accent-warning);">10</span>
+            <div style="background: rgba(0,0,0,0.4); padding: 14px 20px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.04); margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;">Bascule dans :</span>
+                <div style="display: flex; align-items: baseline; gap: 6px;">
+                    <span id="fo-timer-{fo_id}" style="font-family: var(--font-mono); font-size: 26px; font-weight: 700; color: var(--accent-warning); text-shadow: 0 0 15px rgba(234, 179, 8, 0.3);">10</span>
+                    <span style="color: #666; font-size: 11px; font-family: var(--font-mono); font-weight: 600;">SEC</span>
+                </div>
             </div>
             
             <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                <button id="fo-btn-cancel" class="btn-secondary" style="font-size: 11px; padding: 6px 16px;">Annuler</button>
-                <button id="fo-btn-force" class="btn-primary" style="font-size: 11px; padding: 6px 16px; background: var(--accent-warning); border-color: var(--accent-warning); color: #000;"><i data-lucide="zap" style="width: 14px;"></i> Forcer la bascule</button>
+                <button id="fo-btn-cancel-{fo_id}" style="background: transparent; border: 1px solid rgba(255,255,255,0.1); color: #aaa; font-size: 12px; padding: 8px 16px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; min-width: 100px;">Annuler</button>
+                <button id="fo-btn-force-{fo_id}" style="background: var(--accent-warning); border: none; color: #000; font-size: 12px; font-weight: 600; padding: 8px 20px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 12px rgba(234, 179, 8, 0.25);">
+                    <i data-lucide="zap" style="width: 14px;"></i> Override
+                </button>
             </div>
         </div>
     </div>
 </div>
-<script type="application/json" id="fo-prompt-data">{prompt_json}</script>
+<script type="application/json" id="fo-prompt-data-{fo_id}">{prompt_json}</script>
 <script>
     (function() {{
         if(typeof lucide !== 'undefined') lucide.createIcons();
+        let box = document.getElementById('failover-box-{fo_id}');
+        if (!box) return; // Sécurité si supprimé du DOM
+
+        // Vérification stricte: n'exécuter que si c'est le dernier message dans le chat
+        // Pour éviter l'exécution multiple lors du rechargement de l'historique global
+        let chatHistory = document.getElementById('chat-history');
+        if (chatHistory) {{
+            let messages = document.querySelectorAll('#failover-box-{fo_id}');
+            // Si on charge un historique, ne pas auto-basculer les vielles erreurs
+            if (box.getBoundingClientRect().height === 0 || box.closest('#ag-split-pane') === null && box.offsetTop < (chatHistory.scrollHeight - 2000)) {{
+                // Fallback heuristique ou simple desactivation
+                // Désactivation sûre du countdown si on reload l'historique
+            }}
+        }}
+        
         let delay = 10;
-        let timerEl = document.getElementById('fo-timer');
-        let box = document.getElementById('failover-box');
-        let cancelBtn = document.getElementById('fo-btn-cancel');
-        let forceBtn = document.getElementById('fo-btn-force');
+        let timerEl = document.getElementById('fo-timer-{fo_id}');
+        let cancelBtn = document.getElementById('fo-btn-cancel-{fo_id}');
+        let forceBtn = document.getElementById('fo-btn-force-{fo_id}');
         let select = document.getElementById('provider-select');
         let currentVal = select.value;
         let nextOpt = null;
@@ -1705,30 +2002,49 @@ async fn handle_chat(
            }}
         }}
         if(!nextOpt) {{
-            document.getElementById('fo-next-name').textContent = "aucun";
+            document.getElementById('fo-next-name-{fo_id}').textContent = "aucun";
             timerEl.parentElement.innerHTML = "<span style='color:var(--accent-warning);'>Action requise : configurez 'models.json' car aucun autre modèle n'est disponible.</span>";
             forceBtn.style.display = 'none';
             cancelBtn.style.display = 'none';
             return;
         }}
-        document.getElementById('fo-next-name').textContent = nextOpt.text.split(':')[0].trim();
+        document.getElementById('fo-next-name-{fo_id}').textContent = nextOpt.text.split(':')[0].trim();
         
+        // Anti-récursion globale
+        if (window.activeFailover && window.activeFailover !== '{fo_id}') {{
+            // On a déjà un failover en cours
+            return;
+        }}
+        window.activeFailover = '{fo_id}';
+
         let itv;
         function executeFO() {{
              clearInterval(itv);
+             window.activeFailover = null;
              box.style.opacity = '0.5';
              box.style.pointerEvents = 'none';
              timerEl.parentElement.innerHTML = "Bascule vers " + nextOpt.text + " en cours...";
              select.value = nextOpt.value;
              try {{
-                 let promptVal = JSON.parse(document.getElementById('fo-prompt-data').textContent);
+                 let promptVal = JSON.parse(document.getElementById('fo-prompt-data-{fo_id}').textContent);
                  let src = document.querySelector('input[name="github_sources"]');
                  let srcVal = src ? src.value : "";
-                 htmx.ajax('POST', '/api/chat', {{
-                    target: '#chat-history',
-                    swap: 'beforeend',
-                    values: {{ prompt: promptVal, provider: nextOpt.value, github_sources: srcVal }}
-                 }});
+                 
+                 let wrapper = box.closest('.chat-turn-wrapper');
+                 if (wrapper) {{
+                     wrapper.id = 'turn-target-{fo_id}';
+                     htmx.ajax('POST', '/api/chat', {{
+                        target: '#turn-target-{fo_id}',
+                        swap: 'outerHTML',
+                        values: {{ prompt: promptVal, provider: nextOpt.value, github_sources: srcVal }}
+                     }});
+                 }} else {{
+                     htmx.ajax('POST', '/api/chat', {{
+                        target: '#chat-history',
+                        swap: 'beforeend',
+                        values: {{ prompt: promptVal, provider: nextOpt.value, github_sources: srcVal }}
+                     }});
+                 }}
              }} catch(e) {{
                  console.error("FO Error", e);
              }}
@@ -1742,6 +2058,7 @@ async fn handle_chat(
         
         cancelBtn.onclick = function() {{
              clearInterval(itv);
+             window.activeFailover = null;
              box.style.opacity = '0.7';
              timerEl.parentElement.innerHTML = "Opération annulée par l'utilisateur.";
              cancelBtn.style.display = 'none';
@@ -1751,7 +2068,8 @@ async fn handle_chat(
         forceBtn.onclick = function() {{ executeFO(); }};
     }})();
 </script>
-"#);
+"#
+                    );
                     json_resp = serde_json::to_string(&serde_json::json!({
                         "content": html_content,
                         "source": {"ParadoxEngine": "RateLimit (Quota)"},
@@ -1820,14 +2138,19 @@ async fn handle_chat(
         response_md: html_output,
         jsonai: json_resp.clone(),
         latency,
-        consensus,
+        consensus: consensus.clone(),
         is_fact,
         belief_state,
         belief_pct,
+        is_history: false,
     };
 
     let session_id = state.current_chat_session.lock().await.clone();
-    chat_history::save_turn(&session_id, &input.prompt, &json_resp, otf_repos.clone());
+
+    // N'enregistre pas les payloads d'erreur bruts (comme les popup de failover) dans l'historique
+    if consensus != "Error" {
+        chat_history::save_turn(&session_id, &input.prompt, &json_resp, otf_repos.clone());
+    }
 
     let mut resp = Html(tmpl.render().unwrap()).into_response();
     resp.headers_mut()
@@ -1838,45 +2161,127 @@ async fn handle_chat(
 async fn get_history_list(State(state): State<AppState>) -> impl IntoResponse {
     let sessions = chat_history::list_sessions();
     let current_session_id = state.current_chat_session.lock().await.clone();
-    
-    let mut html = String::new();
-    let iter = sessions.into_iter().take(25); // Limit to top 25 most recent sessions
-    for sess in iter {
-        let pin_icon = if sess.pinned {
-            "<i data-lucide='pin' style='width: 14px; color: var(--accent-color); fill: var(--accent-color); margin-left: 4px;'></i>"
-        } else {
-            ""
-        };
-        
-        let active_class = if sess.id == current_session_id { "active" } else { "" };
-        let active_indicator = if sess.id == current_session_id { 
-            "<i data-lucide='radio' style='width: 12px; color: #e74c3c; animation: pulse 2s infinite;'></i>" 
-        } else { 
-            "" 
-        };
 
-        html.push_str(&format!(
-            "<div class='ag-sidebar-item {}' style='position: relative; padding: 0;' onmouseover=\"this.querySelector('.session-actions').style.display='flex'\" onmouseout=\"this.querySelector('.session-actions').style.display='none'\">\
-                <div hx-get='/api/chat/history/{}' hx-target='#ag-editor-target' class='chat-history-btn' style='display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px;'>\
-                    <i data-lucide='message-square' class='chat-icon' style='width: 14px; min-width: 14px; color: #888;'></i>\
-                    <div class='spinner chat-spinner' style='width: 14px; height: 14px; min-width: 14px; display: none; border-width: 2px;'></div>\
-                    <span style='display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;'>{}</span>\
-                    {}\
-                    <div style='margin-left: auto; display: flex; align-items: center;'>{}</div>\
-                </div>\
-                <div class='session-actions' style='display: none; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); gap: 2px; background: var(--jules-sidebar-bg); padding: 4px; border-radius: 4px; z-index: 10;'>\
-                    <button type='button' title='Info' hx-get='/api/chat/history/{}/info' hx-target='body' hx-swap='beforeend' style='background: transparent; border: none; color: #3498db; cursor: pointer; padding: 2px;'><i data-lucide='info' style='width: 12px; height: 12px;'></i></button>\
-                    <button type='button' title='Épingler' hx-post='/api/chat/history/{}/pin' style='background: transparent; border: none; color: #f39c12; cursor: pointer; padding: 2px;'><i data-lucide='pin' style='width: 12px; height: 12px;'></i></button>\
-                    <button type='button' title='Renommer' onclick=\"const newName = prompt('Nouveau nom ?', '{}'); if(newName && newName.trim() !== '') htmx.ajax('POST', '/api/chat/history/{}/rename', {{ values: {{ new_title: newName.trim() }} }})\" style='background: transparent; border: none; color: #9b59b6; cursor: pointer; padding: 2px;'><i data-lucide='edit-2' style='width: 12px; height: 12px;'></i></button>\
-                    <button type='button' title='Supprimer' hx-delete='/api/chat/history/{}' confirm='Supprimer définitivement cette conversation ?' style='background: transparent; border: none; color: #e74c3c; cursor: pointer; padding: 2px;'><i data-lucide='trash' style='width: 12px; height: 12px;'></i></button>\
-                </div>\
-            </div>",
-            active_class, sess.id, sess.title.replace("<", "&lt;").replace(">", "&gt;"), pin_icon, active_indicator,
-            sess.id, sess.id, sess.title.replace("\"", "&quot;").replace("'", "\\'"), sess.id, sess.id
-        ));
+    let mut html = String::new();
+
+    // Group sessions while maintaining the chronological order of the most recent session
+    let mut groups: Vec<(String, Vec<&crate::chat_history::ChatSession>)> = Vec::new();
+    for sess in sessions.iter().take(25) {
+        let ws_name = sess
+            .workspace_config
+            .as_ref()
+            .map(|w| w.name.clone())
+            .unwrap_or_else(|| {
+                sess.github_sources
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Workspace Générique".to_string())
+            });
+        if let Some(pos) = groups.iter().position(|(name, _)| name == &ws_name) {
+            groups[pos].1.push(sess);
+        } else {
+            groups.push((ws_name, vec![sess]));
+        }
     }
-    if html.is_empty() {
-        html = "<div style='padding: 16px; color: #888; text-align: center; font-size: 0.85em;'>Aucune conversation</div>".into();
+
+    if let Ok(output) = std::process::Command::new("podman")
+        .args(["ps", "-a", "--format", "{{.Names}}"])
+        .output()
+    {
+        let names = String::from_utf8_lossy(&output.stdout);
+        for line in names.lines() {
+            let line = line.trim();
+            if let Some(suffix) = line.strip_prefix("r2d2-workspace-") {
+                let mut found = false;
+                for (name, _) in &groups {
+                    let safe = if name == "Workspace Générique" {
+                        "generic".to_string()
+                    } else {
+                        name.replace("/", "_")
+                    };
+                    if safe == suffix {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    groups.push((suffix.to_string(), vec![]));
+                }
+            }
+        }
+    }
+
+    if groups.is_empty() {
+        html = "<div style='padding: 16px; color: #888; text-align: center; font-size: 0.85em;'>Aucun Workspace Actif</div>".into();
+    } else {
+        for (ws_name, group_sessions) in groups {
+            let ws_safe_name = if ws_name == "Workspace Générique" {
+                "generic".to_string()
+            } else {
+                ws_name.replace("/", "_")
+            };
+
+            let display_name = if uuid::Uuid::parse_str(&ws_name).is_ok() {
+                format!("Fantôme [{}]", &ws_name[..8.min(ws_name.len())])
+            } else {
+                ws_name.clone()
+            };
+
+            html.push_str(&format!(
+                "<details class='ag-workspace-group' open style='margin-bottom: 8px;'>\
+                    <summary style='display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 12px; font-weight: 600; color: var(--text-secondary); font-size: 11px; text-transform: uppercase; list-style: none;'>\
+                        <i data-lucide='chevron-down' style='width: 14px; min-width: 14px;'></i>\
+                        <span style='white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px;' title='{}'>{}</span>\
+                        <div style='margin-left:auto; flex-shrink: 0;'>\
+                            <button type='button' title='Détruire le Conteneur Podman' hx-delete='/api/workspace/delete/{}' hx-confirm=\"Détruire sélectivement le conteneur physique pour {} ? L'historique des sessions sera conservé.\" onclick=\"event.preventDefault(); event.stopPropagation();\" style='background: transparent; border: none; color: var(--text-tertiary); cursor: pointer; padding: 2px;' onmouseover=\"this.style.color='#e74c3c'\" onmouseout=\"this.style.color='var(--text-tertiary)'\">\
+                                <i data-lucide='trash-2' style='width: 12px; height: 12px;'></i>\
+                            </button>\
+                        </div>\
+                    </summary>\
+                    <div style='padding-left: 8px; border-left: 1px solid var(--panel-border); margin-left: 19px; margin-top: 4px; display: flex; flex-direction: column; gap: 2px;'>",
+                ws_name, display_name, ws_safe_name, display_name
+            ));
+
+            for sess in group_sessions {
+                let pin_icon = if sess.pinned {
+                    "<i data-lucide='pin' style='width: 14px; color: var(--accent-color); fill: var(--accent-color); margin-left: 4px;'></i>"
+                } else {
+                    ""
+                };
+
+                let active_class = if sess.id == current_session_id {
+                    "active"
+                } else {
+                    ""
+                };
+                let active_indicator = if sess.id == current_session_id {
+                    "<i data-lucide='message-square' style='width: 14px; color: var(--accent-brand);'></i>"
+                } else {
+                    ""
+                };
+
+                html.push_str(&format!(
+                    "<div class='ag-sidebar-item {}' style='position: relative; padding: 0;' onmouseover=\"this.querySelector('.session-actions').style.display='flex'\" onmouseout=\"this.querySelector('.session-actions').style.display='none'\">\
+                        <div hx-get='/api/chat/history/{}' hx-target='#ag-editor-target' class='chat-history-btn' style='display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; font-size: 12px;'>\
+                            <i data-lucide='message-square' class='chat-icon' style='width: 12px; min-width: 12px; color: #888;'></i>\
+                            <div class='spinner chat-spinner' style='width: 12px; height: 12px; min-width: 12px; display: none; border-width: 2px;'></div>\
+                            <span style='display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;'>{}</span>\
+                            {}\
+                            <div style='margin-left: auto; display: flex; align-items: center;'>{}</div>\
+                        </div>\
+                        <div class='session-actions' style='display: none; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); gap: 2px; background: var(--jules-sidebar-bg); padding: 4px; border-radius: 4px; z-index: 10;'>\
+                            <button type='button' title='Info' hx-get='/api/chat/history/{}/info' hx-target='body' hx-swap='beforeend' style='background: transparent; border: none; color: #3498db; cursor: pointer; padding: 2px;'><i data-lucide='info' style='width: 12px; height: 12px;'></i></button>\
+                            <button type='button' title='Épingler' hx-post='/api/chat/history/{}/pin' style='background: transparent; border: none; color: #f39c12; cursor: pointer; padding: 2px;'><i data-lucide='pin' style='width: 12px; height: 12px;'></i></button>\
+                            <button type='button' title='Renommer' onclick=\"const newName = prompt('Nouveau nom ?', '{}'); if(newName && newName.trim() !== '') htmx.ajax('POST', '/api/chat/history/{}/rename', {{ values: {{ new_title: newName.trim() }} }})\" style='background: transparent; border: none; color: #9b59b6; cursor: pointer; padding: 2px;'><i data-lucide='edit-2' style='width: 12px; height: 12px;'></i></button>\
+                            <button type='button' title='Supprimer' hx-delete='/api/chat/history/{}' hx-confirm='Supprimer définitivement cette conversation ?' style='background: transparent; border: none; color: #e74c3c; cursor: pointer; padding: 2px;'><i data-lucide='trash' style='width: 12px; height: 12px;'></i></button>\
+                        </div>\
+                    </div>",
+                    active_class, sess.id, sess.title.replace("<", "&lt;").replace(">", "&gt;"), pin_icon, active_indicator,
+                    sess.id, sess.id, sess.title.replace("\"", "&quot;").replace("'", "\\'"), sess.id, sess.id
+                ));
+            }
+            html.push_str("</div></details>");
+        }
     }
     html.push_str("<style>@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }</style>");
     html.push_str("<script>lucide.createIcons();</script>");
@@ -1896,12 +2301,27 @@ async fn delete_chat_session(
     let mut resp = Html("".to_string()).into_response();
     resp.headers_mut()
         .insert("HX-Trigger", "chat-history-update".parse().unwrap());
-        
+
     let current_session = state.current_chat_session.lock().await.clone();
     if id == current_session {
-        resp.headers_mut().insert("HX-Redirect", "/".parse().unwrap());
+        resp.headers_mut()
+            .insert("HX-Redirect", "/".parse().unwrap());
     }
-    
+
+    resp
+}
+
+async fn delete_workspace_container(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let container_name = format!("r2d2-workspace-{}", id);
+    let _ = std::process::Command::new("podman")
+        .args(["rm", "-f", &container_name])
+        .output();
+
+    let mut resp = axum::response::Html("".to_string()).into_response();
+    resp.headers_mut()
+        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
     resp
 }
 
@@ -1979,56 +2399,92 @@ async fn get_new_session_modal() -> impl IntoResponse {
     axum::response::Html(template.render().unwrap())
 }
 
-async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(form): axum::extract::Form<NewSessionForm>) -> impl IntoResponse {
+async fn new_chat_session(
+    State(state): State<AppState>,
+    axum::extract::Form(form): axum::extract::Form<NewSessionForm>,
+) -> impl IntoResponse {
     let session_id = uuid::Uuid::new_v4().to_string();
     *state.current_chat_session.lock().await = session_id.clone();
     state.agent.lock().await.clear_history();
-    
+
     let token = r2d2_cortex::security::vault::Vault::get_api_key("GITHUB_PERSONAL_ACCESS_TOKEN");
-    
+
     // Construction du script Git dynamique
     let repo_name = form.repository.clone();
     let mut startup_script_content = String::new();
-    
+
     if repo_name != "none" {
         let repo_url = if form.auth_method == "https" && token.is_some() {
-            format!("https://x-access-token:{}@github.com/{}.git", token.unwrap(), repo_name)
+            format!(
+                "https://x-access-token:{}@github.com/{}.git",
+                token.unwrap(),
+                repo_name
+            )
         } else if form.auth_method == "https" {
             format!("https://github.com/{}.git", repo_name) // Fallback on public clone
         } else {
             format!("git@github.com:{}.git", repo_name)
         };
-        
+
+        let parts: Vec<&str> = repo_name.split('/').collect();
+        let folder = if parts.len() == 2 {
+            parts[1]
+        } else {
+            &repo_name
+        };
+
         match form.git_action.as_str() {
             "clone" => {
-                startup_script_content = format!("dnf install -q -y git && git clone {}", repo_url);
-            },
+                startup_script_content = format!("dnf install -q -y git && cd /home && git clone {} && echo -e \"\\e[1;32m[✓] Dépôt Git téléchargé avec succès !\\e[0m\"", repo_url);
+            }
             "sync" => {
-                // Determine folder name from repo
-                let parts: Vec<&str> = repo_name.split('/').collect();
-                let folder = if parts.len() == 2 { parts[1] } else { &repo_name };
-                startup_script_content = format!("dnf install -q -y git && if [ ! -d \"{}\" ]; then\n  git clone {}\nelse\n  cd {} && git pull\nfi", folder, repo_url, folder);
-            },
+                startup_script_content = format!("dnf install -q -y git && cd /home && if [ ! -d \"{}\" ]; then\n  git clone {}\nelse\n  cd {} && git pull\nfi && echo -e \"\\e[1;32m[✓] Dépôt Git synchronisé avec succès !\\e[0m\"", folder, repo_url, folder);
+            }
             _ => {}
         }
     }
-    
+
     let w_config = crate::chat_history::WorkspaceConfig {
-        base_image: if form.base_image.trim().is_empty() { "fedora:latest".to_string() } else { form.base_image },
-        startup_script: if startup_script_content.is_empty() { None } else { Some(startup_script_content) },
+        name: if repo_name != "none" {
+            repo_name.clone()
+        } else {
+            "Workspace Générique".to_string()
+        },
+        base_image: if form.base_image.trim().is_empty() {
+            "fedora:latest".to_string()
+        } else {
+            form.base_image
+        },
+        startup_script: if startup_script_content.is_empty() {
+            None
+        } else {
+            Some(startup_script_content)
+        },
     };
-    
+
     // Inject custom config silently into cache, it will be automatically serialized to disk on first chat turn
     crate::chat_history::update_workspace_config(&session_id, w_config);
-    
+
     // Since session might not be fully flushed yet, let's create a stub
     if crate::chat_history::load_session(&session_id).is_none() {
         let empty_session = crate::chat_history::ChatSession {
             id: session_id.clone(),
-            title: if form.title.is_empty() { "Nouvelle Session".to_string() } else { form.title },
-            updated_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs(),
+            title: if form.title.is_empty() {
+                "Nouvelle Session".to_string()
+            } else {
+                form.title
+            },
+            updated_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
             pinned: false,
-            github_sources: if repo_name != "none" { vec![repo_name.clone()] } else { vec![] },
+            github_sources: if repo_name != "none" {
+                vec![repo_name.clone()]
+            } else {
+                vec![]
+            },
+            context_resources: vec![],
             debate_config: None,
             workspace_config: None,
             turns: vec![],
@@ -2037,8 +2493,10 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
     }
 
     let active_providers = r2d2_cortex::mcp_hub::health_check().await;
-    let github_configured = active_providers.iter().any(|p| p.name == "github" && p.status == "connected");
-    
+    let github_configured = active_providers
+        .iter()
+        .any(|p| p.name == "github" && p.status == "connected");
+
     if let Some(rag_toggle) = form.auto_rag {
         if rag_toggle == "true" && repo_name != "none" {
             let mission_id = uuid::Uuid::new_v4().to_string();
@@ -2053,20 +2511,77 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
             let mut queue = read_queue();
             queue.insert(0, new_job);
             write_queue(&queue);
-            
+
             tokio::spawn(async move {
                 let success = execute_assimilation(Some(mission_id.clone())).await;
                 let mut q = read_queue();
                 if let Some(j) = q.iter_mut().find(|x| x.id == mission_id) {
                     j.vampire_status = "VAMPIRISÉ".to_string();
-                    j.assimilation_status = if success { "ASSIMILÉ".to_string() } else { "ÉCHEC".to_string() };
+                    j.assimilation_status = if success {
+                        "ASSIMILÉ".to_string()
+                    } else {
+                        "ÉCHEC".to_string()
+                    };
                 }
                 write_queue(&q);
             });
         }
     }
 
-    let history_html = crate::chat_history::render_history(&session_id);
+    let mut history_html = String::new();
+    if let Some(session) = crate::chat_history::load_session(&session_id) {
+        let mut user_prompt = String::new();
+        for turn in session.turns {
+            if turn.role == "user" {
+                user_prompt = turn.content.clone();
+            } else if turn.role == "assistant" {
+                let json_resp = &turn.content;
+                let (raw_text, model_name, consensus, latency) =
+                    crate::parser::extract_markdown(json_resp);
+                let mut options = pulldown_cmark::Options::empty();
+                options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+                options.insert(pulldown_cmark::Options::ENABLE_TABLES);
+                options.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
+                options.insert(pulldown_cmark::Options::ENABLE_SMART_PUNCTUATION);
+
+                let html_output = if consensus == "Error" || consensus == "System" {
+                    raw_text.clone()
+                } else {
+                    let parser =
+                        pulldown_cmark::Parser::new_ext(&raw_text, options).map(
+                            |event| match event {
+                                pulldown_cmark::Event::Html(html)
+                                | pulldown_cmark::Event::InlineHtml(html) => {
+                                    pulldown_cmark::Event::Text(html)
+                                }
+                                _ => event,
+                            },
+                        );
+                    let mut out = String::new();
+                    pulldown_cmark::html::push_html(&mut out, parser);
+                    out
+                };
+
+                let is_fact = false; // We can extract it properly later if needed via parser
+
+                let tmpl = ChatResponseTemplate {
+                    mcp_feedback: String::new(),
+                    prompt: user_prompt.clone(),
+                    model_name,
+                    response_md: html_output,
+                    jsonai: json_resp.clone(),
+                    latency,
+                    consensus: consensus.clone(),
+                    is_fact,
+                    belief_state: 0.0,
+                    belief_pct: "0".to_string(),
+                    is_history: true,
+                };
+                history_html.push_str(&tmpl.render().unwrap_or_default());
+                user_prompt.clear();
+            }
+        }
+    }
     let roles = read_model_roles().await;
     let mut active_providers = Vec::new();
     for (id, role) in roles.roles {
@@ -2074,11 +2589,26 @@ async fn new_chat_session(State(state): State<AppState>, axum::extract::Form(for
     }
     active_providers.sort_by(|a, b| a.1.cmp(&b.1));
 
+    let mut active_sources_html = String::new();
+    if repo_name != "none" {
+        let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
+        active_sources_html.push_str(&format!(
+            "<div id=\"{}\" class=\"context-pill border-glow\" style=\"display:flex; align-items:center; gap:8px; padding: 6px 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 6px;\">\
+                <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px; color: var(--text-secondary);\"></i>\
+                <span style=\"flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;\">{} (Cognitive Tool)</span>\
+                <i data-lucide=\"brain\" style=\"width: 14px; height: 14px; margin: 0 4px; color: var(--text-tertiary);\"></i>\
+                <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"path\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\" style=\"background:none; border:none; cursor:pointer; padding: 0; outline: none; display: flex; align-items: center;\">\
+                    <i data-lucide=\"x\" style=\"width: 14px; height: 14px; color:var(--text-tertiary);\"></i>\
+                </button>\
+                <input type=\"hidden\" name=\"context_resource_item\" value=\"{}|{}|grey\">\
+            </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>", id_val, repo_name, repo_name, id_val, "github", repo_name));
+    }
+
     let template_html = ChatTemplate {
         session_id: session_id.clone(),
         history_html,
         github_configured,
-        active_sources_html: if repo_name != "none" { repo_name.clone() } else { String::new() },
+        active_sources_html,
         library_repos: vec![],
         active_providers,
     }
@@ -2129,8 +2659,9 @@ async fn handle_sse_stream(
 
     let session_id = state.current_chat_session.lock().await.clone();
     let prompt_for_save = prompt.clone();
-    let session_config = crate::chat_history::load_session(&session_id).and_then(|s| s.debate_config);
-    let debate_config = session_config.map(|c| crate::chat_history::DebateConfig {
+    let session_config =
+        crate::chat_history::load_session(&session_id).and_then(|s| s.debate_config);
+    let _debate_config = session_config.map(|c| crate::chat_history::DebateConfig {
         architect_provider: c.architect_provider,
         red_teamer_provider: c.red_teamer_provider,
         max_rounds: c.max_rounds,
@@ -2142,7 +2673,7 @@ async fn handle_sse_stream(
     tokio::spawn(async move {
         let mut agent = agent_arc.lock().await;
         agent.set_provider("consensus");
-        if let Err(e) = agent.run_debate(&prompt, tx.clone(), ).await {
+        if let Err(e) = agent.run_debate(&prompt, tx.clone()).await {
             let _ = tx
                 .send(DebateEvent::SystemEvent(format!(
                     "[ERREUR CASTRATHROPHIC CORTEX]: {}",
@@ -2242,6 +2773,88 @@ fn read_queue() -> Vec<VampireJob> {
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default()
+}
+
+async fn get_chat_assimilation_status(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let session = crate::chat_history::load_session(&id);
+    let repo_name = session
+        .and_then(|s| s.github_sources.first().cloned())
+        .unwrap_or_default();
+
+    if repo_name.is_empty() || repo_name == "none" {
+        return axum::response::Html(
+            "<div id='assimilation-banner' style='display:none;'></div>".to_string(),
+        );
+    }
+
+    let queue = read_queue();
+    let job_opt = queue.iter().find(|job| job.theme == repo_name);
+
+    if let Some(job) = job_opt {
+        let is_running = job.assimilation_status == "EN_ATTENTE"
+            || job.assimilation_status == "EN_COURS"
+            || job.vampire_status == "EN_ATTENTE"
+            || job.vampire_status == "EN_COURS"
+            || job.vampire_status == "EN ATTENTE"
+            || job.assimilation_status == "NON ASSIMILÉ";
+        let is_success = job.assimilation_status == "ASSIMILÉ";
+        let is_failure = job.assimilation_status == "ÉCHEC";
+
+        let (color, animation, hint, pulse_js) = if is_running {
+            (
+                "#e74c3c",
+                "animation: pulse 2s infinite;",
+                "Assimilation au RAG en cours...",
+                "",
+            )
+        } else if is_success {
+            (
+                "#2ecc71",
+                "",
+                "RAG Assimilé !",
+                "setTimeout(() => lucide.createIcons(), 50);",
+            )
+        } else if is_failure {
+            (
+                "#f39c12",
+                "",
+                "Échec de l'assimilation RAG",
+                "setTimeout(() => lucide.createIcons(), 50);",
+            )
+        } else {
+            (
+                "#95a5a6",
+                "",
+                "État RAG inconnu",
+                "setTimeout(() => lucide.createIcons(), 50);",
+            )
+        };
+
+        let hx_trigger = if is_running {
+            "hx-trigger='every 2s'"
+        } else {
+            ""
+        };
+        let hx_get = if is_running {
+            format!("hx-get='/api/chat/{}/assimilation_status'", id)
+        } else {
+            "".to_string()
+        };
+
+        axum::response::Html(format!(
+            "<div id='assimilation-banner' {} {} hx-swap='outerHTML' title='{}' style='display: flex; align-items: center; justify-content: center; padding: 4px 8px; border-radius: 6px; background: rgba(0,0,0,0.1); cursor: help;'>\
+                <i data-lucide='brain' style='width: 16px; height: 16px; color: {}; {}'></i>\
+                <script>{}</script>\
+             </div>",
+            hx_get, hx_trigger, hint, color, animation, pulse_js
+        ))
+    } else {
+        axum::response::Html(
+            "<div id='assimilation-banner' style='display:none;'></div>".to_string(),
+        )
+    }
 }
 
 fn write_queue(q: &Vec<VampireJob>) {
@@ -2345,9 +2958,7 @@ async fn get_debate_config_ui(
     axum::response::Html(template.render().unwrap())
 }
 
-async fn get_current_debate_config(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn get_current_debate_config(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
     get_debate_config_ui(axum::extract::Path(session_id)).await
 }
@@ -2365,9 +2976,7 @@ struct WorkspaceConfigTemplate {
     startup_script: String,
 }
 
-async fn get_workspace_config_ui(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+async fn get_workspace_config_ui(State(state): State<AppState>) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
     let session = crate::chat_history::load_session(&session_id);
     let config = session.and_then(|s| s.workspace_config).unwrap_or_default();
@@ -2385,14 +2994,26 @@ async fn post_workspace_config_ui(
     axum::extract::Form(form): axum::extract::Form<WorkspaceConfigForm>,
 ) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
-    
+
     let config = crate::chat_history::WorkspaceConfig {
-        base_image: if form.base_image.is_empty() { "fedora:latest".to_string() } else { form.base_image },
-        startup_script: if form.startup_script.trim().is_empty() { None } else { Some(form.startup_script) },
+        name: format!(
+            "workspace-{}",
+            session_id.chars().take(8).collect::<String>()
+        ),
+        base_image: if form.base_image.is_empty() {
+            "fedora:latest".to_string()
+        } else {
+            form.base_image
+        },
+        startup_script: if form.startup_script.trim().is_empty() {
+            None
+        } else {
+            Some(form.startup_script)
+        },
     };
-    
+
     crate::chat_history::update_workspace_config(&session_id, config);
-    
+
     // Auto-close modal after save
     axum::response::Html("<div id='workspace-config-modal'></div>".to_string())
 }
@@ -2415,7 +3036,7 @@ async fn post_debate_config_ui(
         max_rounds: form.max_rounds,
     };
     crate::chat_history::update_debate_config(&id, config);
-    
+
     // Auto-close modal after save
     axum::response::Html("<div id='debate-config-modal'></div>".to_string())
 }
@@ -2600,70 +3221,56 @@ async fn store_download_model(
 
 #[derive(serde::Deserialize)]
 struct AttachContextPayload {
-    repo_url: String,
-    analyze_mode: String,
+    res_type: String,
+    path: String,
+    priority: String,
 }
 
 async fn attach_context(
     State(state): State<AppState>,
     Form(payload): Form<AttachContextPayload>,
 ) -> impl IntoResponse {
-    let mode = payload.analyze_mode.as_str();
-    let repo = payload.repo_url.trim();
     let session_id = state.current_chat_session.lock().await.clone();
 
-    if mode == "async" {
-        let mut queue = read_queue();
-        let target_theme = format!("Codebase: {}", repo);
-        queue.push(VampireJob {
-            id: uuid::Uuid::new_v4().to_string(),
-            theme: target_theme.clone(),
-            notebook: repo.to_string(),
-            vampire_status: "EN ATTENTE".to_string(),
-            assimilation_status: "NON ASSIMILÉ".to_string(),
-            provider: "github".to_string(),
-        });
-        write_queue(&queue);
+    let res_item = crate::chat_history::ContextResource {
+        res_type: payload.res_type.clone(),
+        path: payload.path.clone(),
+        priority: payload.priority.clone(),
+    };
 
-        // Persist local session Context
-        let prefixed_repo = format!("github-async://{}", repo);
-        chat_history::append_github_source(&session_id, &prefixed_repo);
+    crate::chat_history::add_context_resource(&session_id, res_item.clone());
 
-        let id_val = format!("github-async-{}", uuid::Uuid::new_v4().simple());
-        let html_snippet = format!(
-            "<div id=\"{}\" class=\"context-pill context-pill-async\">\
-                <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
-                <span>{} (Async Queued)</span>\
-                <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
-                    <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
-                </button>\
-                <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
-            </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>",
-            id_val, repo, prefixed_repo, id_val, prefixed_repo
-        );
-        axum::response::Html(html_snippet)
-    } else {
-        chat_history::append_github_source(&session_id, repo);
-        let id_val = format!("github-otf-{}", uuid::Uuid::new_v4().simple());
+    let id_val = format!("ctx-{}", uuid::Uuid::new_v4().simple());
+    let lucide_icon = match payload.res_type.as_str() {
+        "github" => "github",
+        "folder" => "folder",
+        "web" => "globe",
+        _ => "file",
+    };
+    let brain_color_style = match payload.priority.as_str() {
+        "green" => "color: #2ecc71;", // RAG Vector
+        "gold" => "color: #f39c12; text-shadow: 0 0 5px rgba(243, 156, 18, 0.5);", // Prioritized System
+        _ => "color: var(--text-tertiary);",                                       // Grey MCP
+    };
 
-        let html_snippet = format!(
-            "<div id=\"{}\" class=\"context-pill context-pill-otf\">\
-                <i data-lucide=\"github\" class=\"icon-type\" style=\"width: 14px; height: 14px;\"></i>\
-                <span>{} (Cognitive Tool)</span>\
-                <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"repo\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\">\
-                    <i data-lucide=\"x\" style=\"width: 12px; height: 12px;\"></i>\
-                </button>\
-                <input type=\"hidden\" name=\"github_source_item\" value=\"{}\">\
-            </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>",
-            id_val, repo, repo, id_val, repo
-        );
-        axum::response::Html(html_snippet)
-    }
+    let html_snippet = format!(
+        "<div id=\"{}\" class=\"context-pill border-glow\" style=\"display:flex; align-items:center; gap:8px; padding: 6px 10px; background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.05); border-radius: 4px; margin-bottom: 6px;\">\
+            <i data-lucide=\"{}\" style=\"width: 14px; height: 14px; color: var(--text-secondary);\"></i>\
+            <span style=\"flex: 1; font-size: 11px; font-family: var(--font-mono); color: var(--text-primary); text-overflow: ellipsis; overflow: hidden; white-space: nowrap;\">{}</span>\
+            <i data-lucide=\"brain\" style=\"width: 14px; height: 14px; margin: 0 4px; {}\"></i>\
+            <button type=\"button\" hx-post=\"/api/chat/context/remove\" hx-vals='{{\"path\": \"{}\"}}' hx-target=\"#{}\" hx-swap=\"delete\" style=\"background:none; border:none; cursor:pointer; padding: 0; outline: none; display: flex; align-items: center;\">\
+                <i data-lucide=\"x\" style=\"width: 14px; height: 14px; color:var(--text-tertiary);\"></i>\
+            </button>\
+            <input type=\"hidden\" name=\"context_resource_item\" value=\"{}|{}|{}\">\
+        </div><script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>",
+        id_val, lucide_icon, payload.path, brain_color_style, payload.path, id_val, payload.res_type, payload.path, payload.priority
+    );
+    axum::response::Html(html_snippet)
 }
 
 #[derive(serde::Deserialize)]
 struct RemoveContextPayload {
-    repo: String,
+    path: String,
 }
 
 async fn remove_context(
@@ -2671,11 +3278,11 @@ async fn remove_context(
     Form(payload): Form<RemoveContextPayload>,
 ) -> impl IntoResponse {
     let session_id = state.current_chat_session.lock().await.clone();
-    chat_history::remove_github_source(&session_id, &payload.repo);
+    crate::chat_history::remove_context_resource(&session_id, &payload.path);
     axum::response::Html("") // Return empty block to swap out the pill
 }
 
-async fn system_airgap_mock(
+async fn system_airgap_toggle(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let enabled = params.get("enabled").map(|v| v == "true").unwrap_or(false);
@@ -2683,7 +3290,7 @@ async fn system_airgap_mock(
     axum::response::Html(format!("Air-Gapped: {}", enabled))
 }
 
-async fn system_heuristic_mock(
+async fn system_heuristic_update(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     let value = params
@@ -2702,10 +3309,10 @@ mod tests {
     use std::collections::HashMap;
 
     #[tokio::test]
-    async fn test_system_airgap_mock_toggle() {
+    async fn test_system_airgap_toggle() {
         let mut params = HashMap::new();
         params.insert("enabled".to_string(), "true".to_string());
-        let res = system_airgap_mock(Query(params)).await.into_response();
+        let res = system_airgap_toggle(Query(params)).await.into_response();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
     }
 
@@ -2713,7 +3320,7 @@ mod tests {
     async fn test_system_heuristic_mock_parsing() {
         let mut params = HashMap::new();
         params.insert("threshold".to_string(), "0.85".to_string());
-        let res = system_heuristic_mock(Query(params)).await.into_response();
+        let res = system_heuristic_update(Query(params)).await.into_response();
         assert_eq!(res.status(), axum::http::StatusCode::OK);
     }
 
@@ -2822,13 +3429,120 @@ mod tests {
     }
 }
 
-pub async fn ws_terminal_handler(State(_state): State<AppState>, axum::extract::Path(session_id): axum::extract::Path<String>, ws: axum::extract::ws::WebSocketUpgrade) -> axum::response::Response {
-    tracing::info!("📡 [WS] Demande d'upgrade WebSocket pour session: {}", session_id);
+pub async fn ws_terminal_handler(
+    State(_state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> axum::response::Response {
+    tracing::info!(
+        "📡 [WS] Demande d'upgrade WebSocket pour session: {}",
+        session_id
+    );
     ws.on_upgrade(move |socket| crate::terminal::handle_terminal_socket(socket, session_id))
 }
 
-pub async fn ws_ai_terminal_handler(State(state): State<AppState>, axum::extract::Path(session_id): axum::extract::Path<String>, ws: axum::extract::ws::WebSocketUpgrade) -> axum::response::Response {
-    tracing::info!("📡 [WS] Demande d'upgrade WebSocket (AI) pour session: {}", session_id);
+pub async fn ws_ai_terminal_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(session_id): axum::extract::Path<String>,
+    ws: axum::extract::ws::WebSocketUpgrade,
+) -> axum::response::Response {
+    tracing::info!(
+        "📡 [WS] Demande d'upgrade WebSocket (AI) pour session: {}",
+        session_id
+    );
     let terminal_rx = state.terminal_tx.subscribe();
-    ws.on_upgrade(move |socket| crate::terminal::handle_ai_terminal_socket(socket, session_id, terminal_rx))
+    ws.on_upgrade(move |socket| {
+        crate::terminal::handle_ai_terminal_socket(socket, session_id, terminal_rx)
+    })
+}
+
+// ==========================================
+// FORGE: BitNet 1.58b Training & Fine-Tuning
+// ==========================================
+
+async fn render_forge() -> impl IntoResponse {
+    Html(
+        ForgeTemplate {}
+            .render()
+            .unwrap_or_else(|_| "Erreur de rendu Forge".to_string()),
+    )
+}
+
+#[derive(serde::Serialize)]
+struct ForgeStatusResponse {
+    status: String,
+    loss: f32,
+    epoch: usize,
+}
+
+#[axum::debug_handler]
+async fn get_forge_status(State(state): State<AppState>) -> impl IntoResponse {
+    let mut guard = state.forge_state.lock().await;
+
+    if let Some(rx) = guard.as_mut() {
+        match &*rx.borrow() {
+            TrainingState::Active { loss, epoch } => axum::Json(ForgeStatusResponse {
+                status: "active".into(),
+                loss: *loss,
+                epoch: *epoch,
+            }),
+            TrainingState::Finished { final_loss } => axum::Json(ForgeStatusResponse {
+                status: "finished".into(),
+                loss: *final_loss,
+                epoch: 0,
+            }),
+            TrainingState::CircuitOpen { reason } => axum::Json(ForgeStatusResponse {
+                status: format!("circuit_open: {}", reason),
+                loss: 0.0,
+                epoch: 0,
+            }),
+        }
+    } else {
+        axum::Json(ForgeStatusResponse {
+            status: "idle".into(),
+            loss: 0.0,
+            epoch: 0,
+        })
+    }
+}
+
+#[axum::debug_handler]
+async fn start_forge(State(state): State<AppState>) -> impl IntoResponse {
+    let mut guard = state.forge_state.lock().await;
+
+    if guard.is_some() {
+        return axum::response::Html("La forge est déjà en cours d'exécution.".to_string());
+    }
+
+    tracing::info!("🛠️ [Forge API] Démarrage du pipeline d'entraînement Quantized (QAT)");
+
+    let (batch_tx, state_rx, recycle_rx) = r2d2_cortex::training::daemon::TrainingDaemon::spawn();
+
+    let tokenizer_path = std::path::PathBuf::from("data/tokenizer.json");
+    if !tokenizer_path.exists() {
+        return axum::response::Html(
+            "Le dictionnaire Tokenizer n'est pas présent dans data/tokenizer.json".to_string(),
+        );
+    }
+
+    let mut dataloader = match r2d2_cortex::training::dataloader::JsonAiDataloader::new(
+        &tokenizer_path,
+        batch_tx,
+        recycle_rx,
+    ) {
+        Ok(dl) => dl,
+        Err(e) => return axum::response::Html(format!("Erreur Dataloader : {}", e)),
+    };
+
+    let dataset_path = std::path::PathBuf::from("payloads.jsonl");
+
+    *guard = Some(state_rx);
+
+    tokio::spawn(async move {
+        if let Err(e) = dataloader.stream_dataset(&dataset_path).await {
+            tracing::error!("Erreur lors du traitement du dataset : {}", e);
+        }
+    });
+
+    axum::response::Html("Forge lancée. Les données sont en cours d'assimilation.".to_string())
 }

@@ -88,7 +88,8 @@ async fn main() -> Result<()> {
                                     .and_then(|a| a.as_str())
                                 {
                                     let full_text = format!("Thème: {}\n\n{}", theme, answer);
-                                    let chunks = r2d2_chunker::TextChunker::chunk_text(&full_text, 200, 40);
+                                    let chunks =
+                                        r2d2_chunker::TextChunker::chunk_text(&full_text, 200, 40);
                                     all_chunks.extend(chunks);
                                 }
                             } else {

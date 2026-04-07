@@ -14,8 +14,16 @@ fn default_pinned() -> bool {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-#[derive(Default)]
+pub struct ContextResource {
+    pub res_type: String, // "github", "file", "folder", "web"
+    pub path: String,     // repo name, or physical path, or URL
+    pub priority: String, // "grey" (MCP), "green" (RAG), "gold" (System Prompt)
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
 pub struct WorkspaceConfig {
+    pub name: String,
     pub base_image: String,
     pub startup_script: Option<String>,
 }
@@ -36,6 +44,8 @@ pub struct ChatSession {
     pub pinned: bool,
     #[serde(default)]
     pub github_sources: Vec<String>,
+    #[serde(default)]
+    pub context_resources: Vec<ContextResource>,
     pub debate_config: Option<DebateConfig>,
     pub workspace_config: Option<WorkspaceConfig>,
     pub turns: Vec<ChatTurn>,
@@ -59,7 +69,10 @@ pub fn save_turn(
             updated_at: 0,
             pinned: false,
             github_sources: current_sources.clone(),
-            debate_config: None, workspace_config: None, turns: vec![],
+            context_resources: vec![],
+            debate_config: None,
+            workspace_config: None,
+            turns: vec![],
         })
     } else {
         ChatSession {
@@ -68,7 +81,10 @@ pub fn save_turn(
             updated_at: 0,
             pinned: false,
             github_sources: current_sources.clone(),
-            debate_config: None, workspace_config: None, turns: vec![],
+            context_resources: vec![],
+            debate_config: None,
+            workspace_config: None,
+            turns: vec![],
         }
     };
 
@@ -149,35 +165,21 @@ pub fn toggle_pin_session(session_id: &str) {
     }
 }
 
-pub fn append_github_source(session_id: &str, source: &str) {
-    let mut session = load_session(session_id).unwrap_or_else(|| ChatSession {
-        id: session_id.to_string(),
-        title: "Nouvelle Conversation".to_string(),
-        updated_at: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        pinned: false,
-        github_sources: vec![],
-        debate_config: None, workspace_config: None, turns: vec![],
-    });
-
-    if !session.github_sources.contains(&source.to_string()) {
-        session.github_sources.push(source.to_string());
-
-        // Save immediately
-        let dir = PathBuf::from("data/chats");
-        let _ = fs::create_dir_all(&dir);
-        let file_path = dir.join(format!("{}.json", session_id));
+pub fn add_context_resource(session_id: &str, res: ContextResource) {
+    if let Some(mut session) = load_session(session_id) {
+        // Remove existing resource with same path if any
+        session.context_resources.retain(|r| r.path != res.path);
+        session.context_resources.push(res);
+        let file_path = PathBuf::from("data/chats").join(format!("{}.json", session_id));
         if let Ok(json) = serde_json::to_string_pretty(&session) {
             let _ = fs::write(file_path, json);
         }
     }
 }
 
-pub fn remove_github_source(session_id: &str, source: &str) {
+pub fn remove_context_resource(session_id: &str, path: &str) {
     if let Some(mut session) = load_session(session_id) {
-        session.github_sources.retain(|s| s != source);
+        session.context_resources.retain(|r| r.path != path);
         let file_path = PathBuf::from("data/chats").join(format!("{}.json", session_id));
         if let Ok(json) = serde_json::to_string_pretty(&session) {
             let _ = fs::write(file_path, json);
@@ -205,17 +207,5 @@ pub fn update_debate_config(session_id: &str, config: DebateConfig) {
     if let Some(mut session) = load_session(session_id) {
         session.debate_config = Some(config);
         save_session(session_id, session);
-    }
-}
-
-pub fn render_history(session_id: &str) -> String {
-    if let Some(session) = load_session(session_id) {
-        let mut html = String::new();
-        for turn in session.turns {
-            html.push_str(&format!("<div class='chat-message {}'>{}</div>", turn.role, turn.content));
-        }
-        html
-    } else {
-        String::new()
     }
 }

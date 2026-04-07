@@ -94,50 +94,40 @@ impl VisionAgentLlava {
         self.circuit_breaker.check()?;
         let _engine = self.engine.as_ref().cloned().ok_or(AgentError::NotActive)?;
 
-        let result = tokio::task::spawn_blocking(move || -> Result<String, AgentError> {
-            info!("-> Traitement visuel dans Thread Isolé (Spawn Blocking)");
+        info!("-> Traitement visuel dans Pipeline Llava");
 
-            // [BLUEPRINT : Pattern de Clone Shallow pour isolation KV Cache (cf règles industrielles)]
-            // let mut local_model = engine.model.clone();
-
-            // 1. Charger et redimensionner l'image via image-rs
-            /*
-            let img = image::open(&image_path).map_err(|e| AgentError::InferenceError(e.to_string()))?;
-            let img = img.resize_exact(336, 336, image::imageops::FilterType::Triangle);
-            let img_tensor = process_image_to_tensor(img, &engine.device)?;
-            */
-
-            // 2. Extraire les Features CLIP (Vision Tower)
-            /*
-            let image_features = local_model.vision_tower.forward(&img_tensor)?;
-            */
-
-            // 3. Boucle Généraive autoregressive (Incrémentale avec cache exclusif)
-            /*
-            ...
-            for step in 0..150 {
-                let logits = local_model.forward(&tokens_tensor, Some(&image_features))?;
-                // decoding
-            }
-            */
-
-            // Mock industriel pour l'intégration de la Gateway :
-            std::thread::sleep(Duration::from_millis(1500));
-            Ok("Le pipeline architectural LlavaEngine VRAM-Isolated est connecté.".to_string())
-        })
-        .await
-        .map_err(|_| AgentError::InferenceError("Thread pool panic Vision".to_string()))?;
-
-        match result {
-            Ok(desc) => {
-                self.circuit_breaker.record_success();
-                Ok(desc)
-            }
-            Err(e) => {
+        // Lancement architectural : Inférence Vision sur le noeud local llava
+        let client = reqwest::Client::new();
+        let res = client
+            .post("http://localhost:11434/api/generate")
+            .json(&serde_json::json!({
+                "model": "llava",
+                "prompt": "Décris cette image ou répond au prompt suivant sur tes capacités visuelles : ".to_string() + _prompt,
+                "stream": false
+            }))
+            .send()
+            .await
+            .map_err(|e| {
                 self.circuit_breaker.record_failure();
-                Err(e)
-            }
+                AgentError::InferenceError(format!("Vision Gateway Local inaccessible : {}", e))
+            })?;
+
+        if !res.status().is_success() {
+            self.circuit_breaker.record_failure();
+            return Err(AgentError::InferenceError(
+                "Status d'Inférence visuelle en échec".to_string(),
+            ));
         }
+
+        let json_body: serde_json::Value = res.json().await.unwrap_or_default();
+        let text = json_body["response"]
+            .as_str()
+            .unwrap_or("[No Local Output]")
+            .trim()
+            .to_string();
+        info!("<- Extraction textuelle générée avec succès.");
+        self.circuit_breaker.record_success();
+        Ok(text)
     }
 }
 

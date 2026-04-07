@@ -1,4 +1,107 @@
-<aside id="ag-context-target" hx-swap-oob="true"></aside>
+<aside id="ag-context-target" class="ag-sidebar-context" hx-swap-oob="true" style="width: 320px; min-width: 320px; border-left: 1px solid var(--jules-border); display: flex; flex-direction: column;">
+    <!-- HEADER -->
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; background: var(--bg-void); border-bottom: 1px solid var(--jules-border);">
+        <span style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.1em; color: var(--text-secondary);">Workspace Inspector</span>
+        <div style="display: flex; gap: 12px;">
+            <i data-lucide="filter" style="width: 14px; cursor: pointer; color: var(--text-tertiary);" title="Filtrer"></i>
+            <i data-lucide="layout-sidebar" style="width: 14px; cursor: pointer; color: var(--text-primary);" onclick="toggleInspector()" title="Masquer"></i>
+        </div>
+    </div>
+    
+    <!-- ACCORDIONS -->
+    <div style="flex: 1; overflow-y: auto; padding: 8px 0;">
+        <style>
+            .ag-inspector-group {
+                border-bottom: 1px solid rgba(255,255,255,0.02);
+            }
+            .ag-inspector-summary {
+                padding: 8px 20px;
+                cursor: pointer;
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+                color: var(--text-tertiary);
+                transition: color 0.15s, background 0.15s;
+                user-select: none;
+                list-style: none; /* Hide default arrow */
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .ag-inspector-summary::-webkit-details-marker { display: none; }
+            .ag-inspector-summary:hover {
+                color: var(--text-secondary);
+                background: rgba(255,255,255,0.02);
+            }
+            .ag-inspector-group[open] .ag-inspector-summary {
+                color: var(--accent-brand);
+            }
+            .ag-inspector-content {
+                padding: 12px 20px 20px 20px;
+                font-size: 12px;
+                color: var(--text-secondary);
+            }
+        </style>
+        
+        <details class="ag-inspector-group" open>
+            <summary class="ag-inspector-summary" style="display: flex; justify-content: space-between; align-items: center;">
+                <div><i data-lucide="archive" style="width: 14px; height: 14px;"></i> Ressources RAG</div>
+                <button type="button" onclick="document.getElementById('add-context-modal').style.display='flex';" style="background:none; border:none; color:var(--text-secondary); cursor:pointer;">
+                    <i data-lucide="plus" style="width: 14px; height: 14px;"></i>
+                </button>
+            </summary>
+            <div class="ag-inspector-content" id="rag-resources-panel">
+                {{ active_sources_html|safe }}
+                
+                <div style="margin-top: 16px;">
+                    <div style="font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: 8px;">Documentation</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.02);">
+                        <span style="display: flex; align-items: center; gap: 8px; color: var(--text-primary);">
+                            <i data-lucide="file-text" style="width: 12px; color: var(--accent-brand);"></i>
+                            ARCHITECTURE.md
+                        </span>
+                        <i data-lucide="brain" style="width: 12px; color: #22c55e;" title="Indexé dans le RAG"></i>
+                    </div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.02);">
+                        <span style="display: flex; align-items: center; gap: 8px; color: var(--text-primary);">
+                            <i data-lucide="file-text" style="width: 12px; color: var(--accent-brand);"></i>
+                            ATC_R2D2.md
+                        </span>
+                        <i data-lucide="brain" style="width: 12px; color: #22c55e;" title="Indexé dans le RAG"></i>
+                    </div>
+
+                    <div style="font-size: 10px; color: var(--text-tertiary); text-transform: uppercase; margin-bottom: 8px; margin-top: 16px;">Composants Logiciels</div>
+                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.02);">
+                        <span style="display: flex; align-items: center; gap: 8px; color: var(--text-primary);">
+                            <i data-lucide="file-code" style="width: 12px; color: #eab308;"></i>
+                            reasoning_agent.rs
+                        </span>
+                        <i data-lucide="brain" style="width: 12px; color: #f59e0b;" class="pulsing-brain" title="Assimilation en cours..."></i>
+                    </div>
+                </div>
+            </div>
+        </details>
+
+        <details class="ag-inspector-group" open>
+            <summary class="ag-inspector-summary">
+                <i data-lucide="activity" style="width: 14px; height: 14px;"></i> Télémétrie LLM & Traces
+            </summary>
+            <div class="ag-inspector-content" id="rag-telemetry-panel">
+                <div style="opacity: 0.6; font-style: italic; font-size: 11px; text-align: center; padding: 24px 0;">
+                    En attente d'interaction...
+                </div>
+            </div>
+        </details>
+    </div>
+    <style>
+        @keyframes pulse-brain { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.1); } 100% { opacity: 1; transform: scale(1); } }
+        .pulsing-brain { animation: pulse-brain 1.5s infinite ease-in-out; }
+    </style>
+    <script>
+        if(typeof lucide !== 'undefined') lucide.createIcons();
+    </script>
+</aside>
 
 <div style="display: flex; height: 100%; width: 100%; background: var(--jules-main-bg); overflow: hidden;">
     
@@ -20,16 +123,17 @@
             </button>
         </div>
     </div>
+    
+    <!-- RAG ASSIMILATION STATUS INDICATOR -->
+    <div id="assimilation-banner-container" hx-get="/api/chat/{{ session_id }}/assimilation_status" hx-trigger="load, every 2s" hx-swap="outerHTML"></div>
 
     <!-- MESSAGES (CHAT HISTORY) -->
     <div id="chat-history" class="chat-history" style="flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 24px; align-items: center;">
         {% if history_html.is_empty() %}
         <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: 0.5; margin-top: 10vh;">
-            <i data-lucide="zap" style="width: 32px; height: 32px; margin-bottom: 16px; color: var(--text-tertiary);"></i>
-            <h2 style="font-family: var(--font-mono); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px;">Cortex Prêt</h2>
-            <p style="text-align: center; font-size: 11px; max-width: 250px; color: var(--text-tertiary); line-height: 1.5;">
-                Assignez des tâches au système. Les réponses R2D2 sont déduites du graphe E5 ou de l'astuce réseau.
-            </p>
+            <i data-lucide="cpu" style="width: 48px; height: 48px; margin-bottom: 16px;"></i>
+            <h3 style="margin: 0; font-family: var(--font-mono); font-weight: 600;">CORTEX CORE READY</h3>
+            <p style="font-size: 12px; margin-top: 8px;">Waiting for cognitive input...</p>
         </div>
         {% else %}
         {{ history_html|safe }}
@@ -38,22 +142,21 @@
 
     <!-- INPUT AREA -->
     <div style="padding: 24px; background: var(--bg-surface); display: flex; justify-content: center;">
-        <form id="chat-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" style="width: 100%; max-width: 800px;">
+        <form id="chat-form" hx-post="/api/chat" hx-target="#chat-history" hx-swap="beforeend" hx-include="#rag-resources-panel input" style="width: 100%; max-width: 800px;">
             <div class="input-shell" style="box-shadow: 0 4px 20px rgba(0,0,0,0.5); border-radius: var(--radius-md); background: var(--bg-void); border: 1px solid var(--panel-border);">
                 <textarea 
                     id="chat-input"
                     name="prompt" 
                     placeholder="Posez une question..."
                     rows="1"
-                    style="min-height: 36px; padding: 10px 12px; max-height: 250px; font-size: 12px;"
-                    oninput="this.style.height = ''; this.style.height = Math.min(this.scrollHeight, 250) + 'px'"
-                    onkeydown="if(event.key === 'Enter' && !event.shiftKey && !event.altKey) { event.preventDefault(); document.getElementById('chat-form').dispatchEvent(new Event('submit', { cancelable: true })); document.querySelector('#chat-form button[type=submit]').click(); }"
-                    required
+                    class="raw-input"
+                    style="width: 100%; padding: 16px; border: none; background: transparent; font-size: 14px; resize: none; color: var(--text-primary); outline: none; box-sizing: border-box; max-height: 200px;"
+                    onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); document.getElementById('chat-submit-btn').click();}"
+                    oninput="this.style.height = ''; this.style.height = this.scrollHeight + 'px'"
                 ></textarea>
                 
                 <div class="input-toolbar" style="padding: 6px 12px; justify-content: space-between;">
                     <div class="input-toolbar-left" style="gap: 8px;">
-                        <input type="hidden" name="github_sources" value="{{ active_sources_html }}">
                         <!-- Provider Select -->
                         <div class="custom-select" style="min-width: 140px; display: flex; align-items: center; gap: 4px;">
                             <div style="position: relative; width: 100%;">
@@ -72,8 +175,8 @@
                         </div>
                     </div>
                     
-                    <button type="submit" class="btn-primary" style="padding: 4px 10px; font-size: 10px; border-radius: 4px;">
-                        <i data-lucide="send" style="width: 12px;"></i> Envoyer
+                    <button id="chat-submit-btn" type="submit" class="btn-primary btn-play" style="padding: 6px; font-size: 12px; border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: var(--accent-brand); border: none; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 0 10px rgba(0,0,0,0.5);">
+                        <i id="chat-submit-icon" data-lucide="play" style="width: 16px; height: 16px; color: white; transform: translateX(1px);"></i>
                     </button>
                 </div>
             </div>
@@ -154,13 +257,21 @@
         if(emptyState) emptyState.remove();
         
         history.insertAdjacentHTML('beforeend', tempHtml);
-        if(typeof lucide !== 'undefined') lucide.createIcons();
-        history.scrollTop = history.scrollHeight;
+        const submitBtn = document.getElementById('chat-submit-btn');
+        if (submitBtn) {
+            submitBtn.style.backgroundColor = '#e74c3c';
+            submitBtn.style.transform = 'scale(0.95)';
+            submitBtn.innerHTML = '<i data-lucide="square" style="width: 14px; height: 14px; color: white;"></i>';
+            if(typeof lucide !== 'undefined') lucide.createIcons();
+            // Laissez HTMX processer l'envoi avant de locker
+            setTimeout(() => { submitBtn.disabled = true; }, 10);
+        }
+        inputEl.readOnly = true;
 
         setTimeout(() => {
             inputEl.value = '';
             inputEl.style.height = '';
-        }, 10);
+        }, 100);
 
         if (pollInterval) clearInterval(pollInterval);
         pollInterval = setInterval(async () => {
@@ -182,6 +293,19 @@
             if (pollInterval) clearInterval(pollInterval);
             document.querySelectorAll('[id^="temp-msg-"]').forEach(el => el.remove());
             
+            const submitBtn = document.getElementById('chat-submit-btn');
+            if (submitBtn) {
+                submitBtn.style.backgroundColor = 'var(--accent-brand)';
+                submitBtn.style.transform = 'scale(1)';
+                submitBtn.innerHTML = '<i id="chat-submit-icon" data-lucide="play" style="width: 16px; height: 16px; color: white; transform: translateX(1px);"></i>';
+                submitBtn.disabled = false;
+            }
+            const inputEl = document.getElementById('chat-input');
+            if (inputEl) {
+                inputEl.readOnly = false;
+                inputEl.focus();
+            }
+
             if(typeof lucide !== 'undefined') lucide.createIcons();
             let history = document.getElementById('chat-history');
             if (history) history.scrollTop = history.scrollHeight;
@@ -203,5 +327,43 @@
         }
     }, 100);
 </script>
+
+<!-- MODAL ADD CONTEXT RESOURCE -->
+<div id="add-context-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; font-family: var(--font-mono);">
+    <div class="glass-card" style="padding: 24px; min-width: 400px; box-shadow: 0 10px 40px rgba(0,0,0,0.8);">
+        <h3 style="margin-top: 0; color: var(--accent-brand);">Nouvelle Ressource RAG</h3>
+        <form hx-post="/api/chat/context/attach" hx-target="#rag-resources-panel" hx-swap="afterbegin" onsubmit="document.getElementById('add-context-modal').style.display='none';">
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 11px; margin-bottom: 4px; color: var(--text-tertiary);">Type</label>
+                <select name="res_type" class="raw-input" style="width: 100%; padding: 8px; font-family: var(--font-mono); font-size: 11px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--panel-border);">
+                    <option value="file">Fichier Local</option>
+                    <option value="folder">Dossier Local</option>
+                    <option value="github">Dépôt GitHub</option>
+                    <option value="web">Page Web / URL</option>
+                </select>
+            </div>
+            
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 11px; margin-bottom: 4px; color: var(--text-tertiary);">Sélecteur (Path / URL / Dépôt)</label>
+                <input type="text" name="path" required placeholder="/home/jGx/... ou repo/nom" class="raw-input" style="width: 100%; padding: 8px; font-family: var(--font-mono); font-size: 11px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--panel-border);">
+            </div>
+            
+            <div style="margin-bottom: 24px;">
+                <label style="display: block; font-size: 11px; margin-bottom: 4px; color: var(--text-tertiary);">Niveau d'Intégration (Cerveau)</label>
+                <select name="priority" class="raw-input" style="width: 100%; padding: 8px; font-family: var(--font-mono); font-size: 11px; background: rgba(0,0,0,0.5); color: #fff; border: 1px solid var(--panel-border);">
+                    <option value="grey">Dynamique (Gris) - Pointeur MCP à la volée</option>
+                    <option value="green">Vectorisé (Vert) - Indexation RAG locale</option>
+                    <option value="gold">Priorisé (Brillant) - Injecté dans le System Prompt</option>
+                </select>
+            </div>
+            
+            <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                <button type="button" class="btn-secondary" onclick="document.getElementById('add-context-modal').style.display='none';">Annuler</button>
+                <button type="submit" class="btn-primary">Ajouter</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 
 <div id="modal-container"></div>
