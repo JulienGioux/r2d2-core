@@ -18,7 +18,7 @@ static SPAWN_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
 pub fn spawn_terminal(
     workspace_id: Option<&str>,
 ) -> Result<(TerminalSession, bool, Option<String>)> {
-    let _guard = SPAWN_LOCK.lock().unwrap();
+    let _guard = SPAWN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let pty_system = NativePtySystem::default();
 
     let pair = pty_system.openpty(PtySize {
@@ -125,8 +125,20 @@ pub async fn handle_terminal_socket(socket: WebSocket, session_id: String) {
     };
 
     let (mut ws_sender, mut ws_receiver) = socket.split();
-    let reader = Arc::new(Mutex::new(term_session.master.try_clone_reader().unwrap()));
-    let writer = Arc::new(Mutex::new(term_session.master.take_writer().unwrap()));
+    let reader = match term_session.master.try_clone_reader() {
+        Ok(r) => Arc::new(Mutex::new(r)),
+        Err(e) => {
+            eprintln!("Failed to clone reader: {:?}", e);
+            return;
+        }
+    };
+    let writer = match term_session.master.take_writer() {
+        Ok(w) => Arc::new(Mutex::new(w)),
+        Err(e) => {
+            eprintln!("Failed to take writer: {:?}", e);
+            return;
+        }
+    };
 
     if is_newly_booted {
         if let Some(script) = ws_startup_script {

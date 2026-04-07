@@ -66,62 +66,52 @@ impl SsmBlock {
 
         // 1. Consommation et Recyclage du KV-Cache !
         let mut state = prev_state.unwrap_or_else(|| vec![0.0f32; dim]);
+        let mut y_seq = vec![0.0f32; seq_len * dim];
 
-        let mut h_seq = vec![0.0f32; seq_len * dim];
-
-        // 2. Scan temporel séquentiel (MatMul-Free & SIMD Vectorized)
+        // 2. Scan temporel séquentiel SIMD Zéro-Aliasing (Pas de Rayon)
         for t in 0..seq_len {
             let offset = t * dim;
             let x_t = &x_vec[offset..offset + dim];
-            let h_t = &mut h_seq[offset..offset + dim];
+            let y_t = &mut y_seq[offset..offset + dim];
 
-            for i in 0..dim {
-                // Projection B (Ternaire -> x_in local)
+            // A) Vecteur B * x_t (MatMul-Free via Zip/Fold)
+            let mut bx_t = vec![0.0f32; dim];
+            bx_t.iter_mut().enumerate().for_each(|(i, bx_i)| {
                 let b_row = &b_vec[i * dim..(i + 1) * dim];
-                let mut x_in = 0.0;
-                for j in 0..dim {
-                    let w = b_row[j];
+                *bx_i = b_row.iter().zip(x_t.iter()).fold(0.0, |acc, (&w, &val)| {
                     if w > 0.5 {
-                        x_in += x_t[j];
+                        acc + val
                     } else if w < -0.5 {
-                        x_in -= x_t[j];
+                        acc - val
+                    } else {
+                        acc
                     }
-                }
-
-                // Mamba Recurrence : h_new = decay * h_prev + x_in
-                let h_new = a_vec[i] * state[i] + x_in;
-
-                // Zéro-Aliasing in-place updates
-                state[i] = h_new;
-                h_t[i] = h_new;
-            }
-        }
-
-        // 3. Projection C Parallélisée (Rayon)
-        let mut y_seq = vec![0.0f32; seq_len * dim];
-        use rayon::prelude::*;
-
-        y_seq
-            .par_chunks_exact_mut(dim)
-            .enumerate()
-            .for_each(|(t, y_t)| {
-                let offset = t * dim;
-                let h_t = &h_seq[offset..offset + dim];
-
-                for i in 0..dim {
-                    let c_row = &c_vec[i * dim..(i + 1) * dim];
-                    let mut y_v = 0.0;
-                    for j in 0..dim {
-                        let w = c_row[j];
-                        if w > 0.5 {
-                            y_v += h_t[j];
-                        } else if w < -0.5 {
-                            y_v -= h_t[j];
-                        }
-                    }
-                    y_t[i] = y_v;
-                }
+                });
             });
+
+            // B) Mamba SSM Recurrence (SIMD In-Place) -> h_t = A * h_{t-1} + B * x_t
+            state
+                .iter_mut()
+                .zip(a_vec.iter())
+                .zip(bx_t.iter())
+                .for_each(|((h_i, &a_i), &bx_i)| {
+                    *h_i = (a_i * *h_i) + bx_i;
+                });
+
+            // C) Vecteur y_t = C * h_t (MatMul-Free via Zip/Fold)
+            y_t.iter_mut().enumerate().for_each(|(i, y_i)| {
+                let c_row = &c_vec[i * dim..(i + 1) * dim];
+                *y_i = c_row.iter().zip(state.iter()).fold(0.0, |acc, (&w, &s)| {
+                    if w > 0.5 {
+                        acc + s
+                    } else if w < -0.5 {
+                        acc - s
+                    } else {
+                        acc
+                    }
+                });
+            });
+        }
 
         let out_tensor = Tensor::from_vec(y_seq, (seq_len, dim), x.device())?;
         Ok((out_tensor, state))

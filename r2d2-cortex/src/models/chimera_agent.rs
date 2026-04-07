@@ -64,11 +64,29 @@ impl CognitiveAgent for ChimeraAgent {
 
         let config = self.config.clone();
 
-        info!("   [Chimera] Création du Mock Graphe Local...");
+        // 1. Initialisation de l'architecture mathématique
+        // Si la Forge a généré le fichier QAT, on l'utilise. Sinon, Fallback Mock pour l'UX/CI.
+        let model = if std::path::Path::new("chimera_qat.safetensors").exists() {
+            info!("   [Chimera] Graphe réel détecté. Montage de l'Inférence QAT Safetensors...");
+            // Lecture des poids via mmap (Standard Candle)
+            let vb = unsafe {
+                candle_nn::VarBuilder::from_mmaped_safetensors(
+                    &["chimera_qat.safetensors"],
+                    candle_core::DType::F32,
+                    &self.device,
+                )
+            }
+            .map_err(|e| AgentError::LoadError(format!("VarBuilder failure: {}", e)))?;
 
-        // 1. Initialisation de l'architecture mathématique pure (Mock des tenseurs)
-        let model = ChimeraModel::new_mocked(&config, &self.device)
-            .map_err(|e| AgentError::LoadError(format!("Erreur d'ancrage Chimera: {}", e)))?;
+            ChimeraModel::new_qat(&config, vb)
+                .map_err(|e| AgentError::LoadError(format!("Instanciation QAT échouée: {}", e)))?
+        } else {
+            info!(
+                "   [Chimera] chimera_qat.safetensors introuvable. Fallback Graphe Mock (CI/UX)..."
+            );
+            ChimeraModel::new_mocked(&config, &self.device)
+                .map_err(|e| AgentError::LoadError(format!("Erreur Mock Chimera: {}", e)))?
+        };
 
         // 2. Initialisation du Tokenizer Llama3 depuis HF (car on teste bien le décodage)
         let api_result = hf_hub::api::tokio::ApiBuilder::new()

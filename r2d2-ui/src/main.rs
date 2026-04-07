@@ -31,7 +31,9 @@ use sysinfo::System;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_stream::StreamExt;
 
+mod api_inference;
 mod chat_history;
+mod error;
 mod github_api;
 mod logger;
 mod parser;
@@ -441,6 +443,10 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let api_routes = Router::new()
+        .route(
+            "/api/inference/stream",
+            get(api_inference::chimera_stream_handler),
+        )
         .route("/widgets/status", get(get_status_widget))
         .route("/chat", post(handle_chat))
         .route("/chat/status", get(get_chat_status))
@@ -546,30 +552,32 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn render_index() -> impl IntoResponse {
+async fn render_index() -> Result<impl IntoResponse, crate::error::AppError> {
     let tmpl = IndexTemplate {
         _status: "ACTIF (Air-Gapped)",
     };
-    Html(tmpl.render().unwrap())
+    Ok(Html(tmpl.render()?))
 }
 
-async fn render_sidebar_system() -> impl IntoResponse {
-    Html(SidebarSystemTemplate {}.render().unwrap())
+async fn render_sidebar_system() -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(SidebarSystemTemplate {}.render()?))
 }
 
-async fn render_sidebar_store(State(state): State<AppState>) -> impl IntoResponse {
+async fn render_sidebar_store(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let local_models = state.hf_models_cache.read().await.clone();
-    Html(SidebarStoreTemplate { local_models }.render().unwrap())
+    Ok(Html(SidebarStoreTemplate { local_models }.render()?))
 }
 
-async fn render_sidebar_memory() -> impl IntoResponse {
-    Html(SidebarMemoryTemplate {}.render().unwrap())
+async fn render_sidebar_memory() -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(SidebarMemoryTemplate {}.render()?))
 }
-async fn render_sidebar_mcp() -> impl IntoResponse {
-    Html(SidebarMcpTemplate {}.render().unwrap())
+async fn render_sidebar_mcp() -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(SidebarMcpTemplate {}.render()?))
 }
-async fn render_sidebar_settings() -> impl IntoResponse {
-    Html(SidebarSettingsTemplate {}.render().unwrap())
+async fn render_sidebar_settings() -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(SidebarSettingsTemplate {}.render()?))
 }
 
 #[derive(Template)]
@@ -580,8 +588,8 @@ struct ModelEditorTemplate {
 
 async fn render_editor_model(
     axum::extract::Path(id): axum::extract::Path<String>,
-) -> impl IntoResponse {
-    Html(ModelEditorTemplate { id }.render().unwrap())
+) -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(ModelEditorTemplate { id }.render()?))
 }
 
 async fn render_editor_memory(
@@ -646,7 +654,9 @@ async fn tail_logs() -> impl IntoResponse {
     Html(html_lines)
 }
 
-async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
+async fn render_dashboard(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let mut sys = state.sys.lock().await;
     sys.refresh_memory();
 
@@ -719,11 +729,12 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
         0
     };
 
-    let db_connections = 3; // TODO: Query blackboard pool stats
+    // Connexions Blackboard actives (Valeur proxy temporaire, le vrai décompte nécessite l'exposition du pool sqlx)
+    let db_connections = 3;
 
     let vibe = state.circadian_rx.borrow().clone();
 
-    Html(
+    Ok(Html(
         DashboardTemplate {
             total_ram_gb: format!("{:.1}", total_ram),
             used_ram_gb: format!("{:.1}", used_ram),
@@ -745,12 +756,13 @@ async fn render_dashboard(State(state): State<AppState>) -> impl IntoResponse {
             dissonance: vibe.dissonance,
             tension: vibe.tension,
         }
-        .render()
-        .unwrap(),
-    )
+        .render()?,
+    ))
 }
 
-async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
+async fn render_chat(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let session_id = state.current_chat_session.lock().await.clone();
     let mut history_html = String::new();
     let mut active_sources_html = String::new();
@@ -864,8 +876,7 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
                         is_fact,
                         is_history: true,
                     }
-                    .render()
-                    .unwrap(),
+                    .render()?,
                 );
                 i += 2;
             } else {
@@ -904,7 +915,7 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
     }
     active_providers.sort_by(|a, b| a.1.cmp(&b.1));
 
-    Html(
+    Ok(Html(
         ChatTemplate {
             session_id: session_id.clone(),
             history_html,
@@ -913,15 +924,16 @@ async fn render_chat(State(state): State<AppState>) -> impl IntoResponse {
             library_repos: final_library_repos,
             active_providers,
         }
-        .render()
-        .unwrap(),
-    )
+        .render()?,
+    ))
 }
-async fn render_cortex() -> impl IntoResponse {
-    Html(CortexTemplate {}.render().unwrap())
+async fn render_cortex() -> Result<impl IntoResponse, crate::error::AppError> {
+    Ok(Html(CortexTemplate {}.render()?))
 }
 
-async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
+async fn render_memory(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let agent = state.agent.lock().await;
     let (total_vectors, sample_axioms) = if let Some(mem) = &agent.memory {
         (mem.len(), mem.get_sample_axioms(6))
@@ -934,7 +946,7 @@ async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
     let db_idle_conns = 4;
     let db_status = "OK (max=10)".to_string();
 
-    Html(
+    Ok(Html(
         MemoryTemplate {
             total_vectors,
             sample_axioms,
@@ -942,12 +954,13 @@ async fn render_memory(State(state): State<AppState>) -> impl IntoResponse {
             db_idle_conns,
             db_status,
         }
-        .render()
-        .unwrap(),
-    )
+        .render()?,
+    ))
 }
 
-async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
+async fn render_store(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let t0 = std::time::Instant::now();
     let cached_models = state.hf_models_cache.read().await.clone();
     let t1 = std::time::Instant::now();
@@ -1039,8 +1052,7 @@ async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
             curated_models,
             db_error,
         }
-        .render()
-        .unwrap(),
+        .render()?,
     );
 
     let t5 = std::time::Instant::now();
@@ -1053,10 +1065,12 @@ async fn render_store(State(state): State<AppState>) -> impl IntoResponse {
         t5.duration_since(t0)
     );
 
-    html_res
+    Ok(html_res)
 }
 
-async fn render_cloud_models(State(_state): State<AppState>) -> impl IntoResponse {
+async fn render_cloud_models(
+    State(_state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     use r2d2_cortex::security::vault::Vault;
 
     let t0 = std::time::Instant::now();
@@ -1215,7 +1229,7 @@ async fn render_cloud_models(State(_state): State<AppState>) -> impl IntoRespons
         t0.elapsed(),
         cloud_models.len()
     );
-    Html(CloudModelsTemplate { cloud_models }.render().unwrap())
+    Ok(Html(CloudModelsTemplate { cloud_models }.render()?))
 }
 
 #[derive(serde::Deserialize)]
@@ -1348,7 +1362,7 @@ async fn delete_mcp_tool(
 }
 
 // --- Administration (Vault) ---
-async fn render_admin() -> impl IntoResponse {
+async fn render_admin() -> Result<impl IntoResponse, crate::error::AppError> {
     let masked = r2d2_cortex::security::vault::Vault::get_masked_keys();
     // Default providers expected in the Vault
     let providers = vec![
@@ -1371,7 +1385,7 @@ async fn render_admin() -> impl IntoResponse {
         });
     }
 
-    Html(AdminTemplate { keys }.render().unwrap())
+    Ok(Html(AdminTemplate { keys }.render()?))
 }
 
 async fn system_purge(State(state): State<AppState>) -> impl IntoResponse {
@@ -1401,7 +1415,7 @@ async fn get_chat_status(State(state): State<AppState>) -> impl IntoResponse {
 async fn handle_chat(
     State(state): State<AppState>,
     Form(input): Form<ChatInput>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, crate::error::AppError> {
     tracing::info!(
         "📥 [handle_chat] Received prompt: '{}', provider: '{}', resources_count: {}",
         input.prompt,
@@ -1428,9 +1442,11 @@ async fn handle_chat(
             user_msg_html
         );
         let mut resp = Html(html).into_response();
-        resp.headers_mut()
-            .insert("HX-Trigger", "chat-history-update".parse().unwrap());
-        return resp;
+        resp.headers_mut().insert(
+            "HX-Trigger",
+            axum::http::HeaderValue::from_static("chat-history-update"),
+        );
+        return Ok(resp);
     }
 
     let session_id = state.current_chat_session.lock().await.clone();
@@ -2152,10 +2168,12 @@ async fn handle_chat(
         chat_history::save_turn(&session_id, &input.prompt, &json_resp, otf_repos.clone());
     }
 
-    let mut resp = Html(tmpl.render().unwrap()).into_response();
-    resp.headers_mut()
-        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
-    resp
+    let mut resp = Html(tmpl.render()?).into_response();
+    resp.headers_mut().insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
+    Ok(resp)
 }
 
 async fn get_history_list(State(state): State<AppState>) -> impl IntoResponse {
@@ -2299,13 +2317,15 @@ async fn delete_chat_session(
 ) -> impl IntoResponse {
     chat_history::delete_session(&id);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut()
-        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
+    resp.headers_mut().insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
 
     let current_session = state.current_chat_session.lock().await.clone();
     if id == current_session {
         resp.headers_mut()
-            .insert("HX-Redirect", "/".parse().unwrap());
+            .insert("HX-Redirect", axum::http::HeaderValue::from_static("/"));
     }
 
     resp
@@ -2320,8 +2340,10 @@ async fn delete_workspace_container(
         .output();
 
     let mut resp = axum::response::Html("".to_string()).into_response();
-    resp.headers_mut()
-        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
+    resp.headers_mut().insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
     resp
 }
 
@@ -2331,8 +2353,10 @@ async fn rename_chat_session(
 ) -> impl IntoResponse {
     chat_history::rename_session(&id, &payload.new_title);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut()
-        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
+    resp.headers_mut().insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
     resp
 }
 
@@ -2341,8 +2365,10 @@ async fn pin_chat_session(
 ) -> impl IntoResponse {
     chat_history::toggle_pin_session(&id);
     let mut resp = Html("".to_string()).into_response();
-    resp.headers_mut()
-        .insert("HX-Trigger", "chat-history-update".parse().unwrap());
+    resp.headers_mut().insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
     resp
 }
 
@@ -2393,10 +2419,10 @@ struct NewSessionForm {
     auto_rag: Option<String>,
 }
 
-async fn get_new_session_modal() -> impl IntoResponse {
+async fn get_new_session_modal() -> Result<impl IntoResponse, crate::error::AppError> {
     let repos = github_api::fetch_user_repos().await.unwrap_or_default();
     let template = NewSessionTemplate { repos };
-    axum::response::Html(template.render().unwrap())
+    Ok(axum::response::Html(template.render()?))
 }
 
 async fn new_chat_session(
@@ -2617,7 +2643,10 @@ async fn new_chat_session(
     .unwrap();
 
     let mut headers = axum::http::HeaderMap::new();
-    headers.insert("HX-Trigger", "chat-history-update".parse().unwrap());
+    headers.insert(
+        "HX-Trigger",
+        axum::http::HeaderValue::from_static("chat-history-update"),
+    );
 
     (headers, axum::response::Html(template_html))
 }
@@ -2945,7 +2974,7 @@ struct DebateConfigTemplate {
 
 async fn get_debate_config_ui(
     axum::extract::Path(id): axum::extract::Path<String>,
-) -> impl IntoResponse {
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let session = crate::chat_history::load_session(&id);
     let config = session.and_then(|s| s.debate_config).unwrap_or_default();
 
@@ -2956,10 +2985,12 @@ async fn get_debate_config_ui(
         max_rounds: config.max_rounds,
     };
 
-    axum::response::Html(template.render().unwrap())
+    Ok(axum::response::Html(template.render()?))
 }
 
-async fn get_current_debate_config(State(state): State<AppState>) -> impl IntoResponse {
+async fn get_current_debate_config(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let session_id = state.current_chat_session.lock().await.clone();
     get_debate_config_ui(axum::extract::Path(session_id)).await
 }
@@ -2977,7 +3008,9 @@ struct WorkspaceConfigTemplate {
     startup_script: String,
 }
 
-async fn get_workspace_config_ui(State(state): State<AppState>) -> impl IntoResponse {
+async fn get_workspace_config_ui(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, crate::error::AppError> {
     let session_id = state.current_chat_session.lock().await.clone();
     let session = crate::chat_history::load_session(&session_id);
     let config = session.and_then(|s| s.workspace_config).unwrap_or_default();
@@ -2987,7 +3020,7 @@ async fn get_workspace_config_ui(State(state): State<AppState>) -> impl IntoResp
         startup_script: config.startup_script.unwrap_or_default(),
     };
 
-    axum::response::Html(template.render().unwrap())
+    Ok(axum::response::Html(template.render()?))
 }
 
 async fn post_workspace_config_ui(

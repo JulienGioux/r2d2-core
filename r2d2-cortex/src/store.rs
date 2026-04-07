@@ -69,7 +69,8 @@ impl ModelStore {
         // Idéalement on devrait lire la configuration de la BDD, mais on fallback sur le Catalog par défaut.
         let desc = CortexCatalog::get_default_descriptor(CognitiveSense::Semantic);
 
-        // TODO: Retirer Vault si c'est public, ou bien le garder pour HuggingFace PRO.
+        // NOTE : Le Vault permet d'injecter un token HuggingFace PRO pour les espaces privés.
+        // S'il est vide, `ApiBuilder` utilisera l'accès public par défaut, garantissant le Zero-Config.
         let token = crate::security::vault::Vault::get_api_key("HF_TOKEN");
 
         let api = ApiBuilder::new().with_token(token).build()?;

@@ -12,11 +12,10 @@ pub trait Expert {
 }
 
 /// 🧠 BitFFN (Feed-Forward Réel)
-/// Topologie SwiGLU destinée à être ternarisée localement lors du QAT-Scratch.
+/// Topologie 1.58-bit (Squared ReLU) validée par RustyMaster.
 pub struct BitFFN {
     w1: Linear,
     w2: Linear,
-    w3: Linear,
 }
 
 impl BitFFN {
@@ -27,28 +26,26 @@ impl BitFFN {
         let stdev = (2.0 / (hidden_dim + intermediate_size) as f64).sqrt();
         let init_xav = Init::Randn { mean: 0.0, stdev };
 
-        // Extraction explicite avec XavierNormal pour QAT
+        // L'activation est un Squared ReLU (ReLU^2), nous supprimons donc purement W3
+        // Extraction explicite statique pour QAT
         let w1_w = vb.get_with_hints((intermediate_size, hidden_dim), "w1.weight", init_xav)?;
         let w2_w = vb.get_with_hints((hidden_dim, intermediate_size), "w2.weight", init_xav)?;
-        let w3_w = vb.get_with_hints((intermediate_size, hidden_dim), "w3.weight", init_xav)?;
 
         // Zero-Bias par doctrine "MatMul-Free"
         let w1 = Linear::new(w1_w, None);
         let w2 = Linear::new(w2_w, None);
-        let w3 = Linear::new(w3_w, None);
 
-        Ok(Self { w1, w2, w3 })
+        Ok(Self { w1, w2 })
     }
 }
 
 impl Expert for BitFFN {
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        // SwiGLU: (x * W1) & Silu * (x * W3) -> * W2
+        // Squared ReLU : max(0, x * W1)^2 -> W2
+        // Optimisation Zéro-Bloat sans float "SiLU" et sans Matrice de Porte.
         let hidden = self.w1.forward(x)?;
-        let swish = candle_nn::ops::silu(&hidden)?;
-        let gate = self.w3.forward(x)?;
-        let gated = swish.broadcast_mul(&gate)?;
-        self.w2.forward(&gated)
+        let relu_sqr = hidden.relu()?.sqr()?;
+        self.w2.forward(&relu_sqr)
     }
 }
 
