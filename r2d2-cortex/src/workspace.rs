@@ -12,7 +12,10 @@ pub struct PodmanWorkspace {
 impl PodmanWorkspace {
     pub fn new(name: &str, base_image: Option<&str>, _script: Option<&str>) -> (Self, bool) {
         let container_name = name;
-        let target_image = base_image.unwrap_or("fedora:latest");
+        let mut target_image = base_image.unwrap_or("registry.fedoraproject.org/fedora:latest");
+        if target_image.trim().is_empty() {
+            target_image = "registry.fedoraproject.org/fedora:latest";
+        }
 
         // Assure custom bridge network existence
         let _ = std::process::Command::new("podman")
@@ -39,18 +42,28 @@ impl PodmanWorkspace {
         if should_start {
             let _ = std::process::Command::new("podman")
                 .args([
-                    "run", "-d", 
-                    "--name", container_name,
-                    "--hostname", container_name,
-                    "--network", "r2d2-net",
-                    target_image, "tail", "-f", "/dev/null"
+                    "run",
+                    "-d",
+                    "--name",
+                    container_name,
+                    "--hostname",
+                    container_name,
+                    "--network",
+                    "r2d2-net",
+                    target_image,
+                    "tail",
+                    "-f",
+                    "/dev/null",
                 ])
                 .output();
         }
 
-        (Self {
-            container_name: container_name.to_string(),
-        }, should_start)
+        (
+            Self {
+                container_name: container_name.to_string(),
+            },
+            should_start,
+        )
     }
 }
 
@@ -75,17 +88,20 @@ impl Workspace for PodmanWorkspace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
 
     #[test]
     fn test_podman_exec_basic_command() {
         // Ensure podman is running and r2d2-workspace exists before testing.
         // TDD: This test will fail because exec() currently returns "Not implemented yet".
         let (workspace, _) = PodmanWorkspace::new("r2d2-workspace", None, None);
-        
+
         let result = workspace.exec("echo 'hello sandbox'");
-        assert!(result.is_ok(), "Exec should not return an error: {:?}", result.err());
-        
+        assert!(
+            result.is_ok(),
+            "Exec should not return an error: {:?}",
+            result.err()
+        );
+
         let (stdout, stderr, exit_code) = result.unwrap();
         assert_eq!(exit_code, 0);
         assert_eq!(stdout.trim(), "hello sandbox");

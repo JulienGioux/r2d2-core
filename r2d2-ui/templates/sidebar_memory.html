@@ -1,0 +1,16 @@
+<div style="display: flex; flex-direction: column; gap: 4px;">
+    <div style="margin: 8px 0 8px 16px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; text-transform: uppercase;">
+        R2D2 Blackboard
+    </div>
+    <a href="#" class="nav-item" hx-get="/ui/memory" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="database"></i> <span>Memory Explorer</span>
+    </a>
+    
+    <div style="margin: 16px 0 8px 16px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; text-transform: uppercase;">
+        Recent Axioms
+    </div>
+    <a href="#" class="nav-item" hx-get="/ui/editor/memory/recent" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="brain-circuit"></i> <span>View Last Ingested</span>
+    </a>
+</div>
+<script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>

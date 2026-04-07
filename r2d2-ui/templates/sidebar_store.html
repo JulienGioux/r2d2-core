@@ -1,0 +1,24 @@
+<div style="padding-top: 16px;">
+    <!-- MAGASIN GLOBAL -->
+    <a href="#" class="nav-item" hx-get="/ui/store" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="box"></i> <span>Manage Local Models</span>
+    </a>
+    
+    <div style="margin: 16px 0 8px 16px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; text-transform: uppercase;">
+        Local Sovereign Cache
+    </div>
+
+    {% for m in local_models %}
+    <a href="#" class="nav-item" hx-get="/ui/editor/model/{{ m|urlencode }}" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="cpu"></i> <span>{{ m }}</span>
+    </a>
+    {% endfor %}
+
+    <div style="margin: 16px 0 8px 16px; font-size: 10px; font-weight: 600; color: var(--text-tertiary); letter-spacing: 0.05em; text-transform: uppercase;">
+        Cloud Integrations
+    </div>
+    <a href="#" class="nav-item" hx-get="/ui/store/cloud" hx-target="#ag-editor-target" onclick="setActiveNav(this)">
+        <i data-lucide="cloud"></i> <span>Cloud API Models</span>
+    </a>
+</div>
+<script>if(typeof lucide !== 'undefined') lucide.createIcons();</script>

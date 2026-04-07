@@ -8,7 +8,7 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7.5", features = ["ws", "macros"] }
 tokio = { version = "1.36", features = ["full"] }
 askama = { version = "0.12", features = ["with-axum"] }
 askama_axum = "0.4"
@@ -23,6 +23,7 @@ sysinfo = "0.30"
 
 r2d2-cortex = { path = "../r2d2-cortex" }
 r2d2-jsonai = { path = "../r2d2-jsonai" }
+r2d2-bitnet = { path = "../r2d2-bitnet" }
 r2d2-mcp = { path = "../r2d2-mcp" }
 r2d2-circadian = { path = "../r2d2-circadian" }
 r2d2-blackboard = { path = "../r2d2-blackboard" }
@@ -34,3 +35,7 @@ async-stream = "0.3.6"
 dirs = "6.0.0"
 tracing-core = "0.1.36"
 chrono = "0.4.44"
+portable-pty = "0.8.1"
+futures = "0.3"
+pgvector = "0.4.1"
+r2d2-chunker = { version = "8.2.0", path = "../r2d2-chunker" }

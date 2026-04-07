@@ -15,3 +15,6 @@ r2d2-sensory = { path = "../r2d2-sensory" }
 
 # Traitement Audio (Symphonia)
 symphonia = { version = "0.5.4", features = ["all"] }
+r2d2-cortex = { version = "8.2.0", path = "../r2d2-cortex" }
+tokio = { version = "1.36", features = ["full"] }
+tracing-subscriber = "0.3"

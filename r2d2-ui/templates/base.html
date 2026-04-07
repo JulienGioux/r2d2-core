@@ -223,23 +223,69 @@
 
     /* 3. Context Sidebar (Right) */
     .ag-sidebar-context {
-        width: 260px;
-        min-width: 260px;
-        background: var(--jules-context-bg);
+        width: 320px;
+        min-width: 320px;
+        background: var(--jules-sidebar-bg); /* Match left sidebar */
         border-left: 1px solid var(--jules-border);
         display: flex;
         flex-direction: column;
         z-index: 5;
         transition: width 0.2s;
     }
-    .ag-sidebar-context:empty {
+    .ag-sidebar-context.collapsed {
         width: 0;
         min-width: 0;
         border-left: none;
+        overflow: hidden;
+    }
+
+    /* 4. Activity Bar (Far Left) */
+    .ag-activity-bar {
+        width: 48px;
+        min-width: 48px;
+        background: var(--jules-header-bg);
+        border-right: 1px solid var(--jules-border);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding-top: 16px;
+        gap: 16px;
+        z-index: 15;
+    }
+    .ag-activity-item {
+        color: var(--text-tertiary);
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 6px;
+        transition: 0.2s;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+    .ag-activity-item:hover, .ag-activity-item.active {
+        color: var(--text-primary);
+    }
+    .ag-activity-item.active {
+        border-left: 2px solid var(--accent-brand);
+        border-radius: 0 6px 6px 0;
+        margin-left: -2px;
+    }
+
+    /* 5. Status Bar */
+    .ag-status-bar {
+        height: 24px;
+        min-height: 24px;
+        background: var(--accent-brand, #3b82f6);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        padding: 0 12px;
+        font-size: 11px;
+        z-index: 30;
     }
     </style>
 </head>
-<body>
+<body style="flex-direction: column; display: flex;">
     
     <!-- TOP HEADER -->
     <header class="ag-header-global">
@@ -252,17 +298,33 @@
                 <div style="width: 8px; height: 8px; background-color: #22c55e; border-radius: 50%; box-shadow: 0 0 8px #22c55e88;"></div>
                 System Online
             </span>
-            <button class="btn-secondary" style="padding: 6px; border: none; background: transparent; cursor: pointer;" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" title="Settings">
+            <a style="padding: 6px; cursor: pointer; display: flex;" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" title="Settings">
                 <i data-lucide="settings" style="width: 16px; color: var(--text-tertiary);"></i>
-            </button>
+            </a>
         </div>
     </header>
 
     <div class="ag-content-wrapper">
+        <!-- ACTIVITY BAR (Far Left) -->
+        <aside class="ag-activity-bar">
+            <a class="ag-activity-item active" hx-get="/ui/chat" hx-target="#ag-editor-target" title="Workspace / Session">
+                <i data-lucide="code-2" style="width: 20px; height: 20px;"></i>
+            </a>
+            <a class="ag-activity-item" hx-get="/ui/chat" hx-target="#ag-editor-target" title="La Forge">
+                <i data-lucide="hammer" style="width: 20px; height: 20px;"></i>
+            </a>
+            <a class="ag-activity-item" hx-get="/ui/editor/logs" hx-target="#ag-editor-target" title="Télémétrie & Logs">
+                <i data-lucide="activity" style="width: 20px; height: 20px;"></i>
+            </a>
+            <a class="ag-activity-item" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" title="Système / Administration" style="margin-top: auto; margin-bottom: 16px;">
+                <i data-lucide="server-cog" style="width: 20px; height: 20px;"></i>
+            </a>
+        </aside>
+
         <!-- PANNEAU 1 : GLOBAL SIDEBAR (LEFT) -->
         <aside class="ag-sidebar-global">
             <div class="ag-sidebar-search">
-                <input type="text" class="ag-search-input" placeholder="Search for models or sessions...">
+                <input type="text" class="ag-search-input" placeholder="Chercher une session..." oninput="if(window.TerminalManager) window.TerminalManager.filterSessions(this.value)">
             </div>
             
             <div class="ag-sidebar-section">
@@ -281,19 +343,19 @@
                     Codebases / Store
                 </div>
                 
-                <a class="ag-sidebar-item" hx-get="/ui/store" hx-target="#ag-editor-target">
+                <a class="ag-sidebar-item" hx-get="/ui/store" hx-target="#ag-editor-target" style="cursor: pointer;">
                     <i data-lucide="database" style="width: 14px;"></i>
                     Sovereign Infrastructure
                 </a>
-                <a class="ag-sidebar-item" hx-get="/ui/store/cloud" hx-target="#ag-editor-target">
+                <a class="ag-sidebar-item" hx-get="/ui/store/cloud" hx-target="#ag-editor-target" style="cursor: pointer;">
                     <i data-lucide="cloud" style="width: 14px;"></i>
                     Cloud Gateways
                 </a>
             </div>
 
             <div class="ag-sidebar-footer">
-                <span style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-secondary);" hx-get="/ui/store" hx-target="#ag-editor-target" title="Documentation">
-                    <i data-lucide="file-text" style="width:12px;"></i> Docs
+                <span style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--text-secondary);" hx-get="/ui/editor/admin" hx-target="#ag-editor-target" title="Cryptographic Vault">
+                    <i data-lucide="lock" style="width:12px;"></i> Vault
                 </span>
                 <span style="display: flex; gap: 8px;">
                     <span onclick="window.TerminalManager.toggleTerminal()" style="cursor: pointer; color: var(--text-secondary); display: inline-flex;" title="Afficher/Masquer Terminal">
@@ -336,13 +398,41 @@
         </main>
 
         <!-- PANNEAU 3 : CONTEXT SIDEBAR (RIGHT) -->
-        <aside class="ag-sidebar-context" id="ag-context-target">
-            <!-- Will be dynamically populated. -->
+        <aside class="ag-sidebar-context" id="ag-context-target" style="width: 0; min-width: 0; overflow: hidden; border-left: none;">
+            <!-- Placeholder for Right Inspector -->
         </aside>
+    </div>
+
+    <!-- STATUS BAR -->
+    <div id="ag-status-bar" class="ag-status-bar">
+        <span style="display: flex; align-items: center;"><i data-lucide="git-branch" style="width:12px; margin-right:4px;"></i> main*</span>
+        <span style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+            <span style="display: flex; align-items: center;"><i data-lucide="check-circle-2" style="width:12px; margin-right:4px;"></i> Prettier</span>
+            <span>UTF-8</span>
+            <span>LF</span>
+            <span>Rust</span>
+        </span>
     </div>
 
     <script>
         lucide.createIcons();
+
+        function toggleInspector() {
+            const contextPanel = document.getElementById('ag-context-target');
+            if (contextPanel) {
+                contextPanel.classList.toggle('collapsed');
+                if (contextPanel.classList.contains('collapsed')) {
+                    contextPanel.style.width = '0';
+                    contextPanel.style.minWidth = '0';
+                    contextPanel.style.borderLeft = 'none';
+                } else {
+                    contextPanel.style.width = '320px';
+                    contextPanel.style.minWidth = '320px';
+                    contextPanel.style.borderLeft = '1px solid var(--jules-border)';
+                }
+            }
+        }
+
 
         // Terminal Manager handles multiple sessions natively for Contextual Tabs
         window.TerminalManager = {
@@ -427,14 +517,19 @@
                     
                     wsTerm.onopen = () => {
                         console.log("WebSocket connected for", termKey);
+                        setTimeout(() => {
+                            if (term.rows > 0) term.write('\r\n\x1b[32m[Connexion Terminal Etablie]\x1b[0m\r\n\r\n');
+                        }, 50);
                         if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
                     };
                     wsTerm.onerror = (e) => {
                         console.error("WebSocket error for", termKey, e);
+                        term.write('\r\n\x1b[31m[Erreur WebSocket]\x1b[0m\r\n');
                         if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
                     };
                     wsTerm.onclose = (e) => {
                         console.log("WebSocket closed for", termKey, e.code);
+                        term.write('\r\n\x1b[31m[Canal de communication ferme]\x1b[0m\r\n');
                         if (window.TerminalManager) window.TerminalManager.renderTabs(window.TerminalManager.activeSession);
                     };
                     
@@ -499,6 +594,34 @@
                 if(tabName) return tabName;
                 if(termKey === 'local') return 'Local System';
                 return 'Session ' + termKey.substring(0, 6);
+            },
+            
+            filterSessions(query) {
+                const q = query.toLowerCase();
+                const groups = document.querySelectorAll('.ag-workspace-group');
+                groups.forEach(group => {
+                    let hasVisibleItem = false;
+                    const items = group.querySelectorAll('.ag-sidebar-item');
+                    const groupTitleEl = group.querySelector('summary span');
+                    const groupTitle = groupTitleEl ? groupTitleEl.textContent.toLowerCase() : '';
+                    const groupMatches = groupTitle.includes(q);
+
+                    items.forEach(item => {
+                        const titleEl = item.querySelector('.chat-history-btn span');
+                        if (titleEl && titleEl.textContent) {
+                            const title = titleEl.textContent.toLowerCase();
+                            if (title.includes(q) || groupMatches) {
+                                item.style.display = 'flex';
+                                hasVisibleItem = true;
+                            } else {
+                                item.style.display = 'none';
+                            }
+                        }
+                    });
+                    
+                    // Show group if it has visible items, or if it's empty but matches the query
+                    group.style.display = (hasVisibleItem || (items.length === 0 && groupMatches)) ? 'block' : 'none';
+                });
             }
         };
 

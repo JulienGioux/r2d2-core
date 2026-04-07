@@ -1,0 +1,47 @@
+<div class="ag-scrollable" style="padding: 24px; color: var(--text-primary);">
+    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 24px;">
+        <h2 style="font-family: var(--font-mono); font-size: 14px; display: flex; align-items: center;">
+            <i data-lucide="box" style="width: 16px; margin-right: 8px;"></i>
+            Model Configuration : {{ id }}
+        </h2>
+    </div>
+
+    <div class="glass-card" style="padding: 16px; margin-bottom: 16px;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 12px; display: flex; gap: 8px; align-items: center;">
+            <i data-lucide="tag" style="width: 12px;"></i> Active Role Assignment
+        </div>
+        
+        <form hx-post="/api/store/assign_role" hx-swap="none" onsubmit="alert('Rôle Axiomatique assigné. R2D2 utilisera ce modèle.');" style="display: flex; flex-direction: column; gap: 12px;">
+            <input type="hidden" name="model_id" value="{{ id }}">
+            
+            <div style="display: flex; gap: 12px;">
+                <select name="role_id" class="raw-input" style="flex: 1;" required>
+                    <option value="" disabled selected>-- Sélectionner le Rôle Système --</option>
+                    <option value="reasoning_agent">Reasoning Agent (Cœur Logique / Coder)</option>
+                    <option value="vision_agent">Vision Agent (Analyse Multimodale)</option>
+                    <option value="audio_agent">Audio Agent (Transcription)</option>
+                    <option value="embedding">Embedding Engine (Mémoire Vectorielle)</option>
+                </select>
+                <button type="submit" class="btn-primary" style="padding: 8px 16px;">
+                    <i data-lucide="link" style="width: 14px;"></i> Assigner
+                </button>
+            </div>
+            <p style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">Le changement de rôle re-route les appels asynchrones internes vers ce modèle.</p>
+        </form>
+    </div>
+    
+    <div class="glass-card" style="padding: 16px;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="hard-drive" style="width: 12px;"></i> Action Destructrice
+        </div>
+        <form hx-post="/api/store/delete" hx-swap="none" style="display: flex; gap: 12px;" onsubmit="return confirm('Attention: cela supprimera physiquement les poids du disque. Continuer ?');">
+            <input type="hidden" name="model_id" value="{{ id }}" />
+            <button type="submit" class="btn-danger" style="padding: 8px 16px; font-size: 12px;">
+                <i data-lucide="trash-2" style="width: 14px;"></i> Supprimer les poids (.safetensors)
+            </button>
+        </form>
+    </div>
+</div>
+<script>
+    lucide.createIcons();
+</script>

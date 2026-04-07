@@ -14,6 +14,7 @@ pub mod registry;
 pub mod security;
 pub mod store;
 pub mod training;
+pub mod workspace;
 
 pub use agent::{AgentError, CognitiveAgent};
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};

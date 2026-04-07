@@ -1,4 +1,9 @@
+use candle_core::{Device, Tensor};
+use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
+use r2d2_bitnet::model::{BitNetConfig, BitNetModel};
 use r2d2_bitnet::training::batch::{TrainingBatch, TrainingState};
+use r2d2_bitnet::training::optimizer::TwoStageAdamW;
+use r2d2_bitnet::weights::TrainingWeights;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, instrument};
 
@@ -34,33 +39,97 @@ impl TrainingDaemon {
 
         // 3. Boucle Mathématique Isolée (CPU-Bound)
         tokio::task::spawn_blocking(move || {
-            use candle_core::{Device, Tensor};
             let device = Device::new_cuda(0).unwrap_or(Device::Cpu);
             info!(
                 "🚀 [Training Daemon] Moteur Mathématique (BitNet 1.58b) sur: {:?}",
                 device
             );
 
+            // --- INSTANCIATION CANDLE / BITNET ---
+            let varmap = VarMap::new();
+            let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
+            let config = BitNetConfig::default();
+
+            let model = match BitNetModel::<TrainingWeights>::load_train(vb, &config) {
+                Ok(m) => m,
+                Err(e) => {
+                    error!("Impossible d'instancier le modèle dynamique: {}", e);
+                    let _ = state_tx.send(TrainingState::CircuitOpen {
+                        reason: "Erreur Modèle".to_string(),
+                    });
+                    return;
+                }
+            };
+
+            let adamw_params = ParamsAdamW {
+                lr: 1e-4,
+                weight_decay: 0.01,
+                ..Default::default()
+            };
+
+            let adamw = match AdamW::new(varmap.all_vars(), adamw_params) {
+                Ok(opt) => opt,
+                Err(e) => {
+                    error!("Impossible d'initialiser AdamW: {}", e);
+                    let _ = state_tx.send(TrainingState::CircuitOpen {
+                        reason: "Erreur Optimizer".to_string(),
+                    });
+                    return;
+                }
+            };
+
+            // Total steps pour le TwoStage: supposons 1000 pour la PoC.
+            let mut optimizer = TwoStageAdamW::new(adamw, 1000, 0.8);
+
             while let Some(mut batch) = batch_rx.blocking_recv() {
-                // 1. Instanciation des Tensors : Appel FFI CUDA
-                let _input_tensor = Tensor::new(batch.input_tokens.as_slice(), &device)
+                // 1. Instanciation des Tensors : Appel FFI
+                let input_tensor = Tensor::new(batch.input_tokens.as_slice(), &device)
                     .unwrap()
                     .unsqueeze(0)
                     .unwrap();
-                let _target_tensor = Tensor::new(batch.target_tokens.as_slice(), &device)
-                    .unwrap()
-                    .unsqueeze(0)
-                    .unwrap();
-                let _mask_tensor = Tensor::new(batch.loss_mask.as_slice(), &device)
+                let target_tensor = Tensor::new(batch.target_tokens.as_slice(), &device)
                     .unwrap()
                     .unsqueeze(0)
                     .unwrap();
 
-                // TODO: Intégrer l'appel au modèle r2d2-bitnet
-                let simulated_loss: f32 = 2.45; // Placeholder
+                // 2. Forward pass : Traque le graphe de calcul
+                let logits = match model.forward(&input_tensor) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        error!("Erreur Forward Pass: {}", e);
+                        continue;
+                    }
+                };
+
+                // Redimensionnement pour correspondre à (N_tokens, Vocab_Size) et cibles 1D
+                let seq_len = batch.input_tokens.len();
+                let vocab_size = config.vocab_size;
+                let logits_2d = match logits.reshape((seq_len, vocab_size)) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                let target_flat = match target_tensor.flatten_all() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+
+                let loss = match candle_nn::loss::cross_entropy(&logits_2d, &target_flat) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        error!("Erreur Entropie Croisée: {}", e);
+                        continue;
+                    }
+                };
+
+                // 3. Backward Pass (Straight-Through Estimator interne BitLinear)
+                if let Err(e) = optimizer.backward_step(&loss, batch.batch_idx) {
+                    error!("Erreur lors de la descente de gradient: {}", e);
+                }
+
+                let actual_loss = loss.to_scalar::<f32>().unwrap_or(f32::NAN);
 
                 // --- CIRCUIT BREAKER ---
-                if simulated_loss.is_nan() || simulated_loss.is_infinite() {
+                if actual_loss.is_nan() || actual_loss.is_infinite() {
                     let err_msg = format!(
                         "Divergence Mathématique (Loss = NaN) - Batch {}",
                         batch.batch_idx
@@ -72,13 +141,13 @@ impl TrainingDaemon {
 
                 // Monitoring Live
                 let _ = state_tx.send(TrainingState::Active {
-                    loss: simulated_loss,
+                    loss: actual_loss,
                     epoch: batch.batch_idx,
                 });
 
-                // 3. Object Pool (Recyclage)
-                batch.clear(); // O(1) Zeroize et conserve la capacité mémoire
-                let _ = recycle_tx.blocking_send(batch); // On l'ignore s'il est plein ou fermé
+                // 4. Object Pool (Recyclage)
+                batch.clear(); // O(1) Zeroize
+                let _ = recycle_tx.blocking_send(batch);
             }
 
             info!("🏁 [Training Daemon] Apprentissage Terminé (Plus de données).");

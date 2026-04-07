@@ -82,23 +82,26 @@ impl CognitiveAgent for BitNetAgent {
                         match vb_res {
                             Ok(vb) => (vb, tokenizer),
                             Err(e) => {
-                                tracing::warn!(
-                                    "⚠️ Erreur Mmap Safetensors: {}. Fallback -> Tenseurs zéros.",
+                                return Err(AgentError::LoadError(format!(
+                                    "Erreur Mmap Safetensors : {}",
                                     e
-                                );
-                                (VarBuilder::zeros(DType::F32, &self.device), tokenizer)
+                                )));
                             }
                         }
                     }
-                    Err(_) => {
-                        tracing::warn!("⚠️ Impossible de télécharger les poids. Fallback -> Tenseurs Structuraux Zéros.");
-                        (VarBuilder::zeros(DType::F32, &self.device), tokenizer)
+                    Err(e) => {
+                        return Err(AgentError::LoadError(format!(
+                            "Impossible de télécharger les poids depuis HuggingFace : {}",
+                            e
+                        )));
                     }
                 }
             }
-            Err(_) => {
-                tracing::warn!("⚠️ API HF inaccessible. Fallback -> Tenseurs Structuraux Zéros.");
-                (VarBuilder::zeros(DType::F32, &self.device), None)
+            Err(e) => {
+                return Err(AgentError::LoadError(format!(
+                    "API HF inaccessible : {}",
+                    e
+                )));
             }
         };
 
@@ -143,9 +146,9 @@ impl CognitiveAgent for BitNetAgent {
 
             let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
 
-            // Limite drastique pour le test architectural (5 tokens générés)
+            // Limite de 512 tokens générés
             let generated_ids = model
-                .generate(&prompt_tokens, 5, &device)
+                .generate(&prompt_tokens, 512, &device)
                 .map_err(|e| AgentError::InferenceError(e.to_string()))?;
 
             // Reconstruction textuelle réelle via BPE tokenizer
