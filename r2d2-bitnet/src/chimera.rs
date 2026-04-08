@@ -149,9 +149,9 @@ impl ChimeraModel {
         })
     }
 
-    /// Propagation avant sur une séquence de tokens
+    /// Propagation avant pour extraire l'état vectoriel pur (sans Linear Head d'inférence)
     #[instrument(skip_all)]
-    pub fn forward(
+    pub fn forward_hidden(
         &self,
         tokens: &Tensor,
         mut prev_states: Option<Vec<Vec<f32>>>,
@@ -178,7 +178,18 @@ impl ChimeraModel {
             next_states.push(new_s);
         }
 
-        let logits = self.lm_head.forward(&x)?;
+        Ok((x, next_states))
+    }
+
+    /// Propagation avant sur une séquence de tokens (Couche Causale Générative)
+    #[instrument(skip_all)]
+    pub fn forward(
+        &self,
+        tokens: &Tensor,
+        prev_states: Option<Vec<Vec<f32>>>,
+    ) -> Result<(Tensor, Vec<Vec<f32>>)> {
+        let (hidden, next_states) = self.forward_hidden(tokens, prev_states)?;
+        let logits = self.lm_head.forward(&hidden)?;
 
         Ok((logits, next_states))
     }
