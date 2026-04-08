@@ -1226,3 +1226,81 @@ impl CognitiveAgent for ReasoningAgent {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{extract::State, response::IntoResponse, routing::post, Router};
+    use serde_json::json;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
+
+    #[derive(Clone)]
+    struct MockState {
+        pub count: Arc<Mutex<usize>>,
+    }
+
+    async fn handle_openai_req(State(state): State<MockState>) -> impl IntoResponse {
+        let mut count = state.count.lock().unwrap();
+        *count += 1;
+        if *count == 1 {
+            // First hit: Simulate 429 Too Many Requests to test exponential backoff
+            (reqwest::StatusCode::TOO_MANY_REQUESTS, "Slow down").into_response()
+        } else {
+            // Second hit: Success
+            let body = json!({
+                "choices": [{
+                    "message": {
+                        "content": "```json\n{\"test\": \"success\"}\n```"
+                    }
+                }]
+            });
+            axum::Json(body).into_response()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reasoning_agent_openai_retry_logic() {
+        // TDD Industrial: Real Async HTTP Test without naïve 'let _ ='
+        let state = MockState {
+            count: Arc::new(Mutex::new(0)),
+        };
+        let app = Router::new()
+            .route("/v1/chat/completions", post(handle_openai_req))
+            .with_state(state.clone());
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let url = format!("http://127.0.0.1:{}/v1", port);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let mut agent = ReasoningAgent::new();
+        agent.http_client = Some(reqwest::Client::new());
+
+        let history = vec![];
+        let result = agent
+            .call_openai_compatible("You are an AI", &history, false, Some(&url), None)
+            .await;
+
+        println!("Test Result: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "Call should survive the 429 and succeed: {:?}",
+            result.err()
+        );
+        if let Ok(GeminiResponse::Text(response_json)) = result {
+            assert_eq!(response_json, "{\"test\": \"success\"}");
+        } else {
+            panic!("Expected Text response");
+        }
+
+        assert_eq!(
+            *state.count.lock().unwrap(),
+            2,
+            "Agent should have retried exactly once"
+        );
+    }
+}

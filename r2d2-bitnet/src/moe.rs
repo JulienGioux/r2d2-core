@@ -2,6 +2,7 @@
 // Routage neuro-dynamique et Pruning.
 // Doctrine: Sélection Top-K des experts pour zéro surcharge RAM.
 
+use crate::custom_op_cuda::BitNExpert;
 use candle_core::{Result, Tensor};
 use candle_nn::{Init, Linear, Module, VarBuilder};
 use rayon::prelude::*;
@@ -90,7 +91,7 @@ impl SparseMoe {
 
         for i in 0..num_experts {
             let expert_vb = vb.pp(format!("expert_{i}"));
-            experts.push(Box::new(BitFFN::new(
+            experts.push(Box::new(BitNExpert::new(
                 hidden_dim,
                 intermediate_size,
                 expert_vb,

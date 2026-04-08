@@ -12,30 +12,48 @@ pub struct InferenceRequest {
 
 /// Endpoint Axum SSE dédié à l'Inférence brute du Moteur Chimera 1.58-bit.
 /// Permet l'affichage fluide HTMX (Zero-JS) via Server-Sent Events.
+use crate::error::AppError;
+
 pub async fn chimera_stream_handler(
     Query(req): Query<InferenceRequest>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, AppError> {
     tracing::info!(
         "🧠 Lancement Inférence QAT-Scratch sur le prompt : {}",
         req.prompt
     );
 
-    let stream = async_stream::stream! {
-        // Exécution bloquante off-loadée pour ne pas geler l'Event Loop
-        let prompt_clone = req.prompt.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            // Dans une version finale, ce moteur serait persistant en mémoire dans l'AppState.
-            // Pour l'intégration V1.1, on instancie l'Agent R2D2 natif isolément.
-            use r2d2_cortex::models::chimera_agent::ChimeraAgent;
-            use r2d2_cortex::agent::CognitiveAgent;
+    // Chargement de l'agent en dehors du stream pour pouvoir remonter une HTTP 500 proprement au routeur Axum (captée par HTMX)
+    let load_result = tokio::task::spawn_blocking(|| {
+        use r2d2_cortex::agent::CognitiveAgent;
+        use r2d2_cortex::models::chimera_agent::ChimeraAgent;
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let mut agent = ChimeraAgent::new();
+            agent.load().await?;
+            Ok::<_, r2d2_cortex::error::CortexError>(agent)
+        })
+    })
+    .await
+    .unwrap();
 
-            // Exécution synchrone dans un thread de fond bloquant (Runtime local au thread)
+    let mut agent = match load_result {
+        Ok(a) => a,
+        Err(e) => {
+            tracing::error!("Erreur Cortex au chargement : {}", e);
+            // Retourne une erreur stricte axum HTTP 500 Zéro-Information Leak (grâce au trait IntoResponse de AppError)
+            return Err(anyhow::anyhow!("Erreur lors du chargement des tenseurs: {}", e).into());
+        }
+    };
+
+    let stream = async_stream::stream! {
+        let prompt_clone = req.prompt.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            use r2d2_cortex::agent::CognitiveAgent;
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let mut agent = ChimeraAgent::new();
-                if let Err(e) = agent.load().await {
-                    return format!("Erreur Cortex au chargement : {}", e);
-                }
                 match agent.generate_thought(&prompt_clone).await {
                     Ok(text) => text,
                     Err(e) => format!("Erreur Cortex à l'inférence : {}", e),
@@ -55,5 +73,5 @@ pub async fn chimera_stream_handler(
         yield Ok(Event::default().data("[DONE]"));
     };
 
-    Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new())
+    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::new()))
 }

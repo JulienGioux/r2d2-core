@@ -1,6 +1,7 @@
 pub mod attention;
 pub mod bitlinear;
 pub mod chimera;
+pub mod custom_op_cuda;
 pub mod ffn;
 pub mod hadamard;
 pub mod model;

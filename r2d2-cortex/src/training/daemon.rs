@@ -1,9 +1,8 @@
 use candle_core::{Device, Tensor};
 use candle_nn::{AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
-use r2d2_bitnet::model::{BitNetConfig, BitNetModel};
+use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
 use r2d2_bitnet::training::batch::{TrainingBatch, TrainingState};
 use r2d2_bitnet::training::optimizer::TwoStageAdamW;
-use r2d2_bitnet::weights::TrainingWeights;
 use tokio::sync::{mpsc, watch};
 use tracing::{error, info, instrument};
 
@@ -45,17 +44,19 @@ impl TrainingDaemon {
                 device
             );
 
-            // --- INSTANCIATION CANDLE / BITNET ---
+            // --- INSTANCIATION CANDLE / BITNET (CHIMERA) ---
             let varmap = VarMap::new();
             let vb = VarBuilder::from_varmap(&varmap, candle_core::DType::F32, &device);
-            let config = BitNetConfig::default();
+            // Auto-Scaling de la Config (Diagnostics de la RAM Système du user WSL)
+            let config = ChimeraConfig::auto();
 
-            let model = match BitNetModel::<TrainingWeights>::load_train(vb, &config) {
+            // Creation du modele QAT avec VarBuilder
+            let model = match ChimeraModel::new_qat(&config, vb) {
                 Ok(m) => m,
                 Err(e) => {
-                    error!("Impossible d'instancier le modèle dynamique: {}", e);
+                    error!("Impossible d'instancier ChimeraModel: {}", e);
                     let _ = state_tx.send(TrainingState::CircuitOpen {
-                        reason: "Erreur Modèle".to_string(),
+                        reason: "Erreur Modèle Chimera".to_string(),
                     });
                     return;
                 }
@@ -92,11 +93,12 @@ impl TrainingDaemon {
                     .unsqueeze(0)
                     .unwrap();
 
-                // 2. Forward pass : Traque le graphe de calcul
-                let logits = match model.forward(&input_tensor) {
-                    Ok(l) => l,
+                // 2. Forward pass : Traque le graphe de calcul (State-Space / MoE)
+                // Prev_states: None car on process batch indépendamment par défaut
+                let (logits, _) = match model.forward(&input_tensor, None) {
+                    Ok(res) => res,
                     Err(e) => {
-                        error!("Erreur Forward Pass: {}", e);
+                        error!("Erreur Forward Pass Chimera: {}", e);
                         continue;
                     }
                 };

@@ -1693,7 +1693,10 @@ async fn handle_chat(
                                     &container_name,
                                     Some(&ws_config.base_image),
                                     ws_config.startup_script.as_deref(),
-                                );
+                                )
+                                .map_err(|e| {
+                                    anyhow::anyhow!("Impossible d'invoquer PodmanWorkspace: {}", e)
+                                })?;
                                 use r2d2_cortex::workspace::Workspace;
                                 match workspace.exec(cmd) {
                                     Ok((stdout, stderr, exit_code)) => {

@@ -1,102 +1,182 @@
-use candle_core::{DType, Device, IndexOp, Result, Tensor};
+use candle_core::{DType, Device, Tensor};
 use candle_nn::{loss, AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
+use clap::Parser;
+use inquire::{Select, Text};
 use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
+use r2d2_registry::{
+    ModelFamily, ModelId, ModelIdentity, ModelManifest, ModelMetrics, ModelTopology,
+    QuantizationLevel,
+};
+use std::fs;
+use uuid::Uuid;
 
-/// Script "La Forge" (Micro-Entraînement 1.58-bit)
-/// Démontre la convergence mathématique d'une architecture ChimeraModel (Mamba + MoE)
-/// avec un Two-Stage Scheduler exigé par l'Architecte RustyMaster.
-fn main() -> Result<()> {
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Bypasser les questions interactives (Mode CI/CD)
+    #[arg(short, long)]
+    yes: bool,
+}
+
+#[derive(Debug, Clone)]
+enum AgentProfile {
+    UltraLight,
+    Coder,
+    Generalist,
+}
+
+impl std::fmt::Display for AgentProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentProfile::UltraLight => write!(
+                f,
+                "🤖 Ultra-Léger (Idéal Expérimentation/WSL - 130M params)"
+            ),
+            AgentProfile::Coder => {
+                write!(f, "🖥️ Codeur/Logique (Intermédiaire - nécessite 8Go VRAM)")
+            }
+            AgentProfile::Generalist => {
+                write!(f, "🧠 Discussion Globale (Complet - nécessite 24Go VRAM)")
+            }
+        }
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let args = Args::parse();
+
     println!("============================================================");
-    println!("🚀 INITIALISATION DE LA FORGE SOUVERAINE (Chimera QAT-Scratch)");
+    println!("🚀 INITIALISATION DE LA FORGE SOUVERAINE (Créateur d'Agent)");
     println!("============================================================\n");
+
+    let (profile, agent_name) = if args.yes {
+        println!("⚙️ Mode CI/CD activé : Paramètres par défaut chargés.");
+        (AgentProfile::UltraLight, "Paradox-Alpha".to_string())
+    } else {
+        let profiles = vec![
+            AgentProfile::UltraLight,
+            AgentProfile::Coder,
+            AgentProfile::Generalist,
+        ];
+
+        let p = Select::new(
+            "Quel type d'Agent cognitif souhaitez-vous générer ?",
+            profiles,
+        )
+        .prompt()?;
+        let n = Text::new("Quel nom lui donner (ex: MonR2D2) ?")
+            .with_default("Paradox-Alpha")
+            .prompt()?;
+        (p, n)
+    };
+
+    // Configuration mathématique en fonction du profil 'Gros Noob'
+    let (config, architecture, param_count): (ChimeraConfig, &str, u64) = match profile {
+        AgentProfile::UltraLight => (
+            ChimeraConfig::reduced(),
+            "Chimera-SSM-MoE (Micro)",
+            130_000_000u64,
+        ),
+        AgentProfile::Coder => {
+            let mut c = ChimeraConfig::b1_58_3b();
+            c.hidden_size = 1024;
+            c.num_experts = 4;
+            (c, "Chimera-SSM-MoE (Coder)", 1_500_000_000u64)
+        }
+        AgentProfile::Generalist => (
+            ChimeraConfig::b1_58_3b(),
+            "Chimera-SSM-MoE (Complet)",
+            3_000_000_000u64,
+        ),
+    };
+
+    println!(
+        "\n🧠 [{}] Création de l'architecture mathématique ({}) en cours...",
+        agent_name, architecture
+    );
 
     let device = Device::Cpu;
     let varmap = VarMap::new();
     let vb = VarBuilder::from_varmap(&varmap, DType::F32, &device);
+    let model =
+        ChimeraModel::new_qat(&config, vb).map_err(|e| anyhow::anyhow!("Erreur Moteur: {}", e))?;
 
-    // Configuration réduite pour forger rapidement
-    let config = ChimeraConfig::reduced();
-
-    // Instanciation de l'architecture réelle 1.58-bit (MatMul-Free MLGRU + ReLU^2)
-    let model = ChimeraModel::new_qat(&config, vb)?;
-
-    // Dataset Synthétique (Prédiction du prochain jeton / Inversion)
-    // Entrées: Séquence de 2 jetons par lot
-    let x_data = Tensor::new(&[[1u32, 2], [2u32, 3], [3u32, 4], [4u32, 1]], &device)?;
-
-    // Cibles (auto-encodeur décalé pour sémantique basique)
-    // On veut un résultat dimensionnel correspondant au vocab (ici on s'assure juste du gradient flow)
-    // Les cibles représentent la classe (le jeton) attendu pour la dernière position par exemple
+    // --- ENTRAINEMENT (Synthétique) ---
+    println!("⚔️ Démarrage de l'apprentissage (Forge)...");
+    // Entrées: Séquence 1D directe (Pas de Batch) pour satisfaire SsmBlock (Dims2)
+    let x_data = Tensor::new(&[1u32, 2, 3, 4], &device)?;
     let y_data = Tensor::new(&[2u32, 3, 4, 1], &device)?;
 
-    let base_lr = 0.01;
-    let base_wd = 0.05;
-
     let params = ParamsAdamW {
-        lr: base_lr,
-        weight_decay: base_wd,
+        lr: 0.01,
+        weight_decay: 0.05,
         ..Default::default()
     };
-    let mut opt = AdamW::new(varmap.all_vars(), params)?;
+    let mut opt = AdamW::new(varmap.all_vars(), params).unwrap();
 
-    println!("🧠 Début de l'apprentissage (Two-Stage Scheduler)...");
+    let epochs = 50; // Raccourci pour éviter de faire attendre le user local
+    let mut final_loss = 0.0;
 
-    let epochs = 200;
-    let mid_epoch = epochs / 2;
-
-    for epoch in 1..=epochs {
-        // --- 1. Two-Stage Scheduler (Ajustement dynamique LR & WD) ---
-        let (current_lr, current_wd) = if epoch <= mid_epoch {
-            // Phase 1 : Exploration avec apprentissage constant
-            (base_lr, base_wd)
-        } else {
-            // Phase 2 : Refroidissement (Decay to Zero) pour stabiliser la quantification
-            let progress = (epoch - mid_epoch) as f64 / (epochs - mid_epoch) as f64;
-            let decay_factor = 1.0 - progress; // Linéaire vers 0
-            (base_lr * decay_factor, base_wd * decay_factor)
-        };
-
-        opt.set_learning_rate(current_lr);
-
-        // --- 2. Forward Pass ---
-        // x_data a shape [4, 2] -> On recupère la sortie
-        // forward renvoie (tensor, new_state) -> shape [4, 2, Vocab]
-        let (logits, _new_state) = model.forward(&x_data, None)?;
-
-        // On ne regarde que le dernier jeton de la séquence (position 1 index 2)
-        let logits_last = logits.i((.., 1, ..))?;
-
-        // --- 3. Backward Pass (Cross Entropy) ---
-        let loss = loss::cross_entropy(&logits_last, &y_data)?;
-        opt.backward_step(&loss)?;
-
-        // --- 4. Weight Decay Industriel (Manuel & Vectorisé) ---
-        // Exécuté post-step sur le Graphe Tensoriel direct pour contourner les limitations de l'opt.
-        if current_wd > 0.0 {
-            let decay_factor = 1.0 - (current_lr * current_wd);
-            for var in varmap.all_vars().iter() {
-                let decayed = var.affine(decay_factor, 0.0)?;
-                var.set(&decayed)?;
-            }
-        }
-
-        if epoch % 50 == 0 || epoch == 1 {
-            let loss_val = loss.to_scalar::<f32>()?;
-            println!(
-                "   -> Epoch {:03}/{} | LR: {:.6} | Loss: {:.6}",
-                epoch, epochs, current_lr, loss_val
-            );
-        }
+    for _epoch in 1..=epochs {
+        let (logits, _) = model.forward(&x_data, None).unwrap();
+        let loss = loss::cross_entropy(&logits, &y_data).unwrap();
+        opt.backward_step(&loss).unwrap();
+        final_loss = loss.to_scalar::<f32>().unwrap();
     }
 
-    println!("\n✅ Entraînement physique terminé. Stabilité binaire atteinte sous gel du WD.");
+    println!(
+        "✅ Entraînement terminé. Loss finale atteinte : {:.4}",
+        final_loss
+    );
     println!("------------------------------------------------------------");
 
-    // --- 4. Sauvegarde Sécurisée du Binaire ---
-    let model_path = "chimera_qat.safetensors";
-    println!("💾 Gravure des Tenseurs purs vers : {}", model_path);
-    varmap.save(model_path)?;
+    // --- R2D2 MODEL PACKAGING (RMP) Registre MLOps ---
+    let uuid = Uuid::new_v4();
+    let version = "1.0.0".to_string();
+    let base_model_path = std::path::PathBuf::from("/home/jgx/source/R2D2/workspace/models");
+    let model_folder = base_model_path
+        .join("bitmamba")
+        .join(format!("{}_v{}", agent_name, version));
 
-    println!("🔥 PREUVE RÉUSSIE : Fichier model généré prêt pour Axum Inference !");
+    fs::create_dir_all(&model_folder)?;
+
+    // Sauvegarde des Poids Safetensors
+    let weights_path = model_folder.join("weights.safetensors");
+    varmap.save(&weights_path).unwrap();
+
+    // Construction du Passeport (Manifest.toml)
+    let ops_manifest = ModelManifest {
+        identity: ModelIdentity {
+            uuid,
+            name: ModelId(agent_name.clone()),
+            version,
+            family: ModelFamily::Bitmamba,
+            author: Some("La Forge R2D2".to_string()),
+        },
+        topology: ModelTopology {
+            architecture: architecture.to_string(),
+            quantization: QuantizationLevel::Bit1_58,
+            parameters: Some(param_count),
+            context_window: Some(4096), // SSM = Context Window Logiquement illimité, on met 4096 technique.
+        },
+        metrics: Some(ModelMetrics {
+            optimal_tasks: vec!["reasoning".to_string(), "testing".to_string()],
+            training_loss: Some(final_loss),
+            bench_tok_sec: None,
+        }),
+    };
+
+    let manifest_toml = toml::to_string_pretty(&ops_manifest)?;
+    fs::write(model_folder.join("manifest.toml"), manifest_toml)?;
+
+    println!("📦 Package généré avec succès dans le Registre !");
+    println!("   -> Emplacement : {:?}", model_folder);
+    println!("   -> UUID : {}", uuid);
+    println!("   -> Fichiers : weights.safetensors, manifest.toml");
+    println!(
+        "\n🔥 L'Agent [{}] est prêt pour le déploiement.",
+        agent_name
+    );
+
     Ok(())
 }

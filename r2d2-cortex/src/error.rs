@@ -37,6 +37,9 @@ pub enum CortexError {
     #[error("Erreur spécifique liée au sous-type ou au décodage : {0}")]
     ComponentDecouplingError(String),
 
+    #[error("Erreur d'infrastructure Workspace/Podman : {0}")]
+    WorkspaceError(String),
+
     // ---- Encapsulation Typée des Erreurs d'Infrastructure Internes ----
     #[error(transparent)]
     Io(#[from] std::io::Error),

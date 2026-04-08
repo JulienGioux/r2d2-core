@@ -48,3 +48,7 @@ logs/
 *.json
 *.py
 media_test/
+*.safetensors
+*.gguf
+*.bin
+workspace/models/

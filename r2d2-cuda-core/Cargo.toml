@@ -1,0 +1,15 @@
+[package]
+name = "r2d2-cuda-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+
+thiserror = { workspace = true }
+
+[features]
+cuda = []
+
+[build-dependencies]
+cc = "1.0"

@@ -24,7 +24,7 @@ impl ChimeraAgent {
     /// Par défaut, instancie le profil Réduit pour valider le code sans exploser la RAM.
     pub fn new() -> Self {
         Self {
-            name: "R2D2-Chimera-Native-Mocked".to_string(),
+            name: "R2D2-Chimera-Native".to_string(),
             device: Device::Cpu,
             model: None,
             tokenizer: None,
@@ -66,49 +66,58 @@ impl CognitiveAgent for ChimeraAgent {
         let config = self.config.clone();
 
         // 1. Initialisation de l'architecture mathématique
-        // Si la Forge a généré le fichier QAT, on l'utilise. Sinon, Fallback Mock pour l'UX/CI.
-        let model = if std::path::Path::new("chimera_qat.safetensors").exists() {
-            info!("   [Chimera] Graphe réel détecté. Montage de l'Inférence QAT Safetensors...");
-            // Lecture des poids via mmap (Standard Candle)
-            let vb = unsafe {
-                candle_nn::VarBuilder::from_mmaped_safetensors(
-                    &["chimera_qat.safetensors"],
-                    candle_core::DType::F32,
-                    &self.device,
-                )
-            }
-            .map_err(|e| CortexError::LoadError(format!("VarBuilder failure: {}", e)))?;
+        // Si la Forge n'a pas généré le fichier QAT, on panique purement (Doctrine "Zéro-Mock").
+        if !std::path::Path::new("chimera_qat.safetensors").exists() {
+            tracing::error!("   [Chimera] Fichier de poids introuvable. Arrêt strict.");
+            return Err(CortexError::ModelNotFound(
+                "chimera_qat.safetensors".to_string(),
+            ));
+        }
 
-            ChimeraModel::new_qat(&config, vb)
-                .map_err(|e| CortexError::LoadError(format!("Instanciation QAT échouée: {}", e)))?
-        } else {
-            info!(
-                "   [Chimera] chimera_qat.safetensors introuvable. Fallback Graphe Mock (CI/UX)..."
-            );
-            ChimeraModel::new_mocked(&config, &self.device)
-                .map_err(|e| CortexError::LoadError(format!("Erreur Mock Chimera: {}", e)))?
-        };
+        info!("   [Chimera] Graphe réel détecté. Montage de l'Inférence QAT Safetensors...");
+        // Lecture des poids via mmap (Standard Candle)
+        let vb = unsafe {
+            candle_nn::VarBuilder::from_mmaped_safetensors(
+                &["chimera_qat.safetensors"],
+                candle_core::DType::F32,
+                &self.device,
+            )
+        }
+        .map_err(|e| CortexError::LoadError(format!("VarBuilder failure: {}", e)))?;
 
-        // 2. Initialisation du Tokenizer Llama3 depuis HF (car on teste bien le décodage)
-        let api_result = hf_hub::api::tokio::ApiBuilder::new()
-            .with_token(crate::security::vault::Vault::get_api_key("HF_TOKEN"))
-            .build();
+        let model = ChimeraModel::new_qat(&config, vb)
+            .map_err(|e| CortexError::LoadError(format!("Instanciation QAT échouée: {}", e)))?;
 
-        let tokenizer = match api_result {
-            Ok(api) => {
-                let repo = api.model("1bitLLM/bitnet_b1_58-3B".to_string());
-                let tok_res = repo.get("tokenizer.json").await;
-                if let Ok(tok_path) = tok_res {
-                    Tokenizer::from_file(&tok_path).ok()
-                } else {
-                    None
+        // 2. Initialisation Air-Gapped du Tokenizer
+        // La doctrine souveraine interdit l'appel hf_hub dynamique en production.
+        let paths_to_check = [
+            "chimera_qat/tokenizer.json",
+            "tokenizer.json",
+            "../tokenizer.json",
+        ];
+        let mut tokenizer = None;
+
+        for path in paths_to_check.iter() {
+            let p = std::path::Path::new(path);
+            if p.exists() {
+                tokenizer = Tokenizer::from_file(p).ok();
+                if tokenizer.is_some() {
+                    info!(
+                        "   [Chimera] Dictionnaire Lexical (Tokenizer) chargé en local depuis: {}",
+                        path
+                    );
+                    break;
                 }
             }
-            Err(_) => None,
-        };
+        }
 
         if tokenizer.is_none() {
-            tracing::warn!("Tokenizer HuggingFace introuvable, Inférence restreinte.");
+            tracing::error!(
+                "🚨 [CORTEX] Fichier Tokenizer introuvable. Système aveugle. Refus de boot."
+            );
+            return Err(CortexError::ModelNotFound(
+                "tokenizer.json local (Air-Gapped)".to_string(),
+            ));
         }
 
         self.model = Some(Arc::new(model));
@@ -144,28 +153,28 @@ impl CognitiveAgent for ChimeraAgent {
                 || -> Result<String, CortexError> {
                     info!("🧠 [Chimera] Réflexion State-Space Continue (spawn_blocking)...");
 
-                    let prompt_tokens: Vec<u32> = if let Some(tok) = &tokenizer {
-                        let encoding = tok.encode(prompt_str.clone(), false).map_err(|e| {
-                            CortexError::InferenceError(format!("Tokenizer encode error: {}", e))
-                        })?;
-                        encoding.get_ids().to_vec()
-                    } else {
-                        vec![0, 1, 2] // Fallback dummy IDs
-                    };
+                    let tok = tokenizer.as_ref().ok_or_else(|| {
+                        CortexError::InferenceError(
+                            "Tokenizer désynchronisé en mémoire.".to_string(),
+                        )
+                    })?;
 
-                    // Limite de max 50 tokens (C'est un mock, pas besoin de surcharger le CPU)
+                    let encoding = tok.encode(prompt_str.clone(), false).map_err(|e| {
+                        CortexError::InferenceError(format!("Tokenizer encode error: {}", e))
+                    })?;
+                    let prompt_tokens = encoding.get_ids().to_vec();
+
+                    // Limite Cognitive Élevée (512 jetons) au lieu d'un mock bridé.
+                    // Le SSM BitMamba digère ce flux en O(1).
                     let generated_ids = model
-                        .generate(&prompt_tokens, 50, &device)
+                        .generate(&prompt_tokens, 512, &device)
                         .map_err(|e| CortexError::InferenceError(e.to_string()))?;
 
-                    if let Some(tok) = &tokenizer {
-                        let generated_text = tok.decode(&generated_ids, true).map_err(|e| {
-                            CortexError::InferenceError(format!("Tokenizer decode error: {}", e))
-                        })?;
-                        Ok(generated_text)
-                    } else {
-                        Ok(format!("(Mock Decode) IDs: {:?}", generated_ids))
-                    }
+                    let generated_text = tok.decode(&generated_ids, true).map_err(|e| {
+                        CortexError::InferenceError(format!("Tokenizer decode error: {}", e))
+                    })?;
+
+                    Ok(generated_text)
                 },
             ));
 
@@ -186,5 +195,34 @@ impl CognitiveAgent for ChimeraAgent {
         })
         .await
         .map_err(|_| CortexError::InferenceError("Thread pool tokio expiré".to_string()))?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_chimera_air_gapped_failsafe() {
+        // Selon la Doctrine "Souveraineté Absolue", une IA isolée ne doit pas halluiner
+        // ou simuler (avec le cloud) en cas d'absence de modèle local. Elle DOIT faire un crash-fail sain.
+        let mut agent = ChimeraAgent::new();
+        // On modifie volontairement le path pour être sûr d'échouer
+        agent.config = ChimeraConfig::reduced();
+
+        let result = agent.load().await;
+        assert!(result.is_err(), "L'Agent Souverain a accepté de démarrer avec des fichiers manquants (Mocking potentiel detecté !)");
+
+        if let Err(CortexError::ModelNotFound(target)) = result {
+            assert!(
+                target.contains("safetensors") || target.contains("tokenizer"),
+                "Le rejet ne cible pas le bon fichier."
+            );
+        } else {
+            panic!(
+                "L'Erreur soulevée devrait être strictement un `ModelNotFound`. Reçu: {:?}",
+                result
+            );
+        }
     }
 }

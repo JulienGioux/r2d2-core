@@ -120,21 +120,23 @@ async fn main() -> anyhow::Result<()> {
             }
         };
 
+        let jsonai_system_prompt = "Tu es R2D2-Vampire. Ta mission est d'extraire la connaissance selon le standard d'Architecture Stricte JSONAI V3.0 (Graphe Sémantique pour Embedding & HTMX). Chaque réponse DOIT être structurée au format JSON pur comprenant :\n1. 'metadata': contenant 'is_fact' (boolean), 'belief_state' (0.0-1.0), 'spatial_context', 'temporal_context', et 'ontology_links' (array de relations).\n2. 'html_fragment': le composant d'interface associé en HTML avec attributs HTMX (hx-target) et ARIA (aria-live='polite', aria-atomic).\n3. 'semantic_vector_target': l'intention et le résumé conceptuel absolu focalisés pour un encodeur.";
+
         let (tool_name, mcp_args, system_prompt) = if job.provider == "github" {
             let repo = &job.notebook; // UI stores repo link in notebook field
             (
                 "search_code",
                 json!({ "q": format!("repo:{}", repo) }),
-                "You are an expert GitHub repository analyzer extracting key codebase structures into synthetic documentation."
+                jsonai_system_prompt,
             )
         } else {
             (
                 "ask_question",
                 json!({
-                    "question": format!("Génère une fiche d'apprentissage exhaustive et très détaillée sous forme de Quiz (au moins 10 questions/réponses avancées) sur le thème suivant : '{}'. Base-toi EXCLUSIVEMENT sur tes sources. Sépare bien chaque question et réponse.", job.theme),
+                    "question": format!("Vampirise de manière exhaustive le thème suivant : '{}'. Synthétise la connaissance sous forme de multiples points conceptuels. Base-toi EXCLUSIVEMENT sur tes sources. Crée des descriptions extrêmement denses et riches en nuances (concepts, risques, certitudes) pour nourrir un Moteur d'Embedding.", job.theme),
                     "notebook_id": job.notebook
                 }),
-                "You are a specialized agent providing quizzes based on the NotebookLM knowledge representation."
+                jsonai_system_prompt,
             )
         };
 

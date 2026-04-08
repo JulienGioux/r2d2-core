@@ -1,8 +1,8 @@
 use crate::hadamard::HadamardLayer;
-use crate::moe::{Expert, SparseMoe};
+use crate::moe::SparseMoe;
 use crate::ssm::SsmBlock;
-use candle_core::{Device, IndexOp, Result, Tensor, D};
-use candle_nn::{Init, VarBuilder};
+use candle_core::{Device, IndexOp, Module, Result, Tensor, D};
+use candle_nn::{embedding, linear_no_bias, Embedding, Linear, VarBuilder};
 use tracing::{info, instrument};
 
 /// ⚙️ Paramétrage du Modèle R2D2-Chimera
@@ -27,7 +27,6 @@ impl ChimeraConfig {
         }
     }
 
-    /// Profil Giga-Model (Production 3B)
     pub fn b1_58_3b() -> Self {
         Self {
             hidden_size: 4096, // Typique Llama-3B like
@@ -37,16 +36,41 @@ impl ChimeraConfig {
             vocab_size: 128256, // Llama-3 128k
         }
     }
-}
 
-/// Expert "Bouchon" / Mock en attendant la vraie BitFFN
-pub struct MockExpert {
-    _hidden_size: usize,
-}
-impl Expert for MockExpert {
-    fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        // Identity pass for testing topological shapes
-        Ok(x.clone())
+    /// Détection Plug&Play Dynamique de l'Environnement (VRAM/RAM)
+    /// Lit `/proc/meminfo` sous Linux ou WSL pour adapter le profil. Implémenté de manière thread-safe (I/O block évité par OnceLock).
+    pub fn auto() -> Self {
+        static CACHED_RAM_GB: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+
+        let total_ram_gb = *CACHED_RAM_GB.get_or_init(|| {
+            let mut mem = 16; // Assumption par défaut acceptable
+            #[cfg(target_os = "linux")]
+            {
+                if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+                    for line in content.lines() {
+                        if line.starts_with("MemTotal:") {
+                            let parts: Vec<&str> = line.split_whitespace().collect();
+                            if parts.len() >= 2 {
+                                if let Ok(kb) = parts[1].parse::<usize>() {
+                                    mem = kb / (1024 * 1024);
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            mem
+        });
+
+        // 12 Go est la barrière critique de RAM d'une RTX 3060 (ou d'une partition WSL resserrée)
+        if total_ram_gb <= 14 {
+            tracing::info!("⚠️  [Chimera Forge] Système de Diagnostic: RAM Hôte/WSL plafonnée à {} Go. Activation du profil de Survie [REDUCED] pour prévenir l'OOM.", total_ram_gb);
+            Self::reduced()
+        } else {
+            tracing::info!("🚀 [Chimera Forge] Système de Diagnostic: Confort Mémoire garanti ({} Go). Boot du modèle massique [b1.58_3B].", total_ram_gb);
+            Self::b1_58_3b()
+        }
     }
 }
 
@@ -79,69 +103,13 @@ impl ChimeraBlock {
 pub struct ChimeraModel {
     pub config: ChimeraConfig,
     layers: Vec<ChimeraBlock>,
-    /// Table de mock statique pour l'Embedding (Car pas de HuggingFace)
-    embed_mock: Tensor,
-    /// Table de mock pour LM Head
-    lm_head_mock: Tensor,
+    /// Vraie table d'Embedding (Lexique vers Vecteur Dense)
+    pub embed: Embedding,
+    /// Vraie Tête de Génération Linguistique
+    pub lm_head: Linear,
 }
 
 impl ChimeraModel {
-    /// 🚀 Active le Modèle avec des poids factices pour tester la tuyauterie de bout en bout
-    #[instrument(skip_all)]
-    pub fn new_mocked(config: &ChimeraConfig, device: &Device) -> Result<Self> {
-        info!(
-            "Instanciation de la topologie Inférence ChimeraModel (Mocked) [{}] layers, dim={}, vocab={}",
-            config.num_hidden_layers, config.hidden_size, config.vocab_size
-        );
-
-        let mut layers = Vec::with_capacity(config.num_hidden_layers);
-
-        // Initialisation aléatoire ou constantes
-        for _ in 0..config.num_hidden_layers {
-            let dim = config.hidden_size;
-
-            let hadamard = HadamardLayer::new(dim);
-
-            // SSM Projections mockées
-            let a = Tensor::ones(dim, candle_core::DType::F32, device)?;
-            let b = Tensor::ones((dim, dim), candle_core::DType::F32, device)?;
-            let c = Tensor::ones((dim, dim), candle_core::DType::F32, device)?;
-            let ssm = SsmBlock::new(dim, a, b, c);
-
-            // MoE Router (Poids de la porte: [num_experts, hidden_size])
-            let gate_w = Tensor::ones((config.num_experts, dim), candle_core::DType::F32, device)?;
-
-            let mut experts: Vec<Box<dyn Expert + Send + Sync>> = Vec::new();
-            for _ in 0..config.num_experts {
-                experts.push(Box::new(MockExpert { _hidden_size: dim }));
-            }
-
-            let moe = SparseMoe::new(config.top_k, gate_w, experts);
-
-            layers.push(ChimeraBlock { hadamard, ssm, moe });
-        }
-
-        // Mock tensor [vocab_size, hidden_size]
-        let embed_mock = Tensor::ones(
-            (config.vocab_size, config.hidden_size),
-            candle_core::DType::F32,
-            device,
-        )?;
-
-        let lm_head_mock = Tensor::ones(
-            (config.vocab_size, config.hidden_size),
-            candle_core::DType::F32,
-            device,
-        )?;
-
-        Ok(Self {
-            config: config.clone(),
-            layers,
-            embed_mock,
-            lm_head_mock,
-        })
-    }
-
     /// 🚀 Initalisation "QAT-Scratch" avec VarBuilder (Haute-Précision FP32 latente)
     /// Utilisera XavierNormal pour les matrices denses.
     #[instrument(skip_all)]
@@ -150,9 +118,6 @@ impl ChimeraModel {
             "Instanciation de la topologie Inférence ChimeraModel (QAT-Scratch) [{}] layers",
             config.num_hidden_layers
         );
-
-        let stdev = 1.0 / (config.hidden_size as f64).sqrt();
-        let init_xavier = Init::Randn { mean: 0.0, stdev };
 
         let mut layers = Vec::with_capacity(config.num_hidden_layers);
 
@@ -173,24 +138,14 @@ impl ChimeraModel {
             layers.push(ChimeraBlock { hadamard, ssm, moe });
         }
 
-        // Embedding réel (sera initialisé avec XavierNormal)
-        let embed = vb.get_with_hints(
-            (config.vocab_size, config.hidden_size),
-            "embed",
-            init_xavier,
-        )?;
-
-        let lm_head = vb.get_with_hints(
-            (config.vocab_size, config.hidden_size),
-            "lm_head",
-            init_xavier,
-        )?;
+        let embed = embedding(config.vocab_size, config.hidden_size, vb.pp("embed"))?;
+        let lm_head = linear_no_bias(config.hidden_size, config.vocab_size, vb.pp("lm_head"))?;
 
         Ok(Self {
             config: config.clone(),
             layers,
-            embed_mock: embed,
-            lm_head_mock: lm_head,
+            embed,
+            lm_head,
         })
     }
 
@@ -201,20 +156,7 @@ impl ChimeraModel {
         tokens: &Tensor,
         mut prev_states: Option<Vec<Vec<f32>>>,
     ) -> Result<(Tensor, Vec<Vec<f32>>)> {
-        // Pseudo embedding: On récupère la ligne de `embed_mock` correspondant au Token
-        let token_ids = tokens.flatten_all()?.to_vec1::<u32>()?;
-        let mut embed_vectors = Vec::new();
-        for &id in &token_ids {
-            let safe_id = if (id as usize) < self.config.vocab_size {
-                id as usize
-            } else {
-                0
-            };
-            let row = self.embed_mock.i((safe_id, ..))?;
-            embed_vectors.push(row.unsqueeze(0)?);
-        }
-
-        let mut x = Tensor::cat(&embed_vectors, 0)?;
+        let mut x = self.embed.forward(tokens)?;
 
         let mut next_states = Vec::with_capacity(self.layers.len());
 
@@ -236,7 +178,7 @@ impl ChimeraModel {
             next_states.push(new_s);
         }
 
-        let logits = x.matmul(&self.lm_head_mock.t()?)?;
+        let logits = self.lm_head.forward(&x)?;
 
         Ok((logits, next_states))
     }

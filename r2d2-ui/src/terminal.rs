@@ -63,7 +63,8 @@ pub fn spawn_terminal(
             &container_name,
             Some(&ws_config.base_image),
             ws_config.startup_script.as_deref(),
-        );
+        )
+        .map_err(|e| anyhow::anyhow!("Erreur Workspace: {}", e))?;
         is_newly_booted = is_new;
 
         if is_newly_booted {
