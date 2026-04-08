@@ -47,7 +47,12 @@ fn main() -> anyhow::Result<()> {
     };
 
     // 2. Chargement du Dataset (Doctrine Air-Gapped = Byte-Level Tokenizer natif)
-    let dataset_path = "/home/jgx/source/R2D2/datasets/genesis_sft.jsonl";
+    let dataset_path = match args.mode {
+        TrainingMode::CausalLm => "/home/jgx/source/R2D2/datasets/genesis_causal.jsonl",
+        TrainingMode::ContrastiveEmbedding => {
+            "/home/jgx/source/R2D2/datasets/genesis_contrastive.jsonl"
+        }
+    };
     println!("📂 Chargement du Dataset Souverain : {}", dataset_path);
 
     let file = File::open(dataset_path)?;
@@ -59,18 +64,18 @@ fn main() -> anyhow::Result<()> {
 
     for line in reader.lines() {
         let line = line?;
-        match args.mode {
-            TrainingMode::CausalLm => {
-                let mut seq: Vec<u32> = line.bytes().map(|b| b as u32).collect();
-                seq.push(0); // EOS
-                if seq.len() > max_seq_len {
-                    max_seq_len = seq.len();
-                }
-                causal_sequences.push(seq);
-            }
-            TrainingMode::ContrastiveEmbedding => {
-                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if let Some(text) = json_val.get("text").and_then(|t| t.as_str()) {
+        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(text) = json_val.get("text").and_then(|t| t.as_str()) {
+                match args.mode {
+                    TrainingMode::CausalLm => {
+                        let mut seq: Vec<u32> = text.bytes().map(|b| b as u32).collect();
+                        seq.push(0); // EOS
+                        if seq.len() > max_seq_len {
+                            max_seq_len = seq.len();
+                        }
+                        causal_sequences.push(seq);
+                    }
+                    TrainingMode::ContrastiveEmbedding => {
                         if let Some(idx) = text.find(" [/INST] ") {
                             let prompt_str = &text[..idx];
                             let json_str = &text[idx + 9..];
