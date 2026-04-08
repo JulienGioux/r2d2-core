@@ -25,8 +25,8 @@ jobs:
       - name: Check Formatting
         run: cargo fmt --all -- --check
       - name: Clippy (Zero-Warning Policy)
-        # Deny all warnings for industrial grade code
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        # Deny all warnings for industrial grade code. --all-features is removed to prevent compiling Mac (Metal) features on Linux Server.
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test_suite:
     name: "🧪 Test Suite (Zero-Trust Validation)"
@@ -39,7 +39,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
       - name: Run Tests
-        run: cargo test --workspace --all-features
+        run: cargo test --workspace
 
   security_audit:
     name: "🛡️ Security Audit (rustsec)"
