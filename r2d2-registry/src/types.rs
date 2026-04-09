@@ -43,3 +43,30 @@ pub enum QuantizationLevel {
     #[serde(rename = "1.58b")]
     Bit1_58,
 }
+
+/// Pivot de Sécurité : Lie mathématiquement un corpus de données à une Architektur de Tenseurs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskTypology {
+    CausalLm,
+    ContrastiveEmbedding,
+}
+
+/// Typestate Pattern (Interdiction à la compilation des couplages maudits)
+pub trait EngineMode: Send + Sync + 'static {
+    type Payload: Send + Sync;
+}
+
+/// État représentant l'inférence causale de type "Next Token Prediction"
+#[derive(Debug, Clone)]
+pub struct StateCausal;
+impl EngineMode for StateCausal {
+    type Payload = Vec<u32>;
+}
+
+/// État représentant la structuration des vecteurs spatiaux latents
+#[derive(Debug, Clone)]
+pub struct StateContrastive;
+impl EngineMode for StateContrastive {
+    type Payload = (Vec<u32>, Vec<u32>);
+}

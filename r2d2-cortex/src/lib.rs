@@ -23,3 +23,6 @@ pub use agent::CognitiveAgent;
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};
 pub use registry::CortexRegistry;
 pub use store::{BertTopology, ModelStore};
+
+pub mod trainer;
+pub use trainer::ChimeraTrainer;

@@ -5,7 +5,7 @@ use inquire::{Select, Text};
 use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
 use r2d2_registry::{
     ModelFamily, ModelId, ModelIdentity, ModelManifest, ModelMetrics, ModelTopology,
-    QuantizationLevel,
+    QuantizationLevel, TaskTypology,
 };
 use std::fs;
 use uuid::Uuid;
@@ -159,6 +159,7 @@ fn main() -> anyhow::Result<()> {
             parameters: Some(param_count),
             context_window: Some(4096), // SSM = Context Window Logiquement illimité, on met 4096 technique.
         },
+        format: TaskTypology::CausalLm,
         metrics: Some(ModelMetrics {
             optimal_tasks: vec!["reasoning".to_string(), "testing".to_string()],
             training_loss: Some(final_loss),

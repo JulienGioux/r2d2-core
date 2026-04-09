@@ -1,0 +1,9 @@
+[package]
+name = "r2d2-forge"
+version = "8.2.0"
+edition = "2021"
+
+[dependencies]
+r2d2-registry = { path = "../r2d2-registry" }
+anyhow.workspace = true
+tracing = "0.1"

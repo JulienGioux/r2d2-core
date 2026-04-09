@@ -12,7 +12,7 @@ members = [
     "r2d2-circadian",
     "r2d2-sensory",
     "r2d2-chunker", "r2d2-ui", "r2d2-tokenizer", "r2d2-cuda-core", "r2d2-registry"
-]
+, "r2d2-forge", "r2d2-orchestrator"]
 resolver = "2"
 
 [workspace.package]

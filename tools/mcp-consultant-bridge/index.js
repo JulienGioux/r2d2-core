@@ -190,53 +190,149 @@ export async function queryNotebookLMStateful(name, url, prompt) {
             await chatEl.focus();
             await page.evaluate((el) => { el.value = ''; }, chatEl); // Purge de sécurité
             
-            const lines = prompt.split('\\n');
-            for (let i = 0; i < lines.length; i++) {
-                await chatEl.type(lines[i]);
-                if (i < lines.length - 1) {
-                    await page.keyboard.down('Shift');
-                    await page.keyboard.press('Enter');
-                    await page.keyboard.up('Shift');
-                }
-            }
+            const safePrompt = prompt.replace(/\r?\n/g, ' ');
+            await chatEl.type(safePrompt);
         } else {
             // Fallback aveugle absolu
-            const lines = prompt.split('\\n');
-            for (let i = 0; i < lines.length; i++) {
-                await page.keyboard.type(lines[i]);
-                if (i < lines.length - 1) {
-                    await page.keyboard.down('Shift');
-                    await page.keyboard.press('Enter');
-                    await page.keyboard.up('Shift');
-                }
-            }
+            const safePrompt = prompt.replace(/\r?\n/g, ' ');
+            await page.keyboard.type(safePrompt);
         }
         
+        // On compte le nombre de messages avant d'envoyer la question
+        const initialCount = await page.evaluate(() => document.querySelectorAll('chat-message').length);
+        
         await page.keyboard.press('Enter');
+
+        let lastLength = -1;
+        let stabilizeCount = 0;
+        let finalResponse = "";
+
+        // Boucle Flash (Vérification toutes les 3 secondes, Max 120s)
+        for (let i = 0; i < 40; i++) {
+            const result = await page.evaluate((ctx) => {
+                const initCt = ctx.initCt;
+                const promptString = ctx.promptStr || "";
+                
+                const messages = document.querySelectorAll('chat-message');
+                
+                // Google UI States
+                const isGenerating = Array.from(document.querySelectorAll('[role="progressbar"], [aria-busy="true"], .generating'))
+                    .some(l => l.offsetParent !== null);
+                    
+                const isReadySignal = Array.from(document.querySelectorAll('[aria-live="polite"]'))
+                    .some(tag => tag.innerText && tag.innerText.toLowerCase().includes("prête"));
+
+                // Logique Chirurgicale Zéro-Bloat (<chat-message> terminal)
+                const chatMessages = Array.from(document.querySelectorAll('chat-message'));
+                if (chatMessages.length === 0) return { missing: true, isLoading: isGenerating, bubbleText: "" };
+                
+                // On s'intéresse UNIQUEMENT au tout dernier message dans le DOM (celui qui est autofocus par Chrome)
+                const lastMsg = chatMessages[chatMessages.length - 1];
+                
+                // ANTI-LAZY-LOADING: Forcer le scroll tout en bas du message pour empêcher 
+                // l'UI Google de suspendre le flux Token-by-Token si le message est trop long.
+                lastMsg.scrollIntoView({ behavior: 'auto', block: 'end' });
+                
+                let txt = lastMsg.innerText.trim();
+                
+                // Pour savoir si c'est la bulle de l'IA ou la nôtre, on compare les 30 premiers caractères 
+                // (Cela nous immunise contre le "Show More" / truncate de Google)
+                let pClean = promptString.trim().replace(/\s+/g, ' ').substring(0, 30);
+                let msgClean = txt.replace(/\s+/g, ' ').substring(0, 30);
+
+                if (msgClean.includes(pClean) || pClean.includes(msgClean)) {
+                    // C'est TOUJOURS notre question ! L'IA n'a pas encore injecté sa réponse à la suite.
+                    return { missing: true, isLoading: isGenerating, isReadySignal: false, bubbleText: "" };
+                }
+
+                // C'est la bulle de l'IA (On récupère tout le texte brut pour tracer le statut)
+                let fullText = lastMsg.innerText.trim();
+                let isReasoning = false;
+                
+                // La réponse finale doit obligatoirement être un bloc injecté par Angular (*ngIf -> ng-star-inserted)
+                // Pour éviter de capturer l'UI des boutons (thumb_down, copy) qui sont aussi ng-star-inserted,
+                // on filtre formellement en excluant les mots-clés UI ou par présence de balises Markdown.
+                const ngInserted = Array.from(lastMsg.querySelectorAll('div.ng-star-inserted'))
+                    .filter(d => {
+                        const txtLocal = d.innerText.trim();
+                        // Exclusion formelle des icones
+                        if (txtLocal === "thumb_down" || txtLocal === "thumb_up" || txtLocal.includes("content_copy")) return false;
+                        
+                        // Si ça contient une structure Markdown, c'est obligatoirement la réponse
+                        if (d.querySelectorAll('p, ul, ol, pre, code, blockquote').length > 0) return true;
+                        
+                        // Si le texte généré sans balise markdown fait plus de 60 caractères (impossible pour une icone)
+                        if (txtLocal.length > 60) return true;
+                        
+                        return false;
+                    });
+                    
+                let structuralAnswer = "";
+                if (ngInserted.length > 0) {
+                    // Le conteneur parent du Markdown est généralement le premier de la liste
+                    structuralAnswer = ngInserted[0].innerText.trim();
+                } else {
+                    // S'il n'y a pas encore de bloc avec des paragraphes injecté, c'est obligatoirement du Reasoning
+                    isReasoning = true;
+                }
+
+                return { 
+                    missing: false, 
+                    isLoading: isGenerating, 
+                    isReasoning: isReasoning,
+                    bubbleText: fullText, 
+                    finalAnswer: structuralAnswer 
+                };
+            }, { initCt: initialCount, promptStr: prompt });
+
+            let currentBubble = result.bubbleText;
+            let currentAnswer = result.finalAnswer;
+
+            // Si le bloc n'existe pas encore
+            if (result.missing) {
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                continue;
+            }
+
+            // Log des processus internes de Google (Reasoning)
+            if (result.isReasoning || currentAnswer === "") {
+                if (currentBubble.length !== lastLength && currentBubble.length > 0) {
+                    if (currentBubble.length < 150) {
+                        console.error(`[Expert en réflexion] ${currentBubble}`);
+                    }
+                    lastLength = currentBubble.length;
+                }
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                continue;
+            }
+
+            // Attente inconditionnelle de la fin du chargement Google (barre de chargement/spinners)
+            if (result.isLoading) {
+                lastLength = currentAnswer.length;
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                continue;
+            }
+
+            // Quand le composant indique "terminé" et que la réponse "ng-star-inserted" est bien là
+            if (currentAnswer.length === lastLength && currentAnswer.length > 0) {
+                stabilizeCount++;
+                if (stabilizeCount >= 2) { // 6 secondes de stabilité de la réponse finale
+                    finalResponse = currentAnswer;
+                    break;
+                }
+            } else {
+                lastLength = currentAnswer.length;
+                stabilizeCount = 0;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 3000));
+        }
+
+        if (!finalResponse) {
+             throw new Error("[Erreur DOM NotebookLM : L'Agent a fait un Timeout à la génération. Vérifiez l'onglet manuellement.]");
+        }
         
-        // Timeout allongé le temps que la puce TPUs/Gemini réponde sur l'interface (20s)
-        await new Promise(resolve => setTimeout(resolve, 20000));
-        
-        const responseText = await page.evaluate(() => {
-             // Extraction ciblée pour éviter d'aspirer l'interface de Google
-             // On cherche les bulles de chat (contenant souvent 'message' ou 'response')
-             const elements = Array.from(document.querySelectorAll('div'));
-             const chatNodes = elements.filter(el => {
-                 const className = (el.className || '').toLowerCase();
-                 return (className.includes('message') || className.includes('response') || className.includes('chat')) 
-                        && el.innerText.length > 50 
-                        && el.offsetParent !== null; // visible
-             });
-             
-             if (chatNodes.length > 0) {
-                 // Le dernier noeud est généralement la réponse la plus récente
-                 return chatNodes[chatNodes.length - 1].innerText.trim();
-             }
-             
-             return "[Erreur d'extraction : Impossible de trouver le bloc de réponse AI. Le DOM a changé. Chef, il faudra m'inspecter la classe CSS de la bulle NotebookLM !]";
-        });
-        
-        return responseText;
+        return finalResponse;
     } catch (error) {
         // Purge d'urgence de l'onglet en cas de désync DOM
         try { await page.close(); } catch(e) {}
