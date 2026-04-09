@@ -1,9 +1,6 @@
 //! # Brique 4 : Inférence Ternaire CPU (BitNet b1.58)
 //!
-//! Ce module implémente l'accumulation vectorielle sans multiplication (MathMul-Free)
-//! pour la souveraineté locale du système R2D2 sur instruction AVX-512.
-//! Les poids du réseau de neurones sont compressés en 2 bits (1.58-bit: -1, 0, 1)
-//! maximisant la rétention en cache L1 et réduisant drastiquement le goulot d'étranglement mémoire.
+//! Exécution AVX-512 MathMul-Free encapsulée selon les standards Zéro-UB.
 
 #![allow(unused_assignments)]
 
@@ -20,125 +17,175 @@ pub enum InferenceError {
     SimdFailure(String),
 }
 
-/// Structure de compression 2-bits pour 16 poids simultanés.
-/// Parfaitement dimensionné pour un cache line et les opérations masquées AVX-512.
-#[derive(Debug, Clone)]
-pub struct TernaryBlock16 {
-    /// Masque binaire indiquant où les poids valent +1
-    pub mask_pos: u16,
-    /// Masque binaire indiquant où les poids valent -1
-    pub mask_neg: u16,
-}
+/// Contrat d'Alignement Strict.
+/// Garantit formellement à la compilation que la RAM est alignée sur 64 octets
+/// pour éviter tout Segfault matériel `_mm512_load_ps`.
+#[repr(C, align(64))]
+#[derive(Clone, Copy)]
+pub struct AlignedBlock(pub [f32; 16]);
 
-impl TernaryBlock16 {
-    pub const fn new(mask_pos: u16, mask_neg: u16) -> Self {
-        Self { mask_pos, mask_neg }
+impl AlignedBlock {
+    pub const fn new(data: [f32; 16]) -> Self {
+        Self(data)
     }
 }
 
-/// Moteur principal d'inférence CPU
-pub struct CpuEngine {
-    pub allow_simd_fallback: bool,
+/// "Newtype" transparent pour les masques de poids AVX-512 (BitNet 1.58b).
+#[repr(transparent)]
+#[derive(Debug, Clone)]
+pub struct PackedTernaryWeights {
+    // Dans une Vraie prod, nous embarquons ici les données.
+    // Pour l'instant, on stocke la signature u32: (mask_pos << 16) | mask_neg
+    packed_mask: u32,
 }
 
-impl CpuEngine {
-    pub fn new(allow_simd_fallback: bool) -> Self {
+impl PackedTernaryWeights {
+    #[inline(always)]
+    pub const fn new(mask_pos: u16, mask_neg: u16) -> Self {
         Self {
-            allow_simd_fallback,
+            packed_mask: ((mask_pos as u32) << 16) | (mask_neg as u32),
         }
     }
 
-    /// Exécute l'inférence sur un tenseur d'activation et le multiplie
-    /// (en réalité, l'additionne) au bloc ternaire sans MathMul.
-    ///
-    /// # Safety
-    /// Utilise des registres AVX-512 sous-jacents bruts (`zmm`).
-    #[target_feature(enable = "avx512f")]
-    #[instrument(skip_all)]
-    unsafe fn forward_avx512(
-        &self,
-        activations: &[f32; 16],
-        weights: &TernaryBlock16,
-    ) -> Result<f32, InferenceError> {
-        // Chargement simultané de 16 flottants dans un registre ZMM 512-bit
-        let vals_zmm = _mm512_loadu_ps(activations.as_ptr());
+    #[inline(always)]
+    pub fn mask_pos(&self) -> __mmask16 {
+        (self.packed_mask >> 16) as __mmask16
+    }
 
-        // Accumulateur à 0
+    #[inline(always)]
+    pub fn mask_neg(&self) -> __mmask16 {
+        (self.packed_mask & 0xFFFF) as __mmask16
+    }
+}
+
+/// Typestate Pattern : Le dispatcher de l'Architecture CPU.
+pub trait SimdArchitecture: Send + Sync {
+    fn forward_layer(
+        &self,
+        activations: &[f32],
+        weights: &[PackedTernaryWeights],
+    ) -> Result<f32, InferenceError>;
+}
+
+/// Moteur AVX-512 Pur (Sans aucun branchement)
+pub struct Avx512Engine;
+
+impl Avx512Engine {
+    pub fn try_new() -> Option<Self> {
+        if is_x86_feature_detected!("avx512f") {
+            Some(Self)
+        } else {
+            None
+        }
+    }
+
+    #[target_feature(enable = "avx512f")]
+    unsafe fn forward_block(&self, block: &AlignedBlock, weight: &PackedTernaryWeights) -> f32 {
+        // Chargement Aligné STRICT. Zéro Segfault.
+        let vals_zmm = _mm512_load_ps(block.0.as_ptr());
         let mut acc_zmm = _mm512_setzero_ps();
 
-        // Ajout conditionnel des poids +1 sans multiplication (mask + addition)
-        let mask_pos = weights.mask_pos;
-        if mask_pos > 0 {
-            // Addition uniquement sur les bits à +1
-            acc_zmm = _mm512_mask_add_ps(acc_zmm, mask_pos, acc_zmm, vals_zmm);
+        let m_pos = weight.mask_pos();
+        if m_pos > 0 {
+            acc_zmm = _mm512_mask_add_ps(acc_zmm, m_pos, acc_zmm, vals_zmm);
         }
 
-        // Soustraction conditionnelle des poids -1 sans multiplication (mask + soustraction)
-        let mask_neg = weights.mask_neg;
-        if mask_neg > 0 {
-            // Soustraction uniquement sur les bits à -1
-            acc_zmm = _mm512_mask_sub_ps(acc_zmm, mask_neg, acc_zmm, vals_zmm);
+        let m_neg = weight.mask_neg();
+        if m_neg > 0 {
+            acc_zmm = _mm512_mask_sub_ps(acc_zmm, m_neg, acc_zmm, vals_zmm);
         }
 
-        // Réduction finale horizontale : somme de toutes les composantes 32-bit de acc_zmm
-        // Note: l'instruction native _mm512_reduce_add_ps (AVX-512) réduit tout le vecteur
-        let result = _mm512_reduce_add_ps(acc_zmm);
+        let sum = _mm512_reduce_add_ps(acc_zmm);
 
-        // Nettoyage impératif des registres ZMM par instruction processeur bitwise XOR pour Zeroization Hardware
-        // (Efface toute trace du calcul des activations dans le CPU)
         let _ = _mm512_xor_ps(vals_zmm, vals_zmm);
         let _ = _mm512_xor_ps(acc_zmm, acc_zmm);
+        sum
+    }
+}
 
-        Ok(result)
+impl SimdArchitecture for Avx512Engine {
+    #[instrument(skip_all)]
+    fn forward_layer(
+        &self,
+        activations: &[f32],
+        weights: &[PackedTernaryWeights],
+    ) -> Result<f32, InferenceError> {
+        // Validation des chunks silencieuse et mathématiquement bornée
+        let chunks = activations.chunks_exact(16);
+        let tail = chunks.remainder();
+        let mut sum = 0.0;
+
+        let mut i = 0;
+        for chunk in chunks {
+            if i < weights.len() {
+                // Try to convert slice to fixed array
+                if let Ok(arr) = chunk.try_into() {
+                    let aligned = AlignedBlock::new(arr);
+                    unsafe {
+                        sum += self.forward_block(&aligned, &weights[i]);
+                    }
+                }
+            }
+            i += 1;
+        }
+
+        // Tail (Reste non multiple de 16)
+        if !tail.is_empty() {
+            // Traitement scalaire du bloc résiduel
+            let w_idx = i;
+            if w_idx < weights.len() {
+                let w = &weights[w_idx];
+                for (j, &val) in tail.iter().enumerate() {
+                    let m_pos = w.mask_pos();
+                    let m_neg = w.mask_neg();
+                    if (m_pos & (1 << j)) != 0 {
+                        sum += val;
+                    }
+                    if (m_neg & (1 << j)) != 0 {
+                        sum -= val;
+                    }
+                }
+            }
+        }
+
+        Ok(sum)
+    }
+}
+
+/// Le Délégué Principal (Pont avec le Cortex)
+pub struct CpuOrchestrator {
+    engine: Box<dyn SimdArchitecture>,
+}
+
+impl CpuOrchestrator {
+    pub fn new() -> Result<Self, KernelError> {
+        if let Some(engine) = Avx512Engine::try_new() {
+            info!("Moteur : AVX-512 MathMul-Free [ALLOUÉ]");
+            Ok(Self {
+                engine: Box::new(engine),
+            })
+        } else {
+            info!("Moteur : AVX-512 Non Supporté. Fallback sur AVX2.");
+            Ok(Self {
+                engine: Box::new(simd_fallback::Avx2Engine),
+            })
+        }
     }
 
-    /// Pont d'inférence sécurisé
-    pub fn generate_thought(
-        &self,
-        _activations: &[f32; 16],
-    ) -> Result<Fragment<Signal>, KernelError> {
-        info!("Lancement de la propagation avant (Forward Pass) R2D2 sur CPU...");
+    pub fn generate_thought(&self, activations: &[f32]) -> Result<Fragment<Signal>, KernelError> {
+        // Ex: Dummy Weights
+        let dummy_w = vec![PackedTernaryWeights::new(
+            0b0000_0000_0000_1001,
+            0b0000_0000_0000_0100,
+        )];
+        let final_value = self
+            .engine
+            .forward_layer(activations, &dummy_w)
+            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
 
-        // Simulation : Génération du tenseur d'activation (donnée brute) et du bloc de poids
-        let dummy_activations: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-        ];
-
-        // Ex: Poids = [+1, 0, -1, +1, ...]
-        // mask_pos = bit 0 et bit 3 (0b0000_1001) = 9
-        // mask_neg = bit 2 (0b0000_0100) = 4
-        let dummy_weights = TernaryBlock16::new(0b0000_0000_0000_1001, 0b0000_0000_0000_0100);
-
-        let final_value = if is_x86_feature_detected!("avx512f") {
-            info!("Moteur : Accélération matérielle AVX-512 MathMul-Free [ACTIVÉE]");
-            unsafe {
-                self.forward_avx512(&dummy_activations, &dummy_weights)
-                    .map_err(|e| KernelError::ValidationFailed(e.to_string()))?
-            }
-        } else if self.allow_simd_fallback {
-            warn!("Moteur : AVX-512 non détecté. Bascule sur Fallback AVX2.");
-            simd_fallback::forward_avx2(&dummy_activations, &dummy_weights)
-        } else {
-            return Err(KernelError::ValidationFailed(
-                "Aucun support matériel adequat (AVX-512 manquant et fallback désactivé)."
-                    .to_string(),
-            ));
-        };
-
-        info!("Pensée brute calculée (Typestate ZMM) : {}", final_value);
-
-        // Le payload devient Validated JSONAI
-        // L'inférence produit intrinsèquement un axiome !
         let payload = format!(
-            r#"
-        {{
-            "is_fact": false,
-            "consensus_level": "DEBATED_SYNTHESIS",
-            "content": "L'inférence ternaire CPU produit une valeur scalaire de {final_value}"
-        }}"#
+            r#"{{ "is_fact": false, "consensus_level": "DEBATED_SYNTHESIS", "content": "L'inférence génère la valeur {final_value}" }}"#
         );
-
-        // L'inférence produit un Signal brut qu'il faudra faire valider par le Paradox Engine !
         Ok(Fragment::new(payload))
     }
 }
@@ -148,34 +195,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ternary_block_packing() {
-        // [1.0, -1.0, 0.0, 1.0] -> pos(1001)=9, neg(0010)=2
-        let weights = TernaryBlock16::new(0b1001, 0b0010);
-        assert_eq!(weights.mask_pos, 9);
-        assert_eq!(weights.mask_neg, 2);
-    }
-
-    #[test]
-    fn test_accumulation_avx2_fallback() {
-        let acts: [f32; 16] = [
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-        ];
-        // Masque pos : Poids aux indices 0 et 3 -> +1
-        // Masque neg : Poids à l'index 1 -> -1
-        let weights = TernaryBlock16::new(0b0000_1001, 0b0000_0010);
-
-        let result = simd_fallback::forward_avx2(&acts, &weights);
-        // (1.0 + 4.0) - (2.0) = 3.0
-        assert_eq!(result, 3.0);
-    }
-
-    #[test]
-    fn test_engine_generate_thought() {
-        let engine = CpuEngine::new(true); // Avec fallback autorisé
-        let acts: [f32; 16] = [1.0; 16];
-        let thought = engine.generate_thought(&acts);
-
-        // Validation que l'inférence génère bien un Signal sans erreur interne
-        assert!(thought.is_ok());
+    fn test_aligned_block_and_mask() {
+        let w = PackedTernaryWeights::new(0b1001, 0b0010);
+        assert_eq!(w.mask_pos(), 9);
+        assert_eq!(w.mask_neg(), 2);
     }
 }

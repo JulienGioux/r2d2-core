@@ -1,15 +1,11 @@
-pub fn init() {}
+//! Cuda Core - Sovereign Shield Architecture
+//!
+//! Cette crate est désormais un "Provider" de noyau CUDA (PTX String)
+//! pour déléguer la compilation JIT (Just-In-Time) à la crate `r2d2-bitnet` via `cudarc::nvrtc`.
 
-#[cfg(not(feature = "cuda"))]
-#[no_mangle]
-pub extern "C" fn chimera_w1a8_matmul(
-    _x_ptr: *const u8,
-    _w_ptr: *const u8,
-    _out_ptr: *mut f32,
-    _batch_seq: usize,
-    _hidden_dim: usize,
-    _intermediate_size: usize,
-) -> i32 {
-    // Si cuda n'est pas activé, on retourne une erreur pour forcer le CPU fallback côté CustomOp
-    -1
+/// Noyau CUDA natif au format Source (String) prêt pour la compilation asynchrone (nvrtc).
+pub const CHIMERA_CUDA_KERNEL_SRC: &str = include_str!("kernels/chimera_cuda.cu");
+
+pub fn init() {
+    tracing::info!("R2D2-CUDA-CORE Initialisé : Mode Dynamic PTX JIT.");
 }
