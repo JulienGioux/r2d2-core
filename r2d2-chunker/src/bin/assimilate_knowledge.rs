@@ -18,6 +18,8 @@ async fn main() -> Result<()> {
 
     info!("🚀 [ASSIMILATOR] Booting Memory Assimilation Pipeline (La Forge)");
 
+    let tokenizer = r2d2_tokenizer::R2Tokenizer::new("sentence-transformers/all-MiniLM-L6-v2")?;
+
     let args: Vec<String> = std::env::args().collect();
     let mut target_mission = None;
     if let Some(idx) = args.iter().position(|a| a == "--mission") {
@@ -88,9 +90,11 @@ async fn main() -> Result<()> {
                                     .and_then(|a| a.as_str())
                                 {
                                     let full_text = format!("Thème: {}\n\n{}", theme, answer);
-                                    let chunks =
-                                        r2d2_chunker::TextChunker::chunk_text(&full_text, 200, 40);
-                                    all_chunks.extend(chunks);
+                                    if let Ok(chunks) = r2d2_chunker::TextChunker::chunk_text(
+                                        &tokenizer, &full_text, 200, 40,
+                                    ) {
+                                        all_chunks.extend(chunks);
+                                    }
                                 }
                             } else {
                                 tracing::warn!("🛡️ [ZERO-TRUST] Impossible de parser le contenu JSON interne. Rejeté.");

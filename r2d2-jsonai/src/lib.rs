@@ -46,6 +46,19 @@ pub enum OntologyRel {
     Contradicts,
 }
 
+/// Lien causal hypermédia entre l'entité actuelle et une Target ID.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Edge {
+    pub rel: OntologyRel,
+    pub target_id: String,
+}
+
+impl Zeroize for Edge {
+    fn zeroize(&mut self) {
+        self.target_id.zeroize();
+    }
+}
+
 /// Traçabilité absolue du JSONAI v3.1.
 ///
 /// Ne contient PAS de `ZeroizeOnDrop` car cette structure est conçue pour
@@ -62,8 +75,7 @@ pub struct JsonAiV3 {
 
     pub content: String,
 
-    pub ontological_tags: Vec<OntologyRel>,
-    pub dependencies: Vec<String>,
+    pub edges: Vec<Edge>,
 }
 
 impl JsonAiV3 {
@@ -81,9 +93,37 @@ impl JsonAiV3 {
             belief_state,
             consensus: ConsensusLevel::Raw,
             content,
-            ontological_tags: Vec::new(),
-            dependencies: Vec::new(),
+            edges: Vec::new(),
         }
+    }
+
+    /// Génère un texte dense ultra-compressé, optimisé pour les FLOPs et le Vector Store.
+    /// Ex : `<[Fact]> Le ciel est bleu <Requires:4fr2><Entails:18xb>`
+    pub fn to_dense_embedding(&self) -> String {
+        let belief_tag = match self.belief_state {
+            BeliefState::Fact => "<[Fact]>",
+            BeliefState::Perspective => "<[Perspective]>",
+        };
+
+        let consensus_tag = match self.consensus {
+            ConsensusLevel::Raw => "<[Raw]>",
+            ConsensusLevel::DebatedSynthesis => "<[Debated]>",
+            ConsensusLevel::ConsensusReached => "<[Consensus]>",
+        };
+
+        let mut dense = format!("{} {} {}", belief_tag, consensus_tag, self.content);
+
+        for edge in &self.edges {
+            let rel_str = match edge.rel {
+                OntologyRel::Requires => "Requires",
+                OntologyRel::Entails => "Entails",
+                OntologyRel::IsStepOf => "IsStepOf",
+                OntologyRel::Contradicts => "Contradicts",
+            };
+            dense.push_str(&format!(" <{}:{}>", rel_str, edge.target_id));
+        }
+
+        dense
     }
 }
 
@@ -92,8 +132,8 @@ impl Zeroize for JsonAiV3 {
     fn zeroize(&mut self) {
         self.id.zeroize();
         self.content.zeroize();
-        for dep in &mut self.dependencies {
-            dep.zeroize();
+        for edge in &mut self.edges {
+            edge.zeroize();
         }
     }
 }

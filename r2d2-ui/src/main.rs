@@ -1775,6 +1775,13 @@ async fn handle_chat(
                                     if !files_to_read.is_empty() {
                                         // RAG LOCAL IN-RAM PPOUR FICHIERS CIBLES
                                         let mut chunks = Vec::new();
+
+                                        // Instancier silencieusement le tokenizer BPE pour le chunking dynamique
+                                        let tokenizer = r2d2_tokenizer::R2Tokenizer::new(
+                                            "sentence-transformers/all-MiniLM-L6-v2",
+                                        )
+                                        .expect("Erreur Init BPE Tokenizer dans le RAG Local");
+
                                         for file_path in files_to_read {
                                             // Traite les fichiers locaux dans le workspace R2D2
                                             if let Ok(content) =
@@ -1782,8 +1789,9 @@ async fn handle_chat(
                                             {
                                                 let file_chunks =
                                                     r2d2_chunker::TextChunker::chunk_text(
-                                                        &content, 200, 40,
-                                                    );
+                                                        &tokenizer, &content, 200, 40,
+                                                    )
+                                                    .unwrap_or_default();
                                                 for (i, text) in file_chunks.into_iter().enumerate()
                                                 {
                                                     chunks.push((

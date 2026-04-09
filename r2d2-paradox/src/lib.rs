@@ -108,7 +108,7 @@ impl TruthValidator for ParadoxSolver {
             }
         } else {
             // Comportement de fallback : Les faits élémentaires sans ramifications ontologiques ne nécessitent pas de Slow Path.
-            if jsonai.is_fact && jsonai.ontological_tags.is_empty() {
+            if jsonai.is_fact && jsonai.edges.is_empty() {
                 reflex_approved = true;
             }
         }
@@ -218,9 +218,10 @@ mod tests {
             "Proposition complexe MCTS".to_string(),
             BeliefState::Perspective, // Force potentiellement le Slow-Path (hors facto)
         );
-        jsonai
-            .ontological_tags
-            .push(r2d2_jsonai::OntologyRel::Requires);
+        jsonai.edges.push(r2d2_jsonai::Edge {
+            rel: r2d2_jsonai::OntologyRel::Requires,
+            target_id: "none".to_string(),
+        });
 
         let payload = serde_json::to_string(&jsonai).unwrap();
 
@@ -246,9 +247,10 @@ mod tests {
             "Proposition absurde".to_string(),
             BeliefState::Perspective,
         );
-        jsonai
-            .ontological_tags
-            .push(r2d2_jsonai::OntologyRel::Requires);
+        jsonai.edges.push(r2d2_jsonai::Edge {
+            rel: r2d2_jsonai::OntologyRel::Requires,
+            target_id: "none".to_string(),
+        });
         let payload = serde_json::to_string(&jsonai).unwrap();
 
         let mock_judge = Arc::new(MockStrictSemanticJudge {
