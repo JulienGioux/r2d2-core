@@ -11,6 +11,10 @@ mod tests {
             "Le PTX généré doit contenir le noyau bitnet_f32_dualmask_matmul"
         );
         assert!(
+            CHIMERA_CUDA_KERNEL_PTX.contains("bitnet_bwd_dx_matmul"),
+            "Le PTX généré doit contenir le noyau backward bitnet_bwd_dx_matmul"
+        );
+        assert!(
             CHIMERA_CUDA_KERNEL_PTX.contains(".version"),
             "Le code source doit être un module PTX valide"
         );

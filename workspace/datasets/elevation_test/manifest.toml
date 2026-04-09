@@ -1,0 +1,12 @@
+format = "contrastive_embedding"
+
+[identity]
+uuid = "550e8400-e29b-41d4-a716-446655440000"
+name = "elevation_test"
+version = "1.0.0"
+author = "R2D2 Architect"
+
+[meta]
+size_bytes = 4096
+samples_count = 32
+source_corpus = "Archival Memory Hub"

@@ -50,6 +50,45 @@ __global__ void bitnet_f32_dualmask_matmul(
     }
 }
 
+// Algorithme de Transposition Virtuelle (Bwd Pass)
+// Décompresse W_quant et accumule `grad_x = dY * W^T`.
+// Optimisation L1-Cache: Les threads d'un même demi-warp (16 threads)
+// demandent exactement le même bloc `TernaryBlock16` (4 Bytes). 
+// L'architecture Ampere broadcast automatiquement ce Hit L1 
+// évitant ainsi le "Strided Access" mortel d'une lecture colonne habituelle.
+__global__ void bitnet_bwd_dx_matmul(
+    const float* __restrict__ dy,              // Gradients sortants F32 (M x N)
+    const TernaryBlock16* __restrict__ weight, // Poids quantifiés (N x (K/16))
+    float* __restrict__ grad_x,                // Gradients des activations F32 (M x K)
+    int M, int N, int K,
+    int stride_dy_m, int stride_dy_n,
+    int stride_w_n, int stride_w_k)
+{
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col_k = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (row < M && col_k < K) {
+        float acc = 0.0f;
+        int block_k = col_k / 16;
+        int bit_idx = col_k % 16;
+
+        for (int n = 0; n < N; ++n) {
+            // Lecture L1 Coalesced avec strides VRAM exacts
+            TernaryBlock16 w_block = weight[n * stride_w_n + block_k * stride_w_k];
+            // Lecture L1 Coalesced dY avec strides VRAM exacts
+            float dy_val = dy[row * stride_dy_m + n * stride_dy_n];
+
+            uint16_t bit_pos = (w_block.m_pos >> bit_idx) & 1;
+            uint16_t bit_neg = (w_block.m_neg >> bit_idx) & 1;
+
+            if (bit_pos) acc += dy_val;
+            if (bit_neg) acc -= dy_val;
+        }
+
+        grad_x[row * K + col_k] = acc;
+    }
+}
+
 // Fonction utilitaire pour la réduction au sein d'un Warp (32 threads)
 // Obligatoire pour la scalabilité des accès "Coalesced" sur le bus VRAM
 __device__ __forceinline__ float warpReduceSum(float val) {
