@@ -25,3 +25,4 @@ tracing = "0.1.44"
 anyhow = { workspace = true }
 async-trait = "0.1.86"
 uuid = { version = "1.23.0", features = ["v4"] }
+rand = "0.8"

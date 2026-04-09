@@ -1,0 +1,10 @@
+{"text":"[INST] Qu\'est-ce que l\'Ownership en Rust ? [/INST] L\'Ownership est le système de gestion mémoire de Rust.","r2d2_cognitive_source":"RAG_CHUNK_0_CAUSAL"}
+{"text":"[INST] Explique la sécurité mémoire de R2D2. [/INST] Le R2D2 Chimera utilise le typestate pattern pour garantir zero UB.","r2d2_cognitive_source":"RAG_CHUNK_1_CAUSAL"}
+{"text":"[INST] Quel est l\'avantage du noyau CUDA NVPTX JIT ? [/INST] Il permet de compiler à la volée via cudarc sans dépendre d\'un linker C++ hôte faillible.","r2d2_cognitive_source":"RAG_CHUNK_2_CAUSAL"}
+{"text":"[INST] Comment fonctionne le BitMamba ? [/INST] Il s\'agit d\'un dérivé Mamba (SSM) couplé avec une quantification 1.58 bits ternaire [-1, 0, 1] pure.","r2d2_cognitive_source":"RAG_CHUNK_3_CAUSAL"}
+{"text":"[INST] Pourquoi utiliser tokio::task::spawn_blocking ? [/INST] Pour enfermer les opérations synchrones IO dans un thread dédié afin d\'éviter d\'étouffer le runtime réseau asynchrone principal.","r2d2_cognitive_source":"RAG_CHUNK_4_CAUSAL"}
+{"text":"[INST] Quelle est l\'utilité de zeroize::Zeroizing ? [/INST] C\'est un wrapper RAII forçant la mémoire sous-jacente à être détruite de manière cryptographique dès sa sortie de scope.","r2d2_cognitive_source":"RAG_CHUNK_5_CAUSAL"}
+{"text":"[INST] Explique le trait SimdArchitecture. [/INST] Il permet un dispatch sécurisé et aligné des instructions SIMD sans branchage AVX dynamique coûteux dans les boucles chaudes CPU.","r2d2_cognitive_source":"RAG_CHUNK_6_CAUSAL"}
+{"text":"[INST] A quoi sert la brique BlackBoard de R2D2 ? [/INST] La BlackBoard est le système PostgreSQL asynchrone de stockage vectoriel persistant lié à l\'agent.","r2d2_cognitive_source":"RAG_CHUNK_7_CAUSAL"}
+{"text":"[INST] Que signifie Sovereign Shield ? [/INST] L\'architecture Sovereign Shield est la doctrine R2D2 empêchant toute faille VRAM via Isolation Stricte Typestate et JIT CUDA.","r2d2_cognitive_source":"RAG_CHUNK_8_CAUSAL"}
+{"text":"[INST] Le Chimera Engine est-il open source ? [/INST] C\'est un moteur hyper-optimisé conçu par l\'Architecte pour remplacer les frameworks Python bloated.","r2d2_cognitive_source":"RAG_CHUNK_9_CAUSAL"}

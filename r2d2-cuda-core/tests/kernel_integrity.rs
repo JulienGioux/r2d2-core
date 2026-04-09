@@ -5,8 +5,8 @@ mod tests {
     #[test]
     fn test_cuda_kernel_source_integrity() {
         assert!(
-            CHIMERA_CUDA_KERNEL_SRC.contains("bitnet_matmul_kernel"),
-            "Le code source CUDA doit contenir le noyau bitnet_matmul_kernel"
+            CHIMERA_CUDA_KERNEL_SRC.contains("bitnet_f32_dualmask_matmul"),
+            "Le code source CUDA doit contenir le noyau bitnet_f32_dualmask_matmul"
         );
         assert!(
             CHIMERA_CUDA_KERNEL_SRC.contains("__global__"),

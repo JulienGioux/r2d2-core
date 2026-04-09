@@ -15,8 +15,8 @@ pub trait Expert {
 /// 🧠 BitFFN (Feed-Forward Réel)
 /// Topologie 1.58-bit (Squared ReLU) validée par RustyMaster.
 pub struct BitFFN {
-    w1: Linear,
-    w2: Linear,
+    pub w1: Linear,
+    pub w2: Linear,
 }
 
 impl BitFFN {

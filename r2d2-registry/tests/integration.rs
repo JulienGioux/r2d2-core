@@ -4,18 +4,18 @@ use std::io::Write;
 use tempfile::tempdir;
 use uuid::Uuid;
 
-#[test]
-fn test_integration_full_registry_lifecycle() {
+#[tokio::test]
+async fn test_integration_full_registry_lifecycle() {
     let dir = tempdir().unwrap();
     let registry = ModelRegistry::new(dir.path());
 
     // 1. Démarrage à vide
-    assert_eq!(registry.catalog().len(), 0);
+    assert_eq!(registry.catalog().await.len(), 0);
 
     // 2. Création d'une structure malformée (Manque manifest)
     let invalid_dir = dir.path().join("bitmamba").join("ghost_model");
     fs::create_dir_all(&invalid_dir).unwrap();
-    assert_eq!(registry.catalog().len(), 0);
+    assert_eq!(registry.catalog().await.len(), 0);
 
     // 3. Création d'un modèle valide
     let valid_dir = dir.path().join("embedding").join("nomic-v1");
@@ -46,7 +46,7 @@ optimal_tasks = ["RAG"]
     file.write_all(manifest_toml.as_bytes()).unwrap();
 
     // 4. Test d'indexation
-    let catalog = registry.catalog();
+    let catalog = registry.catalog().await;
     assert_eq!(catalog.len(), 1);
 
     let manifest = &catalog[0].1;
@@ -56,17 +56,19 @@ optimal_tasks = ["RAG"]
     // 5. Test Finders
     let found_by_uuid = registry
         .find_by_uuid(&valid_uuid)
+        .await
         .expect("UUID introuvable");
     assert_eq!(found_by_uuid.1.identity.name.0, "Nomic-Test");
 
     let found_by_name = registry
         .find_by_name(&ModelId("Nomic-Test".to_string()))
+        .await
         .expect("Name introuvable");
     assert_eq!(found_by_name.1.identity.family, ModelFamily::Embedding);
 }
 
-#[test]
-fn test_integration_manifest_deserialization_safeguards() {
+#[tokio::test]
+async fn test_integration_manifest_deserialization_safeguards() {
     let dir = tempdir().unwrap();
     let model_dir = dir.path().join("llama").join("hacked");
     fs::create_dir_all(&model_dir).unwrap();
@@ -87,12 +89,12 @@ quantization = "fp32"
     file.write_all(bad_manifest.as_bytes()).unwrap();
 
     let registry = ModelRegistry::new(dir.path());
-    let catalog = registry.catalog();
+    let catalog = registry.catalog().await;
 
     // Le parseur TOML refuse la deserialisation de l'enum invalide -> le modèle est ignoré silencieusement (Zéro Panique).
     assert_eq!(catalog.len(), 0);
 
     // Vérif explicite de l'erreur
-    let err = registry.load_manifest(&model_dir).unwrap_err();
+    let err = registry.load_manifest(&model_dir).await.unwrap_err();
     assert!(matches!(err, RegistryError::ParseToml(_)));
 }
