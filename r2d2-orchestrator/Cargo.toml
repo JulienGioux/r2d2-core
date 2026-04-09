@@ -1,0 +1,13 @@
+[package]
+name = "r2d2-orchestrator"
+version = "8.2.0"
+edition = "2021"
+
+[dependencies]
+r2d2-mcp = { path = "../r2d2-mcp" }
+r2d2-forge = { path = "../r2d2-forge" }
+r2d2-cortex = { path = "../r2d2-cortex" }
+r2d2-registry = { path = "../r2d2-registry" }
+anyhow.workspace = true
+tracing = "0.1"
+tracing-subscriber = "0.3"

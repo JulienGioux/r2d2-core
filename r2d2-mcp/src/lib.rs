@@ -9,6 +9,7 @@ pub mod client;
 pub mod hitl;
 pub mod proxy;
 pub mod registry;
+pub mod vampire;
 
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
@@ -25,6 +26,7 @@ use tracing::{info, instrument};
 use actuator::PhysicalExecutorAdapter;
 use proxy::SemanticProxy;
 use registry::ToolRegistry;
+pub use vampire::VampireWorker;
 
 /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
 pub struct McpGateway {

@@ -133,6 +133,8 @@ mod tests {
         fs::create_dir_all(&model_dir).unwrap();
 
         let manifest_content = r#"
+format = "causal_lm"
+
 [identity]
 uuid = "a3bc9dfc-ab84-489e-8c34-eb54e3d3b76a"
 name = "Chimera-Test"

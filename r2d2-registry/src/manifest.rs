@@ -1,4 +1,4 @@
-use crate::types::{ModelFamily, ModelId, QuantizationLevel};
+use crate::types::{ModelFamily, ModelId, QuantizationLevel, TaskTypology};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub struct ModelManifest {
     pub identity: ModelIdentity,
     pub topology: ModelTopology,
+    pub format: TaskTypology, // LE PIVOT DE SÉCURITÉ
     pub metrics: Option<ModelMetrics>,
 }
 
@@ -62,6 +63,7 @@ impl Default for ModelManifest {
                 parameters: None,
                 context_window: None,
             },
+            format: TaskTypology::CausalLm,
             metrics: None,
         }
     }

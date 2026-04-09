@@ -2,10 +2,13 @@ use anyhow::Result;
 use clap::{Parser, ValueEnum};
 use r2d2_cortex::agent::CognitiveAgent;
 use r2d2_cortex::models::reasoning_agent::ReasoningAgent;
+use r2d2_registry::{DatasetIdentity, DatasetManifest, DatasetMeta, TaskTypology};
 use serde_json::json;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+use std::path::PathBuf;
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 #[derive(ValueEnum, Clone, Debug, PartialEq)]
 pub enum TrainingMode {
@@ -17,11 +20,14 @@ pub enum TrainingMode {
 #[command(
     author,
     version,
-    about = "R2D2 - Alchimiste (Data Extraction & Synthesis)"
+    about = "R2D2 - Alchimiste (Dataset Registry Compliant)"
 )]
 struct Args {
     #[arg(short, long, value_enum, default_value_t = TrainingMode::CausalLm)]
     mode: TrainingMode,
+
+    #[arg(short, long, default_value = "genesis_v1")]
+    dataset_name: String,
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -39,9 +45,20 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     info!(
-        "⚗️  [ALCHIMISTE] Démarrage du processeur asynchrone (Mode: {:?})...",
-        args.mode
+        "⚗️  [ALCHIMISTE] Forgerie du Dataset '{}' (Mode: {:?})...",
+        args.dataset_name, args.mode
     );
+
+    let workspace_path =
+        PathBuf::from("/home/jgx/source/R2D2/workspace/datasets").join(&args.dataset_name);
+    fs::create_dir_all(&workspace_path)?;
+    let data_file_path = workspace_path.join("data.jsonl");
+    let manifest_path = workspace_path.join("manifest.toml");
+
+    let mut dataset_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&data_file_path)?;
 
     info!("🔌 [ALCHIMISTE] Booting ReasoningAgent natif...");
     let mut agent = ReasoningAgent::new();
@@ -65,16 +82,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    fs::create_dir_all("datasets").unwrap_or_default();
-    let dataset_path = match args.mode {
-        TrainingMode::CausalLm => "datasets/genesis_causal.jsonl",
-        TrainingMode::ContrastiveEmbedding => "datasets/genesis_contrastive.jsonl",
-    };
-
-    let mut dataset_file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(dataset_path)?;
+    let mut samples_count = 0;
+    let mut total_bytes = 0;
 
     for chunk in chunks {
         info!("=======================================================");
@@ -97,31 +106,23 @@ async fn main() -> Result<()> {
                             .trim()
                             .to_string();
                         if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&clean) {
-                            let mut ok_count = 0;
                             for item in arr {
                                 if let (Some(q), Some(r)) = (
                                     item.get("question").and_then(|v| v.as_str()),
                                     item.get("réponse").and_then(|v| v.as_str()),
                                 ) {
-                                    // Sauvegarde dans l'enveloppe text JSONL lue par le Causal LM Trainer.
-                                    // Format du prompt pour un modele génératif: [INST] Q [/INST] A
                                     let wrapped_text = format!("[INST] {} [/INST] {}", q, r);
                                     let causal_entry = json!({
                                         "text": wrapped_text,
                                         "r2d2_cognitive_source": format!("RAG_CHUNK_{}_CAUSAL", chunk.id)
                                     });
-                                    writeln!(
-                                        dataset_file,
-                                        "{}",
-                                        serde_json::to_string(&causal_entry)?
-                                    )?;
-                                    ok_count += 1;
+                                    let entry_str = serde_json::to_string(&causal_entry)?;
+                                    writeln!(dataset_file, "{}", entry_str)?;
+                                    total_bytes += entry_str.len() as u64 + 1;
+                                    samples_count += 1;
                                 }
                             }
-                            info!(
-                                "✅ [ALCHIMISTE] Paires Causales forgées avec succès: {}",
-                                ok_count
-                            );
+                            info!("✅ [ALCHIMISTE] Paires Causales forgées ajoutées au lot.");
                         } else {
                             warn!("⚠️ [ALCHIMISTE] Array JSON Invalide pour le Causal.");
                         }
@@ -131,7 +132,6 @@ async fn main() -> Result<()> {
             }
             TrainingMode::ContrastiveEmbedding => {
                 let system_prompt = "Tu es R2D2-Alchimiste. Ton rôle strict est de lire un texte brut et de recracher la donnée formatée en standard JSONAI V3.0 pur.\nFormat de sortie :\n{\n  \"metadata\": {\n    \"is_fact\": true/false,\n    \"belief_state\": 0.9,\n    \"ontology_links\": []\n  },\n  \"html_fragment\": \"...\",\n  \"semantic_vector_target\": \"Concept Absolu\"\n}";
-                // Pour augmenter les données, on peut demander deux questions ciblant ce chunk:
                 let user_prompt = format!(
                     "Génère DEUX objets respectant rigoureusement JSONAI V3.0 (dans un tableau JSON [ {{...}}, {{...}} ]) pour cet extrait, en variant l'angle d'attaque (ex: 1 abstrait, 1 technique):\n\n{}",
                     chunk.content
@@ -147,34 +147,24 @@ async fn main() -> Result<()> {
                             .trim()
                             .to_string();
                         if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&clean) {
-                            let mut ok_count = 0;
                             for mut item in arr {
                                 item["r2d2_cognitive_source"] =
                                     json!(format!("RAG_CHUNK_{}_CONTRAST", chunk.id));
-                                // Pour que le module `train_cuda_sft.rs` lise ça, il lui faut le contexte sous un block `[INST]`.
-                                // On génère un pseudo-contexte.
                                 let prompt_contexte = format!(
                                     "Analyse l'information RAG {} sous l'angle approprié.",
                                     chunk.id
                                 );
                                 let json_str = serde_json::to_string(&item)?;
-
                                 let combined_entry = json!({
                                     "text": format!("[INST] {} [/INST] {}", prompt_contexte, json_str)
                                 });
-
-                                writeln!(
-                                    dataset_file,
-                                    "{}",
-                                    serde_json::to_string(&combined_entry)?
-                                )?;
-                                dataset_file.flush()?;
-                                ok_count += 1;
+                                let entry_str = serde_json::to_string(&combined_entry)?;
+                                writeln!(dataset_file, "{}", entry_str)?;
+                                total_bytes += entry_str.len() as u64 + 1;
+                                samples_count += 1;
                             }
-                            info!(
-                                "✅ [ALCHIMISTE] Vecteurs JSONAI Contrastifs coulé avec succès: {}",
-                                ok_count
-                            );
+                            dataset_file.flush()?;
+                            info!("✅ [ALCHIMISTE] Vecteurs JSONAI Contrastifs forgés ajoutés.");
                         } else {
                             warn!("⚠️ [ALCHIMISTE] Array JSON Invalide pour le Contrastif.");
                         }
@@ -185,8 +175,36 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!("🏁 [ALCHIMISTE] FIN ALCHIMIQUE. Dataset forgé.");
-    let _ = agent.unload().await;
+    info!("🏁 [ALCHIMISTE] Traitement des Traces terminé. Formatage du DatasetManifest...");
 
+    let dataset_format = match args.mode {
+        TrainingMode::CausalLm => TaskTypology::CausalLm,
+        TrainingMode::ContrastiveEmbedding => TaskTypology::ContrastiveEmbedding,
+    };
+
+    let manifest = DatasetManifest {
+        identity: DatasetIdentity {
+            uuid: Uuid::new_v4(),
+            name: args.dataset_name.clone(),
+            version: "1.0.0".to_string(),
+            author: Some("R2D2-Alchimiste".to_string()),
+        },
+        format: dataset_format,
+        meta: DatasetMeta {
+            size_bytes: total_bytes,
+            samples_count,
+            source_corpus: "knowledge_meta.json".to_string(),
+        },
+    };
+
+    let manifest_toml = toml::to_string_pretty(&manifest)?;
+    fs::write(&manifest_path, manifest_toml)?;
+
+    info!(
+        "📦 [ALCHIMISTE] Dataset packagé avec succès : {:?}",
+        workspace_path
+    );
+
+    let _ = agent.unload().await;
     Ok(())
 }

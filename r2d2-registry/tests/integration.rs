@@ -24,6 +24,8 @@ fn test_integration_full_registry_lifecycle() {
     let valid_uuid = Uuid::new_v4();
     let manifest_toml = format!(
         r#"
+format = "contrastive_embedding"
+
 [identity]
 uuid = "{}"
 name = "Nomic-Test"
