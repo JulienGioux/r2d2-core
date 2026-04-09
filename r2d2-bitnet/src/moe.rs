@@ -114,87 +114,98 @@ impl SparseMoe {
         let hidden_dim = *dims.last().unwrap_or(&0);
         let num_tokens: usize = dims[..dims.len() - 1].iter().product();
 
-        // 1. Extraction (Zéro Float Multiplication)
-        let x_vec = x.flatten_all()?.to_vec1::<f32>()?;
-        let gate_vec = self.gate_weights.flatten_all()?.to_vec1::<f32>()?; // Attendu: [num_experts, hidden_dim]
-
-        // 2. Gating MatMul-Free en Parallèle (CPU Multithreading)
-        // Utilisation de Rayon (L'optimisation "Ryzen/Rayon" !) pour distribuer
-        // le calcul d'affinité des jetons sur tous les cœurs du CPU.
         let mut expert_assignments: Vec<Vec<usize>> = vec![Vec::new(); self.num_experts];
+        let gpu_routing = x.device().is_cuda() && cfg!(feature = "cuda");
 
-        let assignments: Vec<(usize, usize)> = (0..num_tokens)
-            .into_par_iter()
-            .map(|t| {
-                let token_offset = t * hidden_dim;
-                let mut best_expert = 0;
-                let mut best_score = f32::NEG_INFINITY;
+        if gpu_routing {
+            #[cfg(feature = "cuda")]
+            {
+                use crate::custom_op_cuda::SparseMoeRoutingOp;
+                let routing_op = SparseMoeRoutingOp {
+                    num_experts: self.num_experts,
+                    hidden_dim,
+                    num_tokens,
+                };
 
-                for e in 0..self.num_experts {
-                    let mut score = 0.0;
-                    let gate_offset = e * hidden_dim;
+                // Appel Asynchrone VRAM au Routeur Top-K GPU
+                let assignments_t = x.apply_op2_no_bwd(&self.gate_weights, &routing_op)?;
+                // Seul ce tout petit Array (2 Ko pour 512 tokens) redescend du VRAM au CPU
+                let assignments_vec = assignments_t.to_vec1::<u32>()?;
 
-                    // Opération mathématique sans Float Mult
-                    for i in 0..hidden_dim {
-                        let weight = gate_vec[gate_offset + i];
-                        let val = x_vec[token_offset + i];
-                        if weight > 0.5 {
-                            score += val;
-                        } else if weight < -0.5 {
-                            score -= val;
+                for (t, &e) in assignments_vec.iter().enumerate() {
+                    expert_assignments[e as usize].push(t);
+                }
+            }
+        } else {
+            let x_vec = x.flatten_all()?.to_vec1::<f32>()?;
+            let gate_vec = self.gate_weights.flatten_all()?.to_vec1::<f32>()?;
+
+            let assignments: Vec<(usize, usize)> = (0..num_tokens)
+                .into_par_iter()
+                .map(|t| {
+                    let token_offset = t * hidden_dim;
+                    let mut best_expert = 0;
+                    let mut best_score = f32::NEG_INFINITY;
+
+                    for e in 0..self.num_experts {
+                        let mut score = 0.0;
+                        let gate_offset = e * hidden_dim;
+
+                        for i in 0..hidden_dim {
+                            let weight = gate_vec[gate_offset + i];
+                            let val = x_vec[token_offset + i];
+                            if weight > 0.5 {
+                                score += val;
+                            } else if weight < -0.5 {
+                                score -= val;
+                            }
+                        }
+
+                        if score > best_score {
+                            best_score = score;
+                            best_expert = e;
                         }
                     }
+                    (t, best_expert)
+                })
+                .collect();
 
-                    if score > best_score {
-                        best_score = score;
-                        best_expert = e;
-                    }
-                }
-                (t, best_expert)
-            })
-            .collect();
-
-        // Répartition séquentielle des résultats du multithreading
-        for (t, e) in assignments {
-            expert_assignments[e].push(t);
+            for (t, e) in assignments {
+                expert_assignments[e].push(t);
+            }
         }
 
-        // 3. Dispatch & Récolte groupée (Batching par expert pour performance)
-        let mut output_vec = vec![0.0f32; num_tokens * hidden_dim];
+        // --- 2. DISPATCH & RECOMBINAISON 100% DEVICE ---
+        let x_2d = x.reshape((num_tokens, hidden_dim))?;
+
+        // Initialisation de la sortie VRAM "Zeroed"
+        let mut output_tensor = candle_core::Tensor::zeros(
+            (num_tokens, hidden_dim),
+            candle_core::DType::F32,
+            x.device(),
+        )?;
 
         for (e, assigned_tokens) in expert_assignments.iter().enumerate().take(self.num_experts) {
             if assigned_tokens.is_empty() {
                 continue; // Zéro-Bloat absolu: Si l'expert n'est pas requis, on le saute totalement.
             }
 
-            // Préparer le tenseur de batch pour cet expert
-            let mut expert_input = Vec::with_capacity(assigned_tokens.len() * hidden_dim);
-            for &t_idx in assigned_tokens {
-                let offset = t_idx * hidden_dim;
-                expert_input.extend_from_slice(&x_vec[offset..offset + hidden_dim]);
-            }
+            // [CUDA-NATIVE] Conversion des index en Tensor CPU puis déplacement asynchrone VRAM
+            let idx_u32: Vec<u32> = assigned_tokens.iter().map(|&id| id as u32).collect();
+            let idx = candle_core::Tensor::new(idx_u32.as_slice(), x.device())?;
 
-            let batch_tensor = Tensor::from_vec(
-                expert_input,
-                (assigned_tokens.len(), hidden_dim),
-                x.device(),
-            )?;
+            // Gather des activations via Slicing Tensoriel interne (Zéro extraction Host)
+            let batch_tensor = x_2d.index_select(&idx, 0)?;
 
             // Exécution du Forward sur le sous-réseau
             let batch_output = self.experts[e].forward(&batch_tensor)?;
-            let batch_out_vec = batch_output.flatten_all()?.to_vec1::<f32>()?;
 
-            // Dispersion (Scatter) des résultats à leur place originale
-            for (batch_idx, &t_idx) in assigned_tokens.iter().enumerate() {
-                let global_offset = t_idx * hidden_dim;
-                let batch_offset = batch_idx * hidden_dim;
-                output_vec[global_offset..global_offset + hidden_dim]
-                    .copy_from_slice(&batch_out_vec[batch_offset..batch_offset + hidden_dim]);
-            }
+            // Scatter exact via addition sur le Tenseur F32 zeros (Propriété mathématique garantie pour Top-1/Top-K)
+            output_tensor = output_tensor.index_add(&idx, &batch_output, 0)?;
         }
 
-        // 4. Reconstitution du Tenseur final
-        Tensor::from_vec(output_vec, shape, x.device())
+        // 4. Reconstitution de la Forme d'origine
+        output_tensor.reshape(shape)
     }
 }
 
@@ -253,6 +264,36 @@ mod tests {
         // Le Jeton 0 a été multiplié par 10.
         // Les jetons 1 et 2 ont été multipliés par 100 parce qu'ils ont été "Paddés" ensemble.
         // L'expert 2 n'a jamais été chargé (Zéro Bloat prouvé).
+        assert_eq!(out_vec, vec![10.0, 10.0, -100.0, 100.0, -200.0, 200.0]);
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "cuda")]
+    fn test_zero_bloat_routing_cuda() -> Result<()> {
+        if !candle_core::utils::cuda_is_available() {
+            return Ok(()); // Ignorer si le runtime n'a pas de GPU disponible
+        }
+
+        let device = candle_core::Device::new_cuda(0)?;
+
+        let experts: Vec<Box<dyn Expert + Send + Sync>> = vec![
+            Box::new(MockExpert { id: 10.0 }),
+            Box::new(MockExpert { id: 100.0 }),
+            Box::new(MockExpert { id: 1000.0 }),
+        ];
+
+        let gate_w = Tensor::new(&[[1.0f32, 1.0], [-1.0, 1.0], [-1.0, -1.0]], &device)?;
+
+        let moe = SparseMoe::new(1, gate_w, experts);
+
+        let x = Tensor::new(&[[1.0f32, 1.0], [-1.0, 1.0], [-2.0, 2.0]], &device)?;
+
+        // Exécution Pure Asynchrone VRAM (Kernel OPs + Slicing natif)
+        let out = moe.forward(&x)?;
+        // On rapatrie à la toute fin pour le test uniquement
+        let out_vec = out.flatten_all()?.to_vec1::<f32>()?;
+
         assert_eq!(out_vec, vec![10.0, 10.0, -100.0, 100.0, -200.0, 200.0]);
         Ok(())
     }

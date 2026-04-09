@@ -9,9 +9,9 @@ L'intégralité du traitement tensoriel s'effectue sans aucune unité arithméti
 Le moteur a été repensé "from scratch" en Rust (Zero-Trust Memory) pour fusionner 3 technologies ultra-performantes, sans FPU, en exploitant l'auto-vectorisation (AVX-512) et le Multi-threading CPU via `Rayon` :
 
 - **`ssm.rs` (BitMamba)** : Oubliez la complexité quadratique ($O(N^2)$) des Transformers d'Attention. BitMamba utilise une méthode par Espaces d'États avec projection Poids-Ternaires. Complètement indépendant en mémoire, aucune allocation superflue (Zéro OOM).
-- **`moe.rs` (Sparse Mixture of Experts)** : Le Scatter/Gather ultime. Un routeur Top-K qui active dynamiquement le bon chemin neuronal par jeton. L'algorithme "Zéro-Bloat" permet d'avoir 100 milliards de paramètres ternaires sur le côté, mais une consommation RAM statique infime à l'appel.
+- **`moe.rs` (Sparse Mixture of Experts Asynchrone VRAM)** : Le Scatter/Gather ultime, migré à 100% sur Carte Graphique "Zero-Bus-Bottleneck". L'extraction des jetons (`index_select`), le routage Top-1 / Top-K, et la recombinaison finale (`index_add`) restent intégralement confinés sous la bande passante locale du GPU (>500 Go/s), éradiquant totalement le piège classique des goulots PCI-E (Transferts inutiles Host-to-Device).
 - **`hadamard.rs` (Stabilisateur Quantique)** : Intégration de la Fast Walsh-Hadamard Transform (FWHT), agissant comme un dôme lisseur sur les activations aberrantes ("Outliers"), indispensable pour que BitMamba conserve son exactitude en ternaire sans crash de dérivation.
-- **`custom_op_cuda.rs` (Sovereign PTX Bridge)** : Accélération CUDA asynchrone pour les Tenseurs Quantifiés. Compilation PTX "Offline" via `nvcc -arch=native` (auto-tune sur l'hôte), injection JIT avec `CudaSlice<T>` sans Linker. Dispose d'un repli ("Fallback") CPU natif inviolable en cas de système incompatible.
+- **`custom_op_cuda.rs` (Sovereign PTX Bridge & Warp-Reduction)** : Accélération CUDA asynchrone pour les Tenseurs Quantifiés et le Routage SparseMoE. Implémente la `Warp-Reduction` (synchronisation via l'instruction matérielle `__shfl_down_sync`) pour garantir la coalescence des lectures mémoire.
 - **`BitLinear`** (Legacy Support) : Couche linéaire dense avec packaging scalaire ternaire.
 
 ## 💡 Le Paradigme 1.58-bit (AbsMean Quantization)
