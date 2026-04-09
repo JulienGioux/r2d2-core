@@ -123,7 +123,7 @@ impl Fragment<Validated> {
     /// Ancre la donnée validée dans le Blackboard de la Ruche.
     /// Renvoie un `SecureMemGuard` qui s'assurera de la Zeroization de la RAM en sortie de bloc.
     pub fn finalize(self) -> SecureMemGuard<Validated> {
-        SecureMemGuard::new(self.state)
+        SecureMemGuard::new(zeroize::Zeroizing::new(self.state))
     }
 }
 

@@ -1,27 +1,57 @@
 //! SIMD Fallback (AVX2 / Scala) pour processeurs ne supportant pas AVX-512 nativement.
 
-use crate::TernaryBlock16;
+use crate::{InferenceError, PackedTernaryWeights, SimdArchitecture};
 
-/// Fallback rudimentaire scalaire ou AVX2 simulant l'accumulation MathMul-Free.
-pub fn forward_avx2(activations: &[f32; 16], weights: &TernaryBlock16) -> f32 {
-    let mut sum = 0.0;
+pub struct Avx2Engine;
 
-    // Accumulation conditionnelle scalaire
-    for (i, &act) in activations.iter().enumerate().take(16) {
-        // Extraction du i-ème bit du mask_pos
-        if (weights.mask_pos & (1 << i)) != 0 {
-            sum += act;
+impl SimdArchitecture for Avx2Engine {
+    fn forward_layer(
+        &self,
+        activations: &[f32],
+        weights: &[PackedTernaryWeights],
+    ) -> Result<f32, InferenceError> {
+        let mut sum = 0.0;
+
+        // Traitement simple scalaire (ou AVX2 intrinsics si compilé)
+        // avec padding garanti à la dimension 16 par la loop appelante
+        let chunks = activations.chunks_exact(16);
+        let tail = chunks.remainder();
+
+        let mut i = 0;
+        for chunk in chunks {
+            if i < weights.len() {
+                let w = &weights[i];
+                let m_pos = w.mask_pos();
+                let m_neg = w.mask_neg();
+
+                for (j, &val) in chunk.iter().enumerate() {
+                    if (m_pos & (1 << j)) != 0 {
+                        sum += val;
+                    }
+                    if (m_neg & (1 << j)) != 0 {
+                        sum -= val;
+                    }
+                }
+            }
+            i += 1;
         }
 
-        // Extraction du i-ème bit du mask_neg
-        if (weights.mask_neg & (1 << i)) != 0 {
-            sum -= act;
+        // Tail loop
+        if !tail.is_empty() {
+            let w_idx = i;
+            if w_idx < weights.len() {
+                let w = &weights[w_idx];
+                for (j, &val) in tail.iter().enumerate() {
+                    if (w.mask_pos() & (1 << j)) != 0 {
+                        sum += val;
+                    }
+                    if (w.mask_neg() & (1 << j)) != 0 {
+                        sum -= val;
+                    }
+                }
+            }
         }
+
+        Ok(sum)
     }
-
-    // Dans une implémentation AVX2 réelle, on utiliserait:
-    // _mm256_loadu_ps, _mm256_blendv_ps, _mm256_add_ps, _mm256_sub_ps
-    // sur 2 blocs de 8 floats (256-bit).
-
-    sum
 }

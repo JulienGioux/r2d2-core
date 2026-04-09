@@ -5,11 +5,9 @@ authors.workspace = true
 edition.workspace = true
 
 [dependencies]
-
 thiserror = { workspace = true }
+tracing = "0.1"
 
 [features]
 cuda = []
 
-[build-dependencies]
-cc = "1.0"
