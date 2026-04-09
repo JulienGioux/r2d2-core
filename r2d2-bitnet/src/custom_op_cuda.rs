@@ -1,10 +1,6 @@
 use crate::moe::{BitFFN, Expert};
 #[cfg(feature = "cuda")]
 use candle_core::backend::BackendStorage;
-#[cfg(feature = "cuda")]
-use candle_core::cuda_backend::cudarc::driver::{LaunchAsync, LaunchConfig};
-#[cfg(feature = "cuda")]
-use cudarc::nvrtc::Ptx;
 
 use candle_core::{CustomOp2, Layout, Result, Shape, Tensor};
 use candle_nn::VarBuilder;
@@ -31,9 +27,6 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
         _s2: &candle_core::CpuStorage,
         _l2: &Layout,
     ) -> Result<(candle_core::CpuStorage, Shape)> {
-        // En théorie, on pourrait faire le CPU Fwd ici (Fallback natif Tensor-less)
-        // Mais nous avons BitFFN comme Fallback Haut-Niveau (Expert) au dessus,
-        // donc CustomOp ne sera appelé que s'il est soutenu par CudaStorage.
         candle_core::bail!("BitNetW1A8MatMul CustomOp CPU Fallback direct n'est pas supporté. Utiliser le BitFFN Expert.");
     }
 
@@ -47,20 +40,16 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
     ) -> Result<(candle_core::CudaStorage, Shape)> {
         let dev = act.device();
         let out_shape = Shape::from((self.m, self.n));
+
+        // Zero-Alloc Allocation
         let out_slice = dev
             .alloc_zeros::<f32>(self.m * self.n)
             .map_err(|e| candle_core::Error::Msg(format!("cuda alloc failed: {}", e)))?;
 
-        if !dev.has_func("chimera_module", "bitnet_f32_u8_matmul") {
-            info!("Compilation JIT dynamique via NVRTC (MatMul-Free BitNet)...");
-            let ptx = Ptx::from_src(r2d2_cuda_core::CHIMERA_CUDA_KERNEL_SRC);
-            dev.load_ptx(ptx, "chimera_module", &["bitnet_f32_u8_matmul"])
-                .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
-        }
+        let ptx_str = r2d2_cuda_core::CHIMERA_CUDA_KERNEL_PTX;
 
-        let func = dev
-            .get_func("chimera_module", "bitnet_f32_u8_matmul")
-            .unwrap();
+        let func =
+            dev.get_or_load_custom_func("bitnet_f32_u8_matmul", "chimera_module", ptx_str)?;
 
         let act_slice = act.as_cuda_slice::<f32>()?;
         let w_slice = w.as_cuda_slice::<u32>()?;
@@ -71,27 +60,32 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
         let blocks_x = (self.n as u32 + threads_x - 1) / threads_x;
         let blocks_y = (self.m as u32 + threads_y - 1) / threads_y;
 
-        let cfg = LaunchConfig {
+        let cfg = candle_core::cuda_backend::cudarc::driver::LaunchConfig {
             grid_dim: (blocks_x, blocks_y, 1),
             block_dim: (threads_x, threads_y, 1),
             shared_mem_bytes: 0,
         };
 
-        // Lancement Asynchrone Sécurisé Zero-Pointer via cudarc
-        unsafe {
-            func.launch(
-                cfg,
-                (
-                    act_slice.slice(act_layout.start_offset()..),
-                    w_slice.slice(w_layout.start_offset()..),
-                    &out_slice,
-                    self.m as i32,
-                    self.n as i32,
-                    self.k as i32,
-                ),
-            )
-        }
-        .map_err(|e| candle_core::Error::Msg(format!("Cudarc launch error: {}", e)))?;
+        // Lancement Asynchrone Sécurisé Zero-Pointer
+        let mut builder = func.builder();
+        use candle_core::cuda_backend::cudarc::driver::PushKernelArg;
+
+        let m_i32 = self.m as i32;
+        let n_i32 = self.n as i32;
+        let k_i32 = self.k as i32;
+
+        let act_sub = act_slice.slice(act_layout.start_offset()..);
+        let w_sub = w_slice.slice(w_layout.start_offset()..);
+
+        builder.arg(&act_sub);
+        builder.arg(&w_sub);
+        builder.arg(&out_slice);
+        builder.arg(&m_i32);
+        builder.arg(&n_i32);
+        builder.arg(&k_i32);
+
+        unsafe { builder.launch(cfg) }
+            .map_err(|e| candle_core::Error::Msg(format!("Cudarc launch error: {}", e)))?;
 
         Ok((
             candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev.clone()),

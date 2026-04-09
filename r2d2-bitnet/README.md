@@ -11,6 +11,7 @@ Le moteur a été repensé "from scratch" en Rust (Zero-Trust Memory) pour fusio
 - **`ssm.rs` (BitMamba)** : Oubliez la complexité quadratique ($O(N^2)$) des Transformers d'Attention. BitMamba utilise une méthode par Espaces d'États avec projection Poids-Ternaires. Complètement indépendant en mémoire, aucune allocation superflue (Zéro OOM).
 - **`moe.rs` (Sparse Mixture of Experts)** : Le Scatter/Gather ultime. Un routeur Top-K qui active dynamiquement le bon chemin neuronal par jeton. L'algorithme "Zéro-Bloat" permet d'avoir 100 milliards de paramètres ternaires sur le côté, mais une consommation RAM statique infime à l'appel.
 - **`hadamard.rs` (Stabilisateur Quantique)** : Intégration de la Fast Walsh-Hadamard Transform (FWHT), agissant comme un dôme lisseur sur les activations aberrantes ("Outliers"), indispensable pour que BitMamba conserve son exactitude en ternaire sans crash de dérivation.
+- **`custom_op_cuda.rs` (Sovereign PTX Bridge)** : Accélération CUDA asynchrone pour les Tenseurs Quantifiés. Compilation PTX "Offline" via `nvcc -arch=native` (auto-tune sur l'hôte), injection JIT avec `CudaSlice<T>` sans Linker. Dispose d'un repli ("Fallback") CPU natif inviolable en cas de système incompatible.
 - **`BitLinear`** (Legacy Support) : Couche linéaire dense avec packaging scalaire ternaire.
 
 ## 💡 Le Paradigme 1.58-bit (AbsMean Quantization)
