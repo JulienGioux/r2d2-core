@@ -1,200 +1,124 @@
 <div align="center">
 
-# 🛡️ R2D2 : L'ÉCOSystème Cognitif Souverain
+# 🛡️ R2D2 CHIMERA ENGINE : L'Écosystème Cognitif Souverain
 
 [![CI](https://github.com/r2d2-forge/r2d2-core/actions/workflows/ci.yml/badge.svg)](https://github.com/r2d2-forge/r2d2-core/actions/workflows/ci.yml)
 [![Rust Version](https://img.shields.io/badge/rust-1.80.0%2B-blue.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-green.svg)](#license)
 [![Status](https://img.shields.io/badge/status-Industrial--Grade-red.svg)](#status)
 
-**Architecture d'un Essaim Décentralisé, Ternaire et Auto-Financé**
+**Architecture d'un Système d'Exploitation IA Décentralisé, Ternaire (1.58-bit) et "Zero-Trust"**
 
-[Architecture & Livre Blanc](./DEV_DOCS/LIVRE_BLANC.md) • [Contribuer](./CONTRIBUTING.md) • [Roadmap](./DEV_DOCS/ROADMAP.md)
+[📑 **CONSULTER L'ÉTAT DES LIEUX GLOBAL & LIVRE BLANC B2B (Mise à jour d'Avril 2026)**](./docs_dev/StatusGlobal-2026-04-09.md)  
+*Rapport exhaustif contenant les statistiques de complétion, les Benchmarks et le Modèle Économique.*
+
+[Architecture Base](./DEV_DOCS/LIVRE_BLANC.md) • [Contribuer](./CONTRIBUTING.md) • [Roadmap](./DEV_DOCS/ROADMAP.md)
 
 </div>
 
 ---
 
-## 🚀 Le Projet R2D2
+> [!IMPORTANT]
+> Bienvenue dans la Forge ! Que vous soyez un développeur junior, un expert en Machine Learning ou un DSI issu du pôle bancaire ou militaire, ce document est votre point d'entrée unique. Prenez le temps de le lire intégralement. R2D2 est un projet d'une complexité rare, mais documenté avec une rigueur absolue.
 
-R2D2 n'est pas une simple itération de LLM. C'est un **Système d'Exploitation Cognitif (COS)** bâti sur trois piliers intransigeants :
+## 🚀 Le Projet R2D2 : Qu'est-ce que c'est ?
 
-1. **La Vérité comme Infrastructure :** Fini le probabilisme et les hallucinations. Le "Paradox Engine" valide sémantiquement chaque fragment via le standard `JSONAI v3.1`. Rien n'est exécuté sans preuve.
-2. **La Rupture de l'Inférence Ternaire (BitNet b1.58) :** Destructuration du *Memory Wall*. Remplace les multiplications flottantes par de simples accumulations. Fait tourner des essaims de 15 agents critiques simultanément sur des machines grand public (L40s, RTX 3060).
-3. **Souveraineté et Sécurité "Zero-Trust" :** Écrit en Rust. `SecureMemGuard` et *Zeroization* physique de la RAM (SIMD AVX-512) après chaque inférence pour bloquer le Memory Scraping.
+Le marché de l'Intelligence Artificielle est aujourd'hui dominé par des "Boîtes Noires" délocalisées sur des clouds étrangers (OpenAI, AWS, Google Cloud). L'envoi de données confidentielles vers ces serveurs constitue une violation des secrets industriels pour de nombreuses organisations.
 
-Si vous cherchez un "wrapper API" vite fait, vous êtes au mauvais endroit. Si vous voulez forger la nouvelle épine dorsale inviolable de l'I.A. souveraine, **bienvenue dans la Ruche.**
+R2D2 n'est pas un banal wrapper d'API. C'est un **Système d'Exploitation Cognitif** complet, tournant physiquement *sur votre machine ou vos serveurs fermés*, garanti totalement déconnecté d'Internet. Il s'appuie sur trois ruptures technologiques :
 
----
+1. **La Rupture Mathématique (Inférence Ternaire 1.58-bit) :** Les modèles classiques requièrent des supercalculateurs hors de prix. Nous avons réécrit les noyaux mathématiques (CUDA) afin de convertir d'énormes réseaux de neurones en petites matrices `[-1, 0, 1]`. R2D2 divise la taille mémoire requise (VRAM) par 10 sans perte d'intelligence.
+2. **"Zero-Hallucination" (Le Paradox Engine) :** Les IA classiques mentent de façon plausible. R2D2 valide sémantiquement chaque fragment via une juridiction interne. Rien n'est présenté à un humain sans avoir passé un consensus mathématique stricte.
+3. **Sécurité et Éthique (100% Rust) :** Par design, notre code ne peut pas subir d'attaques fondamentales par débordement de mémoire (Buffer Overflow). Tout est sécurisé à la compilation.
 
-## 🛠️ Déploiement Multi-Plateforme (Industrial-Grade)
-
-Le système R2D2 est agnostique au système d'exploitation, mais exige un environnement Rust sécurisé et l'accès aux cycles CPU/VRAM. L'empreinte mémoire du moteur 1.58-bit (BitNet) permet un déploiement sur des machines Edge classiques en "Zero-Config".
-
-### Prérequis Globaux
-- **Rust Toolchain** (Édition 2021) avec `cargo`
-- **Git** & **CMake** (pour la compilation des stubs C++ Whisper si Audio activé)
+> [!TIP]
+> **Pour les Débutants :** Imaginez R2D2 comme un super-logiciel capable de lire tous vos documents privés de façon intelligente, de programmer à votre place et d'auditer vos calculs, sans jamais avoir besoin du Wifi.  
+> **Pour les Experts :** R2D2 est une implémentation native Rust d'un orchestrateur RAG/Agentique. Nous utilisons des `TernaryBlock16` pour un encodage VRAM Zero-Allocation, encadré par des Graphes Ontologiques (JsonAI V3) parsés via `Aho-Corasick LeftmostLongest` en frontière de Token BPE.
 
 ---
 
-### 🐧 Linux : Déploiement Natif (Debian / Ubuntu)
+## 🗺️ Cartographie de la Ruche (Composants)
 
-Sur un environnement bare-metal Debian/Ubuntu, la compilation nécessite les librairies SSL et les headers de base.
+Le projet est modulaire, découpé en "Crates" (Paquets logiciels) interagissant de façon asynchrone :
 
+* 🧠 **`r2d2-cortex` (Le Cerveau)** : Centre nerveux Agentique. Maintient le contexte, pilote les LLMs locaux ou distants et donne les ordres.
+* ⚡ **`r2d2-cuda-core` & `r2d2-bitnet` (Les Muscles)** : Accélération matérielle. Contient nos noyaux C++ CUDA écrits à la main pour traiter l'encodage extrêmement dense 1.58-bit en VRAM.
+* 📚 **`r2d2-jsonai` / `tokenizer` / `chunker` (La Mémoire Épiscopale)** : Couche de vectorisation (RAG). L'IA lit vos fichiers locaux, et nous utilisons notre propre *Tokenizer* BPE pour ne jamais, ô grand jamais, tronquer un fichier au milieu d'un mot (la garantie d'une information parfaite conservée Postgres/PgVector).
+* 🛡️ **`r2d2-paradox` (La Douane)** : Moteur de résolution des contradictions. Audit chaque phrase qui s'apprête à être affichée à un utilisateur pour détecter les failles logiques.
+* 🎛️ **`r2d2-ui` (L'Écran de Contrôle)** : Interface Web native propulsée par *HTMX* et *Axum*, ne nécessitant aucun lourd Framework JavaScript, la fluidité est absolue (<50ms).
+* 🔌 **`r2d2-mcp` (Les Bras)** : Serveur Model Context Protocol. Permet à R2D2 de contrôler votre terminal de commande, lire vos logiciels de paie ou exécuter du code dans un container virtuel sécurisé (`r2d2-workspace`).
+
+---
+
+## 🛠️ Phase d'Amorçage (Installation & Commandes)
+
+Le système R2D2 est conçu pour une industrialisation "bare-metal" ou conteneurisée.
+L'empreinte mémoire du moteur BitNet permet un déploiement sur des machines grand public équipées de GPU d'entrée de gamme (ex: RTX 3060).
+
+### Prérequis Indispensables
+1. **Rust Toolchain (Édition 2021) :** Assurez-vous d'avoir `cargo` et `rustc` installés via [rustup.rs](https://rustup.rs/).
+2. **PostgreSQL & PgVector :** Nécessaire pour la persistance vectorielle (Blackboard).
+3. **CUDA Toolkit (Optionnel mais recommandé) :** Pour l'inférence hardware Nvidia.
+
+> [!WARNING]
+> Toujours exécuter `source $HOME/.cargo/env` si Rust vient d'être installé, afin de rendre la commande `cargo` disponible dans votre terminal de session active.
+
+### 1. Cloner l'Essaim Souverain
 ```bash
-# 1. Installer les dépendances de compilation critiques
-sudo apt update && sudo apt install -y build-essential pkg-config libssl-dev cmake
-
-# 2. Cloner la ruche R2D2 Sovereign
 git clone https://github.com/r2d2-forge/r2d2-core.git
 cd r2d2-core
-
-# 3. Validation de l'intégrité algébrique et compilation stricte
-cargo test --workspace --release
-cargo run -p r2d2-mcp --release
 ```
 
----
-
-### 📦 Linux : Déploiement Isolé Fedora / Podman (Red Hat)
-
-Pour garantir l'immuabilité "Zero-Trust" de l'hôte, le déploiement via **Podman** (Rootless) est le standard militaro-industriel recommandé sous Fedora/RHEL.
-
+### 2. Le Rituel de Validation Continue (CI Local)
+*Pourquoi ?* : Avant la moindre exécution, nous passons le système au crible. Le script `local_ci.sh` va formater votre code (`cargo fmt`), purger les moindres failles structurelles (`cargo clippy -D warnings`), et tester la totalité des couches logiques du système ainsi que la couverture de test (`cargo llvm-cov`).
 ```bash
-# 1. Création de l'image isolée basée sur UBI/Fedora
-cat <<EOF > Containerfile
-FROM fedora:39
-RUN dnf install -y gcc gcc-c++ cmake openssl-devel cargo
-WORKDIR /usr/src/r2d2
-COPY . .
-RUN cargo build --release --workspace
-CMD ["cargo", "run", "--release", "-p", "r2d2-mcp"]
-EOF
-
-# 2. Build et lancement Sans-Privilège (Rootless)
-podman build -t r2d2-core-secure .
-podman run -d --name r2d2-swarm --network host r2d2-core-secure
+./scripts/local_ci.sh
 ```
-*Note : Assurez-vous d'avoir instancié les drivers `/dev/dri` si l'accélération matérielle est visée hors BitNet.*
+> [!CAUTION]  
+> Ne lancez jamais une compilation de production si le CI Local retourne la moindre erreur pointée en Rouge `Exit Code: 101`. Notre base de code suit le **"Zero-Warning Policy"**.
 
----
-
-### 🏁 Windows : WSL2 & Natif (DirectX 12)
-
-Le système R2D2 s'exécute de façon translucide sur Windows grâce à **WSL2** ou nativement via *MSVC*.
-
-**Méthode WSL2 (Recommandée pour la Gateway MCP) :**
+### 3. Allumer le Tableau de Bord Utilisateur (L'Interface UI)
+L'UI est le meilleur moyen d'interagir avec la matrice. Il faut compiler en "Release" pour s'assurer que les optimisations CPU sont activées (Divise le temps d'inférence par 10).
 ```bash
-# Depuis un shell Ubuntu/Fedora Remix (WSL2)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-source $HOME/.cargo/env
-git clone https://github.com/r2d2-forge/r2d2-core.git
-cd r2d2-core
-cargo check --workspace
+cargo run --release -p r2d2-ui
 ```
-*L'interconnexion au client UI Windows s'opère par Stdio via le Model Context Protocol (MCP).*
+* **Que se passe-t-il ?** : Le serveur web asynchrone *Axum* s'allume. Il prend le contrôle du port `3000` (ou `8080` selon votre `mcp_config.json`).
+* **Comment l'utiliser ?** : Ouvrez votre navigateur Web (Chrome, Firefox) sur `http://localhost:3000`. Vous aurez accès en direct à la télémétrie, au Tenseur Sémantique, et à la fenêtre de discussion avec les Modèles.
 
-**Méthode Windows Native (PowerShell/MSVC) :**
-```powershell
-# Prérequis : Visual Studio C++ Build Tools
-git clone https://github.com/r2d2-forge/r2d2-core.git
-cd r2d2-core
-cargo run --release -p r2d2-mcp
-```
-
----
-
-### 🍏 macOS : Apple Silicon (M1/M2/M3)
-
-Le moteur de R2D2 utilise Candle et supporte nativement l'API `Metal` de macOS, transformant les puces Apple Silicon en redoutables forges d'inférence.
-
+### 4. Bâtir le Pont de Commandement Applicatif (MCP Daemon)
+Si vous voulez que votre IDE (Cursor, Claude Desktop) bénéficie du Cerveau R2D2, il faut initialiser le "Model Context Protocol".
 ```bash
-# 1. Installation de la Toolchain via Homebrew
-brew install rust cmake
-
-# 2. Clonage et exécution (avec l'accélération backend Metal)
-git clone https://github.com/r2d2-forge/r2d2-core.git
-cd r2d2-core
-cargo run --release -p r2d2-mcp --features metal
+# Lancement de la passerelle en silencieux avec journalisation Info
+RUST_LOG=info cargo run --release -p r2d2-mcp
 ```
+* **Pourquoi l'utiliser ?** : Cela permet aux IA installées sur votre machine de comprendre l'état de votre projet en direct, de scripter automatiquement et d'archiver vos données en base vectorielle de façon 100% On-Premise.
 
 ---
 
-## 🦾 R2D2-BitNet : Moteur Cognitif 1.58-bit
+## 🧠 Doctrine d'Ingénierie & Procédure de Contribution
 
-Ce dépôt inclut désormais la brique fondatrice `r2d2-bitnet`, notre implémentation locale du modèle de langage ternaire (AbsMean Quantization Poids/Activations). 
+Le cœur du système gérant de potentielles données Défense/Banque, la complaisance technique n'est pas tolérée. Si vous souhaitez modifier le code ou soumettre une amélioration via Pull Request (PR) :
 
-Pour lancer un prompt sur le Moteur CPU Souverain (0 MatMul, 100% Additions Logic-Only) :
-```bash
-cargo test -p r2d2-bitnet
-```
-*Le backend télécharge de façon atomique les SafeTensors "1bitLLM/bitnet_b1_58-3B", les convertit en masques d'états `{-1, 0, 1}` via hard-thresholding strict, et exécute la boucle autorégressive sans toucher aux FPU !*
+1. **Typestate Pattern Absolu :** En Rust, nous rendons les états invalides impossibles à compiler. Un fragment d'information `Unverified` ne passera jamais dans une fonction exigeant un `Validated`. Si vous détruisez cette sécurité, Clippy vous arrêtera. Ne contournez jamais.
+2. **0 `unwrap()` / 0 `panic!()` inattendus :** Dans une chaîne industrielle, si un fichier JSONAI est illisible, l'IA ne doit pas s'arrêter globalement. Gérez toutes les erreurs via l'usage canonique de `Result<T, Anyhow::Error>` et l'annotation de `#[instrument]` via `tracing`.
+3. **Intégrité UTF-8 Vectorielle :** Toute altération sur le `r2d2-chunker` ou `r2d2-tokenizer` DOIT utiliser la fonction `safe_word_boundary()` basée sur les métadonnées de l'index interne BPE `word_ids`. Séparer brutalement un texte via `.split()` causera une amnésie du sens et corrompra nos espaces latents vectoriels. Ceci est sévèrement proscrit.
 
-**Architecture d'Entraînement "Air-Gapped"** :
-L'entraînement du modèle 1.58b évolue dans `r2d2-cortex`. Le pipeline d'ingestion (Dataloader) est par design garanti **Zero-Allocation (Object Pool MPSC)** post-démarrage. Le streaming asynchrone est protégé contre les vecteurs d'attaque OOM et les corruptions d'apprentissage liées aux chevauchements de frontières UTF-8 du dictionnaire (LLaMA-3 / 128k).
+### Workflow PR (Zero-Direct-Push Policy)
+Personne (pas même l'Architecte Souverain) n'est autorisé à exécuter un `git push` basique sur la branche `main`. Nous utilisons **systématiquement** le Workflow GitHub automatisé `@[/pr-pipeline]`.
 
----
-
-## 🧠 Doctrine d'Ingénierie (Staff-Level Requirement)
-
-Notre code est critique (Défense, Finance, Systèmes Souverains). Lisez attentivement le [CONTRIBUTING.md](./CONTRIBUTING.md) avant votre première PR. Les règles d'or :
-
-1. **Typestate Pattern Absolu :** Un état invalide `Unverified` ne doit *jamais* compiler avec une fonction nécessitant un état `Validated`.
-2. **0 `unwrap()` / 0 `panic!()` :** Toute erreur est traitée, tracée (`tracing`) et renvoyée formellement via `thiserror` et `anyhow`.
-3. **Zero-Trust Memory :** Si vous manipulez des poids de modèles ou des données utilisateurs, elles doivent transiter par les sandbox de la Brique 0 (Hyperviseur).
+1. Placez vos changements sur une branche séparée : `git checkout -b fix/nom-du-correctif`.
+2. Assurez-vous que `./scripts/local_ci.sh` est complètement vert.
+3. Compilez la PR via `gh pr create` en certifiant dans la description la réussite des tests de la pipeline Locale.
 
 ---
 
-## 🗺️ Architecture de Haut Niveau
+## 📜 Licences, Gouvernance & Financement
 
-L'essaim R2D2 est un agencement modulaire strict de 14 Briques. L'intégration récente du Cortex (Tensor/Local) et de la Gateway MCP rend le système autonome et sécure.
+Ce projet est distribué sous double licence **MIT** et **Apache 2.0** au choix. Voir les fichiers `LICENSE-MIT` et `LICENSE-APACHE`.
 
-```mermaid
-graph TD;
-    LLM[Agent Externe / Claude / Gemini] -->|Stdio JSON-RPC| Brique9(Gateway MCP);
-    Brique9 -->|Ingestion| Brique1(JSONAI v3.1);
-    Brique1 -->|Unverified| Brique3(Paradox Engine);
-    Brique3 <-->|Vectors 1024D (E5-Large-Instruct)| Brique4(Cortex Local);
-    Brique3 <-->|Audio (Whisper-Large-v3-Turbo)| Brique4;
-    Brique3 -->|Consensus| Brique2(Kernel & Blackboard);
-    Brique2 -->|Validated| Brique7(Vector DB PostgreSQL HNSW);
-```
+La gouvernance et l'infrastructure de la ruche sont auto-sourcées. La fondation du RAG s'inscrit dans un protocole d'amélioration continue et une architecture éthique assurant le rapatriement total des puissances computationnelles vers les périphériques individuels et les clouds strictement privés.
 
----
-
-## 🔌 Intégration LLM / Éditeur (Guide MCP)
-
-Vous pouvez lier **n'importe quel agent d'IA** (Claude Desktop, Cursor, Gemini) à R2D2 via le protocole ouvert MCP (Model Context Protocol). L'Essaim tournant sous WSL, le pont Windows/Fedora est natif, étanche, et sans latence HTTP !
-
-Pour donner la mémoire absolue à votre IA, ajoutez ceci à votre fichier `mcp_config.json` (Ex: `%APPDATA%/Claude/claude_desktop_config.json` ou `~/.gemini/mcp_config.json`) :
-
-```json
-{
-  "mcpServers": {
-    "r2d2-blackboard": {
-      "command": "wsl.exe",
-      "args": [
-        "--",
-        "bash",
-        "-c",
-        "cd /mnt/d/VOTRE_CHEMIN/R2D2 && source ~/.cargo/env && RUST_LOG=info cargo run -q -p r2d2-mcp"
-      ]
-    }
-  }
-}
-```
-
-Redémarrez votre éditeur, et voici les pouvoirs débloqués :
-- `anchor_thought` : Fait glisser la réflexion de l'IA vers le moteur tensoriel E5 puis dans PostgreSQL.
-- `recall_memory` : Effectue un *Similarity Cosine Search* dans le Blackboard à vitesse maximale pour exhumer toute architecture passée.
-
----
-
-## 📜 Licence
-
-Ce projet est distribué sous double licence MIT et Apache 2.0 au choix. Voir les fichiers `LICENSE-MIT` et `LICENSE-APACHE`.
-L'infrastructure de financement décentralisée par preuve d'inférence (PoI Tax 1%) est intégrée au protocole.
-
+<br>
 <div align="center">
-  <i>Document certifié par l'Essaim R2D2 - Épuration Sémantique Validée</i>
+  <i>Document Forgé et Certifié par le Cortex R2D2 - Souveraineté Radicalement Déterministe.</i>
 </div>
