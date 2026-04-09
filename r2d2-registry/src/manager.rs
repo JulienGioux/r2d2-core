@@ -31,35 +31,51 @@ impl ModelRegistry {
         }
     }
 
-    /// Tente de lire le manifeste dans un dossier spécifique
-    pub fn load_manifest<P: AsRef<Path>>(
+    /// Tente de lire le manifeste dans un dossier spécifique (Asynchrone + Isolé)
+    pub async fn load_manifest<P: AsRef<Path>>(
         &self,
         model_dir: P,
     ) -> Result<ModelManifest, RegistryError> {
         let manifest_file = model_dir.as_ref().join("manifest.toml");
 
-        let metadata = fs::metadata(&manifest_file).map_err(|_| {
-            RegistryError::InvalidManifest(
-                "manifest.toml est introuvable ou inaccessible".to_string(),
-            )
-        })?;
+        // Isolation contre la famine du thread asynchrone (Starvation)
+        let manifest_result =
+            tokio::task::spawn_blocking(move || -> Result<ModelManifest, RegistryError> {
+                let metadata = fs::metadata(&manifest_file).map_err(|_| {
+                    RegistryError::InvalidManifest(
+                        "manifest.toml est introuvable ou inaccessible".to_string(),
+                    )
+                })?;
 
-        // Sécurité Zero-Trust: Refuser les fichiers manifestes gigantesques (Bombes TOML / Fichiers Corrompus)
-        if metadata.len() > 128 * 1024 {
-            // Limite 128 KB
-            return Err(RegistryError::InvalidManifest(
-                "Le fichier manifest.toml dépasse la limite de sécurité de 128 Ko".to_string(),
-            ));
-        }
+                // Sécurité Zero-Trust: Refuser les fichiers manifestes gigantesques
+                if metadata.len() > 128 * 1024 {
+                    // Limite 128 KB
+                    return Err(RegistryError::InvalidManifest(
+                        "Le fichier manifest.toml dépasse la limite de sécurité de 128 Ko"
+                            .to_string(),
+                    ));
+                }
 
-        let content = fs::read_to_string(&manifest_file)?;
-        let manifest: ModelManifest = toml::from_str(&content)?;
+                let content = fs::read_to_string(&manifest_file)?;
+
+                // Protection : deserializer limiter pour toml via serde (Limitation de la profondeur implicitement
+                // traitée par l'implémentation ToML de base avec des listes / strings courtes dans notre structure)
+                let manifest: ModelManifest = toml::from_str(&content)?;
+                Ok(manifest)
+            })
+            .await;
+
+        let manifest = manifest_result.map_err(|e| {
+            tracing::error!("Erreur de spawn_blocking: {}", e);
+            RegistryError::InvalidManifest("Panique dans le thread I/O".to_string())
+        })??; // Double unwrap (spawn_blocking Result + Inner Result)
+
         Ok(manifest)
     }
 
     /// Scan récursif pour indexer tous les modèles disponibles dans la base_path
     /// C'est le "Pipe" principal pour la future interface Front-end !
-    pub fn catalog(&self) -> Vec<(PathBuf, ModelManifest)> {
+    pub async fn catalog(&self) -> Vec<(PathBuf, ModelManifest)> {
         let mut available_models = Vec::new();
 
         if !self.base_path.exists() {
@@ -70,32 +86,40 @@ impl ModelRegistry {
             return available_models;
         }
 
-        // Scan 2 niveaux de profondeur typiquement: [family]/[model_name]/
-        if let Ok(families) = fs::read_dir(&self.base_path) {
-            for family_dir in families.flatten() {
-                if family_dir.path().is_dir() {
-                    if let Ok(models) = fs::read_dir(family_dir.path()) {
-                        for model_dir in models.flatten() {
-                            if model_dir.path().is_dir() {
-                                match self.load_manifest(model_dir.path()) {
-                                    Ok(manifest) => {
-                                        info!(
-                                            "Modèle découvert: {} ({})",
-                                            manifest.identity.name, manifest.identity.uuid
-                                        );
-                                        available_models.push((model_dir.path(), manifest));
-                                    }
-                                    Err(e) => {
-                                        warn!(
-                                            "Ignoré (Metadata Incomplètes) - {:?}: {}",
-                                            model_dir.path(),
-                                            e
-                                        );
-                                    }
+        // On peut encapsuler la lecture du FileSystem pur
+        let base_path_clone = self.base_path.clone();
+        let family_and_model_dirs_res = tokio::task::spawn_blocking(move || -> Vec<PathBuf> {
+            let mut dirs = Vec::new();
+            if let Ok(families) = fs::read_dir(&base_path_clone) {
+                for family_dir in families.flatten() {
+                    if family_dir.path().is_dir() {
+                        if let Ok(models) = fs::read_dir(family_dir.path()) {
+                            for model_dir in models.flatten() {
+                                if model_dir.path().is_dir() {
+                                    dirs.push(model_dir.path());
                                 }
                             }
                         }
                     }
+                }
+            }
+            dirs
+        })
+        .await;
+
+        let family_and_model_dirs = family_and_model_dirs_res.unwrap_or_default();
+
+        for model_dir in family_and_model_dirs {
+            match self.load_manifest(&model_dir).await {
+                Ok(manifest) => {
+                    info!(
+                        "Modèle découvert: {} ({})",
+                        manifest.identity.name, manifest.identity.uuid
+                    );
+                    available_models.push((model_dir, manifest));
+                }
+                Err(e) => {
+                    warn!("Ignoré (Metadata Incomplètes) - {:?}: {}", model_dir, e);
                 }
             }
         }
@@ -104,16 +128,17 @@ impl ModelRegistry {
     }
 
     /// Recherche un modèle par son UUID
-    pub fn find_by_uuid(&self, uuid: &Uuid) -> Option<(PathBuf, ModelManifest)> {
-        // En prod, on voudra mettre en cache le catalog() pour éviter un I/O à chaque requête
+    pub async fn find_by_uuid(&self, uuid: &Uuid) -> Option<(PathBuf, ModelManifest)> {
         self.catalog()
+            .await
             .into_iter()
             .find(|(_, manifest)| &manifest.identity.uuid == uuid)
     }
 
     /// Recherche un modèle par son Nom Exact
-    pub fn find_by_name(&self, name: &ModelId) -> Option<(PathBuf, ModelManifest)> {
+    pub async fn find_by_name(&self, name: &ModelId) -> Option<(PathBuf, ModelManifest)> {
         self.catalog()
+            .await
             .into_iter()
             .find(|(_, manifest)| &manifest.identity.name == name)
     }
@@ -125,8 +150,8 @@ mod tests {
     use std::io::Write;
     use tempfile::tempdir;
 
-    #[test]
-    fn test_registry_manifest_parsing() {
+    #[tokio::test]
+    async fn test_registry_manifest_parsing() {
         let dir = tempdir().unwrap();
         let family_dir = dir.path().join("bitmamba");
         let model_dir = family_dir.join("chimera_1");
@@ -152,7 +177,7 @@ optimal_tasks = ["reasoning"]
         file.write_all(manifest_content.as_bytes()).unwrap();
 
         let registry = ModelRegistry::new(dir.path());
-        let catalog = registry.catalog();
+        let catalog = registry.catalog().await;
 
         assert_eq!(catalog.len(), 1);
         assert_eq!(catalog[0].1.identity.name.0, "Chimera-Test");

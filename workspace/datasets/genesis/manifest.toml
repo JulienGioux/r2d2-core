@@ -1,0 +1,12 @@
+format = "causal_lm"
+
+[identity]
+uuid = "123e4567-e89b-12d3-a456-426614174000"
+name = "genesis"
+version = "1.0.0"
+author = "R2D2-Alchimiste"
+
+[meta]
+size_bytes = 1024
+samples_count = 10
+source_corpus = "knowledge_meta.json"

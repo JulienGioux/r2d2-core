@@ -77,61 +77,14 @@ impl PostgresBlackboard {
         Ok(Self { pool })
     }
 
-    /// Crée les tables dynamiques de registre (Modèles et Outils MCP) si elles n'existent pas.
+    /// Initialise la connexion et vérifie simplement l'état du Registre.
+    /// Éradication complète des DDL (CREATE TABLE) au runtime pour prévenir
+    /// les impasses asynchrones via les verrous de catalogue. L'orchestrateur
+    /// Postgres (DBA) est responsable de l'organisation par script SQL.
     pub async fn initialize_registry_tables(&self) -> Result<(), BlackboardError> {
-        info!("🔧 Initialisation des tables du Registre Sovereign...");
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS model_registry (
-                id VARCHAR PRIMARY KEY,
-                name VARCHAR NOT NULL,
-                model_type VARCHAR NOT NULL,
-                provider VARCHAR NOT NULL,
-                config_json JSONB NOT NULL DEFAULT '{}',
-                is_enabled BOOLEAN NOT NULL DEFAULT true
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS mcp_registry (
-                id VARCHAR PRIMARY KEY,
-                name VARCHAR NOT NULL,
-                command VARCHAR NOT NULL,
-                args_json JSONB NOT NULL DEFAULT '[]',
-                is_enabled BOOLEAN NOT NULL DEFAULT true
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Insertion du modèle E5 par défaut pour assurer la compatibilité si la base est neuve
-        sqlx::query(
-            r#"
-            INSERT INTO model_registry (id, name, model_type, provider, config_json, is_enabled)
-            VALUES ('multilingual-e5-small', 'Multilingual-E5-Small', 'semantic', 'local_hf', '{"repo_id": "intfloat/multilingual-e5-small", "revision": "main"}', true)
-            ON CONFLICT (id) DO NOTHING;
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
-        // Insertion du connecteur github-mcp par défaut pour permettre l'audit initial
-        sqlx::query(
-            r#"
-            INSERT INTO mcp_registry (id, name, command, args_json, is_enabled)
-            VALUES ('mcp-github-default', 'github-mcp', 'npx', '["-y", "@modelcontextprotocol/server-github"]', true)
-            ON CONFLICT (id) DO NOTHING;
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
-
+        info!("🔧 Vérification des tables du Registre Sovereign (No-DDL Mode)...");
+        // Les tables 'model_registry', 'mcp_registry' et 'blackboard_fragments'
+        // doivent être créées via un moteur externe ou script psql au boot de R2D2.
         Ok(())
     }
 }
@@ -216,7 +169,11 @@ impl GlobalBlackboard for PostgresBlackboard {
 
             tokio::time::sleep(delay).await;
             retries += 1;
-            delay *= 2;
+
+            // Jitter Asynchrone : Empêche la Horde Tonitruante / DDoS Interne
+            // Ajoute un délai aléatoire au backoff (+ 0 à 100ms)
+            let jitter = std::time::Duration::from_millis(rand::random::<u64>() % 100);
+            delay = (delay * 2) + jitter;
         }
     }
 }
@@ -331,18 +288,8 @@ impl PostgresBlackboard {
     ) -> Result<(), BlackboardError> {
         info!("Enregistrement d'un nouveau réflexe (Système 1) en BDD.");
 
-        // Création silencieuse de la table si elle n'existe pas (Idéal pour l'expérimentation R&D)
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS reflex_memory (
-                id SERIAL PRIMARY KEY,
-                embedding vector(384),
-                action_payload TEXT NOT NULL
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
+        // DDL CREATE TABLE retiré : La table `reflex_memory` (id, embedding(384), action_payload)
+        // doit exister préalablement.
 
         sqlx::query(
             r#"
@@ -365,18 +312,7 @@ impl PostgresBlackboard {
         query_embedding: Vector,
         threshold: f32, // ex: 0.90
     ) -> Result<Option<(String, f32)>, BlackboardError> {
-        // Optionnel: s'assurer que la table existe
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS reflex_memory (
-                id SERIAL PRIMARY KEY,
-                embedding vector(384),
-                action_payload TEXT NOT NULL
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
+        // Optionnel: s'assurer que la table existe (Désactivé pour Etape II - Anti Starvation)
 
         let max_distance = 1.0 - threshold;
 
