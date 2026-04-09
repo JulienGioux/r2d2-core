@@ -49,7 +49,7 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
         let ptx_str = r2d2_cuda_core::CHIMERA_CUDA_KERNEL_PTX;
 
         let func =
-            dev.get_or_load_custom_func("bitnet_f32_u8_matmul", "chimera_module", ptx_str)?;
+            dev.get_or_load_custom_func("bitnet_f32_dualmask_matmul", "chimera_module", ptx_str)?;
 
         let act_slice = act.as_cuda_slice::<f32>()?;
         let w_slice = w.as_cuda_slice::<u32>()?;
@@ -87,6 +87,94 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
         unsafe { builder.launch(cfg) }
             .map_err(|e| candle_core::Error::Msg(format!("Cudarc launch error: {}", e)))?;
 
+        Ok((
+            candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev.clone()),
+            out_shape,
+        ))
+    }
+}
+
+pub struct SparseMoeRoutingOp {
+    pub num_experts: usize,
+    pub hidden_dim: usize,
+    pub num_tokens: usize,
+}
+
+impl candle_core::CustomOp2 for SparseMoeRoutingOp {
+    fn name(&self) -> &'static str {
+        "sparse_moe_routing_top1"
+    }
+
+    fn cpu_fwd(
+        &self,
+        _s1: &candle_core::CpuStorage,
+        _l1: &candle_core::Layout,
+        _s2: &candle_core::CpuStorage,
+        _l2: &candle_core::Layout,
+    ) -> Result<(candle_core::CpuStorage, candle_core::Shape)> {
+        Err(candle_core::Error::Msg(
+            "SparseMoeRoutingOp uniquement supporté sur CUDA. Fallback non implémenté.".to_string(),
+        ))
+    }
+
+    #[cfg(feature = "cuda")]
+    fn cuda_fwd(
+        &self,
+        t1: &candle_core::CudaStorage,
+        l1: &candle_core::Layout,
+        t2: &candle_core::CudaStorage,
+        l2: &candle_core::Layout,
+    ) -> Result<(candle_core::CudaStorage, candle_core::Shape)> {
+        let dev = t1.device().clone();
+
+        let act_slice = t1.as_cuda_slice::<f32>()?;
+        let gate_slice = t2.as_cuda_slice::<f32>()?;
+
+        let out_shape = candle_core::Shape::from(self.num_tokens);
+
+        // alloc_zeros est appelé sur le Device (qui invoque Async cudaMalloc sous le capot
+        // via cudarc::driver::DeviceAsyncExt::alloc_zeros_async lorsqu'un stream est en cours)
+        let out_slice = dev.alloc_zeros::<u32>(self.num_tokens)?;
+
+        let ptx_str = r2d2_cuda_core::CHIMERA_CUDA_KERNEL_PTX;
+        let func =
+            dev.get_or_load_custom_func("sparse_moe_routing_top1", "chimera_module", ptx_str)?;
+
+        // 1 Token = 1 Warp (32 threads).
+        // 4 Warps (128 threads) par Bloc
+        let threads_per_block = 128;
+        let total_threads = self.num_tokens as u32 * 32;
+        let blocks = (total_threads + threads_per_block - 1) / threads_per_block;
+
+        let cfg = candle_core::cuda_backend::cudarc::driver::LaunchConfig {
+            grid_dim: (blocks, 1, 1),
+            block_dim: (threads_per_block, 1, 1),
+            shared_mem_bytes: 0,
+        };
+
+        let mut builder = func.builder();
+        use candle_core::cuda_backend::cudarc::driver::PushKernelArg;
+
+        let act_sub = act_slice.slice(l1.start_offset()..);
+        let gate_sub = gate_slice.slice(l2.start_offset()..);
+
+        let n_tok = self.num_tokens as i32;
+        let n_exp = self.num_experts as i32;
+        let h_dim = self.hidden_dim as i32;
+
+        builder.arg(&act_sub);
+        builder.arg(&gate_sub);
+        builder.arg(&out_slice);
+        builder.arg(&n_tok);
+        builder.arg(&n_exp);
+        builder.arg(&h_dim);
+
+        unsafe { builder.launch(cfg) }.map_err(|e| {
+            candle_core::Error::Msg(format!("Cudarc launch error WarpRouting: {}", e))
+        })?;
+
+        // Wrapper le slice u32 pour le rendre à l'écosystème Tensor Candle
+        // Puisqu'on crée un CudaStorage manuellement, on emballe le DeviceId et le Slice Cuda
         Ok((
             candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev.clone()),
             out_shape,

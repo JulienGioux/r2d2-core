@@ -7,8 +7,8 @@ mod tests {
     #[cfg(feature = "cuda")]
     fn test_cuda_kernel_source_integrity() {
         assert!(
-            CHIMERA_CUDA_KERNEL_PTX.contains("bitnet_f32_u8_matmul"),
-            "Le PTX généré doit contenir le noyau bitnet_f32_u8_matmul"
+            CHIMERA_CUDA_KERNEL_PTX.contains("bitnet_f32_dualmask_matmul"),
+            "Le PTX généré doit contenir le noyau bitnet_f32_dualmask_matmul"
         );
         assert!(
             CHIMERA_CUDA_KERNEL_PTX.contains(".version"),

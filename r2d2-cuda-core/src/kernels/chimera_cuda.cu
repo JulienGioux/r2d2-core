@@ -50,27 +50,69 @@ __global__ void bitnet_f32_dualmask_matmul(
     }
 }
 
-// Fonction wrapper pour l'ancien FFI statique 
-int32_t chimera_w1a8_matmul(const float* act, const TernaryBlock16* weight, float* out, int m, int n, int k) {
-    dim3 threadsPerBlock(32, 32);
-    dim3 numBlocks((n + threadsPerBlock.x - 1) / threadsPerBlock.x,
-                   (m + threadsPerBlock.y - 1) / threadsPerBlock.y);
+// Fonction utilitaire pour la réduction au sein d'un Warp (32 threads)
+// Obligatoire pour la scalabilité des accès "Coalesced" sur le bus VRAM
+__device__ __forceinline__ float warpReduceSum(float val) {
+    for (int offset = 16; offset > 0; offset /= 2)
+        val += __shfl_down_sync(0xffffffff, val, offset);
+    return val;
+}
 
-    bitnet_f32_dualmask_matmul<<<numBlocks, threadsPerBlock>>>(act, weight, out, m, n, k);
-    
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("[CORTEX ALERTE] Erreur du Driver Cuda : %s\n", cudaGetErrorString(err));
-        return -1;
-    }
-    
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        printf("[CORTEX ALERTE] Panique Sync VRAM : %s\n", cudaGetErrorString(err));
-        return -1;
+// Noyau de Routage SparseMoE (Top-1 Expert)
+// Remplaçant de la fonction CPU "Rayon", 100% Asynchrone VRAM via GPU
+// 1 Warp (32 threads) gère indépendamment l'évaluation d'un Token entier.
+__global__ void sparse_moe_routing_top1(
+    const float* __restrict__ act,             // Batch de Jetons [num_tokens, hidden_dim]
+    const float* __restrict__ gate_weight,     // Poids routeurs [num_experts, hidden_dim]
+    int32_t* __restrict__ expert_assignments,  // Sortie [num_tokens] (ID de l'expert)
+    int num_tokens, 
+    int num_experts, 
+    int hidden_dim)
+{
+    // On groupe par Warp : 1 warp = 32 threads
+    int global_thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+    int warp_id = global_thread_id / 32;
+    int lane_id = global_thread_id % 32;
+
+    if (warp_id >= num_tokens) return;
+
+    int token_offset = warp_id * hidden_dim;
+
+    float best_score = -1e38f; // Moins l'infini
+    int best_expert = 0;
+
+    for (int e = 0; e < num_experts; ++e) {
+        int gate_offset = e * hidden_dim;
+        float score = 0.0f;
+
+        // Lecture Coalescée par 32 threads
+        for (int i = lane_id; i < hidden_dim; i += 32) {
+            float val = act[token_offset + i];
+            float weight = gate_weight[gate_offset + i];
+            
+            // Routage de type BitNet "MatMul-Free"
+            if (weight > 0.5f) {
+                score += val;
+            } else if (weight < -0.5f) {
+                score -= val;
+            }
+        }
+
+        // Warp Reduction
+        score = warpReduceSum(score);
+
+        // Le Leader du Warp consolide l'affinité
+        if (lane_id == 0) {
+            if (score > best_score) {
+                best_score = score;
+                best_expert = e;
+            }
+        }
     }
 
-    return 0;
+    if (lane_id == 0) {
+        expert_assignments[warp_id] = best_expert;
+    }
 }
 
 } // extern "C"
