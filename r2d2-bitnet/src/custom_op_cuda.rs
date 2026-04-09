@@ -60,7 +60,7 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
         let blocks_x = (self.n as u32 + threads_x - 1) / threads_x;
         let blocks_y = (self.m as u32 + threads_y - 1) / threads_y;
 
-        let cfg = cudarc::driver::LaunchConfig {
+        let cfg = candle_core::cuda_backend::cudarc::driver::LaunchConfig {
             grid_dim: (blocks_x, blocks_y, 1),
             block_dim: (threads_x, threads_y, 1),
             shared_mem_bytes: 0,
