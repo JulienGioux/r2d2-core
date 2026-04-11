@@ -52,3 +52,9 @@ media_test/
 *.gguf
 *.bin
 workspace/models/
+nb.zip
+notebooklm-py-main/
+patch_actor.rs
+artifacts_flashcards/
+test_cookies.rs
+test_rpc.rs
