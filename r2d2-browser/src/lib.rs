@@ -1,4 +1,6 @@
-use headless_chrome::{Browser, LaunchOptionsBuilder};
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use futures::StreamExt;
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
 
@@ -75,8 +77,19 @@ impl SovereignBrowser {
             .status();
     }
 
-    /// Tente de se connecter au relais CDP Windows ou lance un Chromium local en fallback.
-    pub fn connect(profile_name: &str) -> Result<Browser, BrowserError> {
+    /// Lance la boucle asynchrone Tokio vitale pour Chromiumoxide
+    fn prime_actor_loop(mut handler: chromiumoxide::Handler) {
+        tokio::spawn(async move {
+            while let Some(h) = handler.next().await {
+                if h.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    /// Tente de se connecter au relais CDP Windows ou lance un Chromium local asynchrone en fallback.
+    pub async fn connect(profile_name: &str) -> Result<Browser, BrowserError> {
         let base_dir =
             if let Some(proj_dirs) = directories::ProjectDirs::from("com", "R2D2", "Vampire") {
                 proj_dirs.config_dir().to_path_buf()
@@ -96,25 +109,24 @@ impl SovereignBrowser {
 
         let mut retry_count = 0;
         loop {
-            let proxy_client = reqwest::blocking::Client::builder()
-                .no_proxy()
-                .build()
-                .unwrap();
+            let proxy_client = reqwest::Client::builder().no_proxy().build().unwrap();
             match proxy_client
                 .get(format!("http://{}:9222/json/version", host_ip))
                 .send()
+                .await
             {
                 Ok(resp) => {
-                    if let Ok(json) = resp.json::<serde_json::Value>() {
+                    if let Ok(json) = resp.json::<serde_json::Value>().await {
                         if let Some(ws_url) =
                             json.get("webSocketDebuggerUrl").and_then(|v| v.as_str())
                         {
-                            info!("🔌 Attachement furtif au navigateur relais (Chrome Host) via CDP (port 9222) !");
-                            return headless_chrome::Browser::connect_with_timeout(
-                                ws_url.to_string(),
-                                std::time::Duration::from_secs(3600), // Empêche la déconnexion iddle CDP de 30s
-                            )
-                            .map_err(|e| BrowserError::ConnectionFailed(e.to_string()));
+                            info!("🔌 Attachement asynchrone furtif au navigateur relais (Chrome Host) via CDP !");
+                            let (browser, handler) = Browser::connect(ws_url)
+                                .await
+                                .map_err(|e| BrowserError::ConnectionFailed(e.to_string()))?;
+
+                            Self::prime_actor_loop(handler);
+                            return Ok(browser);
                         }
                     }
                     break;
@@ -132,32 +144,43 @@ impl SovereignBrowser {
             }
         }
 
-        let options = LaunchOptionsBuilder::default()
-            .headless(false)
-            .sandbox(false)
-            .idle_browser_timeout(std::time::Duration::from_secs(3600)) // Empêche la déconnexion iddle CDP de 30s en mode local fallback
-            .user_data_dir(Some(profile_dir))
+        let config = BrowserConfig::builder()
+            .user_data_dir(profile_dir)
             .build()
             .map_err(|e| BrowserError::ProfileCreationError(e.to_string()))?;
 
-        Browser::new(options).map_err(|e| BrowserError::SpawnFailed(format!("{:?}", e)))
+        let (browser, handler) = Browser::launch(config)
+            .await
+            .map_err(|e| BrowserError::SpawnFailed(e.to_string()))?;
+
+        Self::prime_actor_loop(handler);
+        Ok(browser)
     }
 
     /// Tente de réutiliser un onglet existant contenant `url_matcher`, sinon en crée un nouveau.
-    pub fn get_or_new_tab(
+    pub async fn get_or_new_tab(
         browser: &Browser,
         url_matcher: &str,
-    ) -> Result<std::sync::Arc<headless_chrome::Tab>, BrowserError> {
-        if let Ok(tabs_lock) = browser.get_tabs().lock() {
-            for t in tabs_lock.iter() {
-                let url = t.get_url();
-                if url.contains(url_matcher) {
-                    return Ok(t.clone());
-                }
+    ) -> Result<Arc<chromiumoxide::Page>, BrowserError> {
+        let pages = browser
+            .pages()
+            .await
+            .map_err(|e| BrowserError::SpawnFailed(format!("Echec lecture pages: {:?}", e)))?;
+
+        for p in pages {
+            let url = p.url().await.unwrap_or_default();
+            if url.as_ref().is_some_and(|u| u.contains(url_matcher))
+                || (url.is_none() && url_matcher == "notebooklm")
+            {
+                return Ok(Arc::new(p));
             }
         }
-        browser
-            .new_tab()
-            .map_err(|e| BrowserError::SpawnFailed(format!("Echec creation onglet: {:?}", e)))
+
+        let new_page = browser
+            .new_page("about:blank")
+            .await
+            .map_err(|e| BrowserError::SpawnFailed(format!("Echec creation onglet: {:?}", e)))?;
+
+        Ok(Arc::new(new_page))
     }
 }

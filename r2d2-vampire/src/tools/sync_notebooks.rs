@@ -51,116 +51,114 @@ impl McpTool for SyncNotebooksTool {
             profile_dir
         );
 
-        let store_clone = Arc::clone(&self.store);
+        let browser = r2d2_browser::SovereignBrowser::connect("chrome-profile").await.map_err(|e| anyhow::anyhow!("Échec critique de la liaison au navigateur (CDP Bridge déconnecté ?). Contexte: {}", e))?;
+        let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm")
+            .await
+            .map_err(|e| anyhow::anyhow!("Erreur Tab: {:?}", e))?;
 
-        let result = tokio::task::spawn_blocking(move || {
-            let browser = match r2d2_browser::SovereignBrowser::connect("chrome-profile") {
-                Ok(b) => b,
-                Err(e) => return Err(anyhow::anyhow!("Échec critique de la liaison au navigateur (CDP Bridge déconnecté ?). Contexte: {}", e)),
-            };
-            let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm").map_err(|e| anyhow::anyhow!("Erreur Tab: {:?}", e))?;
+        info!("Mise en orbite vers notebooklm.google.com...");
+        tab.goto("https://notebooklm.google.com/")
+            .await
+            .map_err(|e| anyhow::anyhow!("Erreur Navigate: {}", e))?;
 
-            info!("Mise en orbite vers notebooklm.google.com...");
-            tab.navigate_to("https://notebooklm.google.com/")
-               .map_err(|e| anyhow::anyhow!("Erreur Navigate: {}", e))?;
+        // Attente de stabilisation initiale (Redirection Auth possible)
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
-            // Attente de stabilisation initiale (Redirection Auth possible)
-            std::thread::sleep(Duration::from_secs(3));
-
-            // Boucle de surveillance visuelle (Attente du Login Utilisateur)
-            let mut logged_in = false;
-            for i in 0..120 { // 120 * 3s = 6 minutes max pour taper son mot de passe
-                let url = tab.get_url();
-                if url.contains("notebooklm.google.com") && !url.contains("accounts.google") {
-                    logged_in = true;
-                    break;
-                }
-                if i % 5 == 0 {
-                    warn!("ATTENTION : R2D2 attend votre connexion Google sur la fenêtre ouverte...");
-                }
-                std::thread::sleep(Duration::from_secs(3));
+        // Boucle de surveillance visuelle (Attente du Login Utilisateur)
+        let mut logged_in = false;
+        for i in 0..120 {
+            // 120 * 3s = 6 minutes max pour taper son mot de passe
+            let url = tab.url().await.unwrap_or_default();
+            let safe_url = url.unwrap_or_default();
+            if safe_url.contains("notebooklm.google.com") && !safe_url.contains("accounts.google") {
+                logged_in = true;
+                break;
             }
-
-            if !logged_in {
-                return Err(anyhow::anyhow!("Timeout: Connexion Google non établie. Relancez la commande."));
+            if i % 5 == 0 {
+                warn!("ATTENTION : R2D2 attend votre connexion Google sur la fenêtre ouverte...");
             }
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
 
-            info!("✅ Connexion Google VÉRIFIÉE. Aspiration du DOM et de l'inventaire (Adaptive Polling)...");
+        if !logged_in {
+            return Err(anyhow::anyhow!(
+                "Timeout: Connexion Google non établie. Relancez la commande."
+            ));
+        }
 
-            let extract_js = r#"
-                (function() {
-                    let uniques = {};
-                    let links = document.querySelectorAll('a[href*="/notebook/"]');
-                    for (let a of links) {
-                        let card = a.closest('project-button, mat-card');
-                        if (card) {
-                            let titleEl = card.querySelector('.project-button-title');
-                            if (titleEl) {
-                                let name = titleEl.innerText.trim().replace(/[^a-zA-Z0-9_\-\s]/g, "");
-                                if (name.length > 0 && a.href.startsWith('http')) {
-                                    uniques[name] = a.href;
-                                }
-                            }
-                        }
-                    }
-                    return JSON.stringify(uniques);
-                })()
-            "#;
+        info!("✅ Connexion Google VÉRIFIÉE. Aspiration du DOM et de l'inventaire (Adaptive Polling)...");
 
-            let mut found_count = 0;
-            // Adaptive Polling: 15 essais * 2s = 30s
-            for _ in 0..15 {
-                std::thread::sleep(Duration::from_secs(2));
-
-                if let Ok(result) = tab.evaluate(extract_js, false) {
-                    if let Some(serde_json::Value::String(val_ref)) = result.value {
-                        if let Ok(Value::Object(map)) = serde_json::from_str(&val_ref) {
-                            if !map.is_empty() {
-                                let mut guard = match store_clone.data.write() {
-                                    Ok(g) => g,
-                                    Err(poisoned) => poisoned.into_inner(),
-                                };
-                                for (name, url_val) in map {
-                                    if let Some(url) = url_val.as_str() {
-                                        info!("✅ Découverte Souveraine : '{}' -> {}", name, url);
-                                        let data = ConsultantData {
-                                            url: Some(url.to_string()),
-                                            enabled: true,
-                                            variables: None,
-                                        };
-                                        let key = name.to_lowercase().replace(" ", "_");
-                                        guard.insert(key, data);
-                                        found_count += 1;
-                                    }
-                                }
-                                break;
+        let extract_js = r#"
+            (function() {
+                let uniques = {};
+                let links = document.querySelectorAll('a[href*="/notebook/"]');
+                for (let a of links) {
+                    let card = a.closest('project-button, mat-card');
+                    if (card) {
+                        let titleEl = card.querySelector('.project-button-title');
+                        if (titleEl) {
+                            let name = titleEl.innerText.trim().replace(/[^a-zA-Z0-9_\-\s]/g, "");
+                            if (name.length > 0 && a.href.startsWith('http')) {
+                                uniques[name] = a.href;
                             }
                         }
                     }
                 }
-            }
+                return JSON.stringify(uniques);
+            })()
+        "#;
 
-            if found_count == 0 {
-                let dump_js = "document.body.innerHTML";
-                if let Ok(dump_res) = tab.evaluate(dump_js, false) {
-                    if let Some(serde_json::Value::String(html)) = dump_res.value {
-                        let _ = std::fs::write("/tmp/notebook_dom.html", html);
-                        error!("DOM dumpe dans /tmp/notebook_dom.html pour diagnostique.");
+        let mut found_count = 0;
+        // Adaptive Polling: 15 essais * 2s = 30s
+        for _ in 0..15 {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            if let Ok(result) = tab.evaluate(extract_js).await {
+                if let Some(serde_json::Value::String(val_ref)) = result.value() {
+                    if let Ok(Value::Object(map)) = serde_json::from_str(val_ref) {
+                        if !map.is_empty() {
+                            let mut guard = match self.store.data.write() {
+                                Ok(g) => g,
+                                Err(poisoned) => poisoned.into_inner(),
+                            };
+                            for (name, url_val) in map {
+                                if let Some(url) = url_val.as_str() {
+                                    info!("✅ Découverte Souveraine : '{}' -> {}", name, url);
+                                    let data = ConsultantData {
+                                        url: Some(url.to_string()),
+                                        enabled: true,
+                                        variables: None,
+                                    };
+                                    let key = name.to_lowercase().replace(" ", "_");
+                                    guard.insert(key, data);
+                                    found_count += 1;
+                                }
+                            }
+                            break;
+                        }
                     }
                 }
-                let _ = tab.close_target();
-                return Err(anyhow::anyhow!("Timeout : Aucun carnet trouvé après 30s. L'élément DOM a peut-être changé côté Google."));
             }
+        }
 
-            // On libère la base
-            store_clone.save_disk();
+        if found_count == 0 {
+            let dump_js = "document.body.innerHTML";
+            if let Ok(dump_res) = tab.evaluate(dump_js).await {
+                if let Some(serde_json::Value::String(html)) = dump_res.value() {
+                    let _ = tokio::fs::write("/tmp/notebook_dom.html", html).await;
+                    error!("DOM dumpe dans /tmp/notebook_dom.html pour diagnostique.");
+                }
+            }
+            return Err(anyhow::anyhow!("Timeout : Aucun carnet trouvé après 30s. L'élément DOM a peut-être changé côté Google."));
+        }
 
-            // Fermeture propre
-            let _ = tab.close_target();
+        // On libère la base
+        self.store.save_disk();
 
-            Ok(format!("Aspiration terminée. {} Notebooks ont été synchronisés et écrits." , found_count))
-        }).await??;
-
-        Ok(json!(result))
+        let res_msg = format!(
+            "Aspiration terminée. {} Notebooks ont été synchronisés et écrits.",
+            found_count
+        );
+        Ok(json!(res_msg))
     }
 }

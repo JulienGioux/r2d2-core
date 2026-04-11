@@ -2,17 +2,19 @@ use r2d2_browser::SovereignBrowser;
 use r2d2_vampire::vampire_lord::notebook_api::NotebookApi;
 use tracing::info;
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt().init();
 
-    let browser = SovereignBrowser::connect("Chrome_GOOGLE")?;
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm.google.com")?;
-    let api = NotebookApi::new(tab);
-    api.tab.navigate_to("https://notebooklm.google.com/")?;
-    api.tab.wait_until_navigated()?;
+    let browser = SovereignBrowser::connect("Chrome_GOOGLE").await?;
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let tab =
+        r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm.google.com").await?;
+    let api = NotebookApi::new(tab).await;
+    api.tab.goto("https://notebooklm.google.com/").await?;
+    api.tab.wait_for_navigation().await?;
 
-    let notebooks = api.list_notebooks()?;
+    let notebooks = api.list_notebooks().await?;
     let rustarch_id = notebooks
         .iter()
         .find(|(_, title)| title.contains("[R2D2] RustArch"))
@@ -30,18 +32,18 @@ fn main() -> anyhow::Result<()> {
         for q in queries.iter() {
             info!("🎯 Transmission cible RPC : {}", q);
             // Lancement de l'Agent Deep Research (Google)
-            let _ = api.add_deep_search_source(&id, q);
+            let _ = api.add_deep_search_source(&id, q).await;
 
             // Attente de quelques secondes pour l'enregistrement côté serveur Google
-            std::thread::sleep(std::time::Duration::from_secs(5));
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
 
             // Le Watcher prend le relai, observe, importe, et redonne la main dès que c'est fini.
             info!("👁️ Activation de l'intercepteur d'assimilation asynchrone...");
-            if let Err(e) = api.auto_import_pending_searches(&id) {
+            if let Err(e) = api.auto_import_pending_searches(&id).await {
                 tracing::warn!("Erreur lors de l'assimilation: {}", e);
             }
             info!("✅ Cycle Deep Search achevé. Préparation de l'ogive suivante si présente...");
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }
 

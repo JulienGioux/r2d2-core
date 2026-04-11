@@ -51,7 +51,7 @@ impl McpTool for AuthenticateProviderTool {
             ));
         }
 
-        let content = std::fs::read_to_string(path)?;
+        let content = tokio::fs::read_to_string(path).await?;
         let providers: std::collections::HashMap<String, ProviderConfig> =
             serde_json::from_str(&content)?;
 
@@ -63,7 +63,7 @@ impl McpTool for AuthenticateProviderTool {
                     provider_id
                 ))
             }
-            None => return Err(anyhow::anyhow!("Fournisseur inрияconnu : {}", provider_id)),
+            None => return Err(anyhow::anyhow!("Fournisseur inconnu : {}", provider_id)),
         };
 
         info!(
@@ -73,51 +73,43 @@ impl McpTool for AuthenticateProviderTool {
 
         let profile_name = format!("Chrome_{}", provider_id.to_uppercase());
 
-        // Polling loop asynchrone (Bloquant jusqu'à la réussite)
-        let res = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let browser = r2d2_browser::SovereignBrowser::connect(&profile_name)?;
-            let tab = browser.new_tab()?;
-            tab.navigate_to(&config.auth_url)?;
+        let browser = r2d2_browser::SovereignBrowser::connect(&profile_name).await?;
+        let tab = browser.new_page(&config.auth_url).await?;
 
-            info!(
-                "⏳ En attente de la résolution HUMAINE du SSO pour {} ...",
+        info!(
+            "⏳ En attente de la résolution HUMAINE du SSO pour {} ...",
+            provider_id
+        );
+
+        // Boucle de Polling pour détecter la connexion
+        for _ in 0..120 {
+            // Attente max 10 minutes (120 * 5s)
+            tokio::time::sleep(Duration::from_secs(5)).await;
+
+            let check_js = format!(
+                "document.querySelector(\"{}\") !== null",
+                config.success_selector
+            );
+            if let Ok(eval) = tab.evaluate(check_js.as_str()).await {
+                if let Some(Value::Bool(true)) = eval.value() {
+                    info!(
+                        "✅ Validation Cryptographique : Authentification {} réussie !",
+                        provider_id
+                    );
+                    return Ok(json!(format!(
+                        "Succès de l'authentification native. Profil scellé: {}",
+                        profile_name
+                    )));
+                }
+            }
+            warn!(
+                "... En attente du relais humain sur Chrome (Connexion {} requise)",
                 provider_id
             );
+        }
 
-            // Boucle de Polling pour détecter la connexion
-            for _ in 0..120 {
-                // Attente max 10 minutes (120 * 5s)
-                std::thread::sleep(Duration::from_secs(5));
-
-                let check_js = format!(
-                    "document.querySelector(\"{}\") !== null",
-                    config.success_selector
-                );
-                if let Ok(eval) = tab.evaluate(&check_js, false) {
-                    if let Some(Value::Bool(true)) = eval.value {
-                        info!(
-                            "✅ Validation Cryptographique : Authentification {} réussie !",
-                            provider_id
-                        );
-                        let _ = tab.close_target();
-                        return Ok(format!(
-                            "Succès de l'authentification native. Profil scellé: {}",
-                            profile_name
-                        ));
-                    }
-                }
-                warn!(
-                    "... En attente du relais humain sur Chrome (Connexion {} requise)",
-                    provider_id
-                );
-            }
-
-            Err(anyhow::anyhow!(
-                "Timeout: L'utilisateur n'a pas finalisé l'authentification dans le temps imparti."
-            ))
-        })
-        .await??;
-
-        Ok(json!(res))
+        Err(anyhow::anyhow!(
+            "Timeout: L'utilisateur n'a pas finalisé l'authentification dans le temps imparti."
+        ))
     }
 }
