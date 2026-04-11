@@ -1,3 +1,5 @@
+#![cfg(feature = "cdp_bridge")]
+
 use axum::{routing::get, Router};
 use r2d2_vampire::vampire_lord::notebook_api::NotebookApi;
 use std::time::Duration;
