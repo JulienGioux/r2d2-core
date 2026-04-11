@@ -82,7 +82,7 @@ pub struct ChimeraBlock {
 }
 
 impl ChimeraBlock {
-    pub fn forward(&self, x: &Tensor, prev_state: Option<Vec<f32>>) -> Result<(Tensor, Vec<f32>)> {
+    pub fn forward(&self, x: &Tensor, prev_state: Option<Tensor>) -> Result<(Tensor, Tensor)> {
         // 1. Stabilisation Quantique
         let h1 = self.hadamard.forward(x)?;
 
@@ -102,7 +102,7 @@ impl ChimeraBlock {
 /// 🧠 Le Modèle de Langage Complet R2D2-Chimera
 pub struct ChimeraModel {
     pub config: ChimeraConfig,
-    layers: Vec<ChimeraBlock>,
+    pub layers: Vec<ChimeraBlock>,
     /// Vraie table d'Embedding (Lexique vers Vecteur Dense)
     pub embed: Embedding,
     /// Vraie Tête de Génération Linguistique
@@ -154,8 +154,8 @@ impl ChimeraModel {
     pub fn forward_hidden(
         &self,
         tokens: &Tensor,
-        mut prev_states: Option<Vec<Vec<f32>>>,
-    ) -> Result<(Tensor, Vec<Vec<f32>>)> {
+        mut prev_states: Option<Vec<Tensor>>,
+    ) -> Result<(Tensor, Vec<Tensor>)> {
         let mut x = self.embed.forward(tokens)?;
 
         let mut next_states = Vec::with_capacity(self.layers.len());
@@ -164,8 +164,7 @@ impl ChimeraModel {
             // Take ownership of the layer state to recycle its allocation
             let prev_s = if let Some(ref mut states_vec) = prev_states {
                 if i < states_vec.len() {
-                    let extracted = std::mem::take(&mut states_vec[i]);
-                    Some(extracted)
+                    Some(states_vec[i].clone())
                 } else {
                     None
                 }
@@ -186,8 +185,8 @@ impl ChimeraModel {
     pub fn forward(
         &self,
         tokens: &Tensor,
-        prev_states: Option<Vec<Vec<f32>>>,
-    ) -> Result<(Tensor, Vec<Vec<f32>>)> {
+        prev_states: Option<Vec<Tensor>>,
+    ) -> Result<(Tensor, Vec<Tensor>)> {
         let (hidden, next_states) = self.forward_hidden(tokens, prev_states)?;
         let logits = self.lm_head.forward(&hidden)?;
 
@@ -206,7 +205,7 @@ impl ChimeraModel {
         let mut context = prompt_tokens.to_vec();
 
         // Le cache vec recyclé !
-        let mut ssm_states: Option<Vec<Vec<f32>>> = None;
+        let mut ssm_states: Option<Vec<Tensor>> = None;
 
         if !context.is_empty() {
             let context_tensor = Tensor::new(context.as_slice(), device)?;

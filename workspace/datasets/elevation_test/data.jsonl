@@ -1,0 +1,32 @@
+{"text": "Capitale du Japon ? [/INST] {\"concept\": \"Tokyo\", \"is_fact\": true}"}
+{"text": "Premier homme sur la lune ? [/INST] {\"concept\": \"Neil Armstrong\", \"is_fact\": true}"}
+{"text": "Inventeur de la relativité ? [/INST] {\"concept\": \"Albert Einstein\", \"is_fact\": true}"}
+{"text": "Symbole chimique de l'or ? [/INST] {\"concept\": \"Au\", \"is_fact\": true}"}
+{"text": "Réalisateur de Titanic ? [/INST] {\"concept\": \"James Cameron\", \"is_fact\": true}"}
+{"text": "Vitesse de la lumière ? [/INST] {\"concept\": \"299792 km/s\", \"is_fact\": true}"}
+{"text": "Peintre de la Joconde ? [/INST] {\"concept\": \"Léonard de Vinci\", \"is_fact\": true}"}
+{"text": "Plus haut sommet du monde ? [/INST] {\"concept\": \"Mont Everest\", \"is_fact\": true}"}
+{"text": "Créateur de Rust ? [/INST] {\"concept\": \"Graydon Hoare\", \"is_fact\": true}"}
+{"text": "Langue la plus parlée au monde ? [/INST] {\"concept\": \"Anglais\", \"is_fact\": true}"}
+{"text": "Inventeur du téléphone ? [/INST] {\"concept\": \"Alexander Graham Bell\", \"is_fact\": true}"}
+{"text": "Ancien nom de New York ? [/INST] {\"concept\": \"Nouvelle Amsterdam\", \"is_fact\": true}"}
+{"text": "Composant principal du soleil ? [/INST] {\"concept\": \"Hydrogène\", \"is_fact\": true}"}
+{"text": "Déesse de la sagesse grecque ? [/INST] {\"concept\": \"Athéna\", \"is_fact\": true}"}
+{"text": "Dernier tsar de Russie ? [/INST] {\"concept\": \"Nicolas II\", \"is_fact\": true}"}
+{"text": "Inventeur de l'imprimerie ? [/INST] {\"concept\": \"Gutenberg\", \"is_fact\": true}"}
+{"text": "Élément le plus léger ? [/INST] {\"concept\": \"Hydrogène\", \"is_fact\": true}"}
+{"text": "Planète rouge ? [/INST] {\"concept\": \"Mars\", \"is_fact\": true}"}
+{"text": "Auteur de 1984 ? [/INST] {\"concept\": \"George Orwell\", \"is_fact\": true}"}
+{"text": "Monnaie japonaise ? [/INST] {\"concept\": \"Yen\", \"is_fact\": true}"}
+{"text": "Ville Lumière ? [/INST] {\"concept\": \"Paris\", \"is_fact\": true}"}
+{"text": "Océan le plus grand ? [/INST] {\"concept\": \"Pacifique\", \"is_fact\": true}"}
+{"text": "Capital de l'Australie ? [/INST] {\"concept\": \"Canberra\", \"is_fact\": true}"}
+{"text": "Dieu du tonnerre nordique ? [/INST] {\"concept\": \"Thor\", \"is_fact\": true}"}
+{"text": "Créateur de Linux ? [/INST] {\"concept\": \"Linus Torvalds\", \"is_fact\": true}"}
+{"text": "Organe qui pompe le sang ? [/INST] {\"concept\": \"Cœur\", \"is_fact\": true}"}
+{"text": "Inventeur de la pénicilline ? [/INST] {\"concept\": \"Alexander Fleming\", \"is_fact\": true}"}
+{"text": "Combien de continents ? [/INST] {\"concept\": \"Sept\", \"is_fact\": true}"}
+{"text": "Nombre d'or ? [/INST] {\"concept\": \"1.618\", \"is_fact\": true}"}
+{"text": "Plus longue rivière ? [/INST] {\"concept\": \"Nil\", \"is_fact\": true}"}
+{"text": "Auteur de l'Odyssée ? [/INST] {\"concept\": \"Homère\", \"is_fact\": true}"}
+{"text": "Animal terrestre le plus rapide ? [/INST] {\"concept\": \"Guépard\", \"is_fact\": true}"}

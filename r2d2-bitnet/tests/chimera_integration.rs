@@ -14,6 +14,11 @@ impl Expert for SsmExpertAdapter {
         // En vrai Mamba multi-tours, on garde l'état caché (KV Cache équivalent).
         // Ici, on valide la traversée Mathématique sans état initial (h_{t-1} = None).
         let (y_t, _h_t) = self.block.forward_scan(x, None)?;
+        let y_t = if x.dims().len() == 2 && y_t.dims().len() == 3 {
+            y_t.squeeze(0)?
+        } else {
+            y_t
+        };
         Ok(y_t)
     }
 }

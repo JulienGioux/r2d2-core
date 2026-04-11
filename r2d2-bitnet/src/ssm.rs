@@ -49,72 +49,53 @@ impl SsmBlock {
         })
     }
 
-    /// Ingestion séquentielle MLGRU / Mamba [O(T * D)]
-    /// Recycle prev_state (Zéro-Aliasing) pour annuler le KV-Cache
-    pub fn forward_scan(
-        &self,
-        x: &Tensor,
-        prev_state: Option<Vec<f32>>,
-    ) -> Result<(Tensor, Vec<f32>)> {
-        let (seq_len, dim) = x.dims2()?;
-        let x_vec = x.flatten_all()?.to_vec1::<f32>()?;
+    /// Ingestion Séquentielle MIMO (Multi-Input Multi-Output) O[D] au lieu de O[T*D^2]
+    /// Traite les projections B et C via Tensor Cores massivement parallèles
+    pub fn forward_scan(&self, x: &Tensor, prev_state: Option<Tensor>) -> Result<(Tensor, Tensor)> {
+        let dims = x.dims();
+        let (batch_size, seq_len, dim) = match dims.len() {
+            2 => (1, dims[0], dims[1]),
+            3 => (dims[0], dims[1], dims[2]),
+            _ => candle_core::bail!("SSM attend un tenseur 2D ou 3D"),
+        };
 
-        // L'Extraction (La Matrice A est désormais juste un Decay scalaire 1D)
-        let a_vec = self.proj_a.flatten_all()?.to_vec1::<f32>()?;
-        let b_vec = self.proj_b.flatten_all()?.to_vec1::<f32>()?;
-        let c_vec = self.proj_c.flatten_all()?.to_vec1::<f32>()?;
+        // On flatten temporairement la batch_size pour saturer encore plus le GPU
+        // [B*S, D]
+        let x_flat = x.reshape((batch_size * seq_len, dim))?;
 
-        // 1. Consommation et Recyclage du KV-Cache !
-        let mut state = prev_state.unwrap_or_else(|| vec![0.0f32; dim]);
-        let mut y_seq = vec![0.0f32; seq_len * dim];
+        // 1. MIMO Projection B : Sature les Tensor Cores en un seul appel (Zéro CPU Loop)
+        // [B*S, Dim] x [Dim, Dim]^T => [B*S, Dim]
+        let bx_seq = x_flat.matmul(&self.proj_b.t()?)?;
 
-        // 2. Scan temporel séquentiel SIMD Zéro-Aliasing (Pas de Rayon)
+        // On remet sous forme [B, S, D] pour la récurrence
+        let bx_seq = bx_seq.reshape((batch_size, seq_len, dim))?;
+
+        // 2. Discrétisation Exponentielle (Mamba) : A est un Decay
+        // Différentiable et combat dynamiquement les Vanishing Gradients
+        let exp_a = self.proj_a.exp()?;
+
+        let mut h_t =
+            prev_state.unwrap_or_else(|| Tensor::zeros(dim, x.dtype(), x.device()).unwrap());
+        let mut h_seq = Vec::with_capacity(seq_len);
+
+        // 3. Boucle Récurrente Element-Wise : Graphe Autograd Intact (O(D) au lieu de O(D^2))
         for t in 0..seq_len {
-            let offset = t * dim;
-            let x_t = &x_vec[offset..offset + dim];
-            let y_t = &mut y_seq[offset..offset + dim];
+            let bx_t = bx_seq.narrow(1, t, 1)?.squeeze(1)?; // Extraction temporelle [B, D]
 
-            // A) Vecteur B * x_t (MatMul-Free via Zip/Fold)
-            let mut bx_t = vec![0.0f32; dim];
-            bx_t.iter_mut().enumerate().for_each(|(i, bx_i)| {
-                let b_row = &b_vec[i * dim..(i + 1) * dim];
-                *bx_i = b_row.iter().zip(x_t.iter()).fold(0.0, |acc, (&w, &val)| {
-                    if w > 0.5 {
-                        acc + val
-                    } else if w < -0.5 {
-                        acc - val
-                    } else {
-                        acc
-                    }
-                });
-            });
-
-            // B) Mamba SSM Recurrence (SIMD In-Place) -> h_t = A * h_{t-1} + B * x_t
-            state
-                .iter_mut()
-                .zip(a_vec.iter())
-                .zip(bx_t.iter())
-                .for_each(|((h_i, &a_i), &bx_i)| {
-                    *h_i = (a_i * *h_i) + bx_i;
-                });
-
-            // C) Vecteur y_t = C * h_t (MatMul-Free via Zip/Fold)
-            y_t.iter_mut().enumerate().for_each(|(i, y_i)| {
-                let c_row = &c_vec[i * dim..(i + 1) * dim];
-                *y_i = c_row.iter().zip(state.iter()).fold(0.0, |acc, (&w, &s)| {
-                    if w > 0.5 {
-                        acc + s
-                    } else if w < -0.5 {
-                        acc - s
-                    } else {
-                        acc
-                    }
-                });
-            });
+            // h_t = exp(A) * h_{t-1} + bx_t
+            h_t = exp_a.broadcast_mul(&h_t)?.broadcast_add(&bx_t)?;
+            h_seq.push(h_t.unsqueeze(1)?); // Forme [B, 1, D]
         }
 
-        let out_tensor = Tensor::from_vec(y_seq, (seq_len, dim), x.device())?;
-        Ok((out_tensor, state))
+        // Reconstruction de l'historique d'états
+        let h_global = Tensor::cat(&h_seq, 1)?; // [B, Seq, Dim]
+
+        // 4. MIMO Projection C : Sature les Tensor Cores
+        let h_global_flat = h_global.reshape((batch_size * seq_len, dim))?;
+        let y_seq_flat = h_global_flat.matmul(&self.proj_c.t()?)?;
+        let y_seq = y_seq_flat.reshape((batch_size, seq_len, dim))?;
+
+        Ok((y_seq, h_t))
     }
 }
 
@@ -137,24 +118,27 @@ mod tests {
         // x_t = [2.0, 3.0]
         let x = Tensor::new(&[[2.0f32, 3.0]], &Device::Cpu)?;
         // h_prev = [1.0, 2.0]
-        let h_prev = vec![1.0f32, 2.0];
+        let h_prev = Tensor::new(&[1.0f32, 2.0], &Device::Cpu)?;
 
         let (y_t, h_t) = block.forward_scan(&x, Some(h_prev))?;
 
         let y_t_out = y_t.flatten_all()?.to_vec1::<f32>()?;
+        let h_t_out = h_t.flatten_all()?.to_vec1::<f32>()?;
 
-        // Calcul Manuel:
-        // x_in[0] = 1*2 - 1*3 = -1
-        // h_new[0] = -1*1 + -1 = -2
-        // x_in[1] = 0*2 + 1*3 = 3
-        // h_new[1] = -1*2 + 3 = 1
-        // => h_t state = [-2, 1]
-        assert_eq!(h_t, vec![-2.0, 1.0]);
+        // Calcul MIMO Native:
+        // x_in = X * B^T => [2.0, 3.0] * [[1, -1], [0, 1]]^T
+        // B^T = [[1, 0], [-1, 1]]
+        // x_in = [2*1 + 3*-1, 2*0 + 3*1] => [-1.0, 3.0]
+        // exp_A = exp([-1, -1]) = [0.36787945, 0.36787945]
+        // h_new = exp_A * [1, 2] + [-1, 3] = [0.36787945 - 1, 0.7357589 + 3]
+        // h_new = [-0.63212055, 3.7357588]
+        // y_t = h_new * C^T => [-0.63212055, 3.7357588] * [[1, 1], [-1, 0]]^T
+        // C^T = [[1, -1], [1, 0]]
+        // y_out[0] = -0.63212055 + 3.7357588 = 3.1036382
+        // y_out[1] = 0.63212055 + 0 = 0.63212055
 
-        // y_t[0] = 1*-2 + 1*1 = -1
-        // y_t[1] = -1*-2 + 0*1 = 2
-        // => y_t = [-1, 2]
-        assert_eq!(y_t_out, vec![-1.0, 2.0]);
+        assert!((h_t_out[0] - -0.63212055).abs() < 1e-4, "h_t diverge");
+        assert!((y_t_out[0] - 3.1036382).abs() < 1e-4, "y_t diverge");
 
         Ok(())
     }

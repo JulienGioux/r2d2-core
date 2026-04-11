@@ -2,6 +2,8 @@ use candle_core::{DType, Device, Tensor};
 use candle_nn::{loss, AdamW, Optimizer, ParamsAdamW, VarBuilder, VarMap};
 use clap::Parser;
 use r2d2_bitnet::chimera::{ChimeraConfig, ChimeraModel};
+use r2d2_cortex::agent::CognitiveAgent;
+use r2d2_cortex::models::minilm_embedder::MiniLmEmbedderAgent;
 use r2d2_registry::{
     DatasetManifest, ModelFamily, ModelId, ModelIdentity, ModelManifest, ModelMetrics,
     ModelTopology, QuantizationLevel, StateCausal, StateContrastive, TaskTypology,
@@ -23,9 +25,37 @@ struct Args {
     dataset_name: String,
 }
 
+#[cfg(feature = "cuda")]
+extern "C" {
+    fn cudaDeviceGetDefaultMemPool(
+        pool: *mut *mut std::ffi::c_void,
+        device: std::ffi::c_int,
+    ) -> std::ffi::c_int;
+    fn cudaMemPoolSetAttribute(
+        pool: *mut std::ffi::c_void,
+        attr: std::ffi::c_int,
+        value: *mut std::ffi::c_void,
+    ) -> std::ffi::c_int;
+}
+
+pub fn lock_cuda_mempool() {
+    #[cfg(feature = "cuda")]
+    unsafe {
+        let mut pool: *mut std::ffi::c_void = std::ptr::null_mut();
+        // 0 = cudaSuccess
+        if cudaDeviceGetDefaultMemPool(&mut pool, 0) == 0 {
+            let mut threshold: u64 = u64::MAX;
+            // attr 1 = cudaMemPoolAttrReleaseThreshold
+            cudaMemPoolSetAttribute(pool, 1, &mut threshold as *mut _ as *mut std::ffi::c_void);
+            println!("🔒 VRAM Asynchronous MemPool Verrouillé (Threshold: UINT64_MAX). Zéro-Fragmentation garantie.");
+        }
+    }
+}
+
 /// 🧠 R2D2 - Assimilation Mathématique SFT
 /// Doctrine Zéro-Erreurs: Charge dynamiquement via les Typestates Rust.
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     println!("============================================================");
     println!("🚀 PHASE 11 : ASSIMILATION SFT SÉCURISÉE (TYPESTATE)");
     println!("============================================================\n");
@@ -35,6 +65,7 @@ fn main() -> anyhow::Result<()> {
 
     let device = if candle_core::utils::cuda_is_available() {
         println!("⚡ [HARDWARE] Noyau CUDA détecté.");
+        lock_cuda_mempool();
         Device::new_cuda(0)?
     } else {
         println!("⚠️ [HARDWARE] CUDA non disponible. Fallback CPU.");
@@ -76,7 +107,6 @@ fn main() -> anyhow::Result<()> {
         weight_decay: 0.01,
         ..Default::default()
     };
-    let mut opt = AdamW::new(varmap.all_vars(), params)?;
     let epochs = 20;
     println!("\n🔥 Démarrage du Gradient Descent (Epochs: {})...", epochs);
 
@@ -86,12 +116,27 @@ fn main() -> anyhow::Result<()> {
         TaskTypology::CausalLm => {
             let validated =
                 ValidatedDataset::<StateCausal>::new(data_path, dataset_manifest.clone());
+            let mut opt = AdamW::new(varmap.all_vars(), params)?;
             run_causal_training(&validated, &model, &mut opt, &device, epochs)?
         }
         TaskTypology::ContrastiveEmbedding => {
             let validated =
                 ValidatedDataset::<StateContrastive>::new(data_path, dataset_manifest.clone());
-            run_contrastive_training(&validated, &model, &mut opt, &device, epochs)?
+
+            let mut embedder = MiniLmEmbedderAgent::new();
+            println!("🔥 Initialisation du Tenseur Cible (JSONAI)....");
+            embedder.load().await?;
+
+            run_contrastive_training(
+                &validated,
+                &model,
+                params,
+                &device,
+                epochs,
+                &mut embedder,
+                &varmap,
+            )
+            .await?
         }
     };
 
@@ -204,17 +249,21 @@ fn run_causal_training(
 }
 
 /// Boucle stricte Contrastive (N'accepte qu'un Dataset <StateContrastive>)
-fn run_contrastive_training(
+async fn run_contrastive_training(
     dataset: &ValidatedDataset<StateContrastive>,
     model: &ChimeraModel,
-    opt: &mut AdamW,
+    params: ParamsAdamW,
     device: &Device,
     epochs: usize,
+    embedder: &mut MiniLmEmbedderAgent,
+    varmap: &VarMap,
 ) -> anyhow::Result<f32> {
+    use candle_nn::Module;
+
     let file = File::open(&dataset.filepath)?;
     let reader = BufReader::new(file);
 
-    let mut paired_sequences: Vec<(Vec<u32>, Vec<u32>)> = Vec::new();
+    let mut paired_sequences: Vec<(Vec<u32>, String)> = Vec::new();
     for line in reader.lines() {
         let line = line?;
         if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
@@ -222,46 +271,106 @@ fn run_contrastive_training(
                 if let Some(idx) = text.find(" [/INST] ") {
                     let mut p_seq: Vec<u32> = text[..idx].bytes().map(|b| b as u32).collect();
                     p_seq.push(0);
-                    let mut j_seq: Vec<u32> = text[idx + 9..].bytes().map(|b| b as u32).collect();
-                    j_seq.push(0);
-                    paired_sequences.push((p_seq, j_seq));
+                    // On garde le concept jsonai en clair pour le passer au MiniLM
+                    let jsonai_str = text[idx + 9..].to_string();
+                    paired_sequences.push((p_seq, jsonai_str));
                 }
             }
         }
     }
 
     println!(
-        "   -> {} paires (Prompt/JSONAI) à l'alignement.",
+        "   -> {} paires (Prompt/JSONAI) prêtes pour l'InfoNCE Batching.",
         paired_sequences.len()
     );
+
+    // --- 1. Contrastive Head & Learnable Temperature ---
+    let vb_head = VarBuilder::from_varmap(varmap, DType::F32, device);
+    let head_dim = 384;
+    let model_dim = model.config.hidden_size;
+
+    let proj_anchor = candle_nn::linear_no_bias(model_dim, head_dim, vb_head.pp("proj_anchor"))?;
+    let proj_positive = candle_nn::linear_no_bias(384, head_dim, vb_head.pp("proj_positive"))?;
+
+    let initial_tau = 2.65926_f64; // log(1 / 0.07)
+    let log_tau = varmap.get(
+        (),
+        "log_tau",
+        candle_nn::Init::Const(initial_tau),
+        DType::F32,
+        device,
+    )?;
+
+    // 2. Initialisation tardive de l'AdamW pour inclure ContrastiveHead !
+    let mut opt = AdamW::new(varmap.all_vars(), params)?;
 
     let mut final_loss = 0.0;
     for epoch in 1..=epochs {
         let mut total_loss = 0.0;
         let mut batch_count = 0;
 
-        for (p_seq, j_seq) in &paired_sequences {
-            if p_seq.is_empty() || j_seq.is_empty() {
+        // InfoNCE BATCH LOOP (Batch In-Negative Effect)
+        let batch_size = 16;
+        for chunk in paired_sequences.chunks(batch_size) {
+            let mut anchor_tensors = Vec::new();
+            let mut pos_tensors = Vec::new();
+
+            for (p_seq, jsonai_str) in chunk {
+                if p_seq.is_empty() {
+                    continue;
+                }
+
+                let p_data = Tensor::new(p_seq.as_slice(), device)?;
+                // Génération On-Device O(1) de la cible dense "JSONAI"
+                let pos_vec = embedder.embed_raw(jsonai_str, false).await?;
+                let pos_data = Tensor::from_vec(pos_vec, (1, 384), device)?;
+
+                // Traverse Chimera
+                let (p_hidden, _) = model.forward_hidden(&p_data, None)?;
+
+                // Mean pooling temporel de la séquence (sur seq_len qui est dim 1)
+                let p_emb = p_hidden.mean(1)?; // [1, model_dim]
+
+                anchor_tensors.push(p_emb);
+                pos_tensors.push(pos_data);
+            }
+
+            if anchor_tensors.is_empty() {
                 continue;
             }
-            let p_data = Tensor::new(p_seq.as_slice(), device)?;
-            let j_data = Tensor::new(j_seq.as_slice(), device)?;
 
-            let (p_hidden, _) = model.forward_hidden(&p_data, None)?;
-            let (j_hidden, _) = model.forward_hidden(&j_data, None)?;
+            // Concaténation le long de la dimension batch
+            let anchor_batch = Tensor::cat(&anchor_tensors, 0)?; // [B, model_dim]
+            let pos_batch = Tensor::cat(&pos_tensors, 0)?; // [B, 384]
 
-            let p_emb = p_hidden.mean(0)?;
-            let j_emb = j_hidden.mean(0)?;
+            // Projections vers l'espace InfoNCE
+            let p_proj = proj_anchor.forward(&anchor_batch)?; // [B, head_dim]
+            let j_proj = proj_positive.forward(&pos_batch)?; // [B, head_dim]
 
-            let p_norm = p_emb.sqr()?.sum_keepdim(candle_core::D::Minus1)?.sqrt()?;
-            let p_norm = p_norm.broadcast_add(&Tensor::new(&[1e-6_f32], device)?)?;
-            let p_normed = p_emb.broadcast_div(&p_norm)?;
+            // L2-Norm Stricte de chaque tenseur [B, D] le long de D (Minus1)
+            let p_norm = p_proj.sqr()?.sum_keepdim(candle_core::D::Minus1)?.sqrt()?;
+            let p_norm_safe = p_norm.broadcast_add(&Tensor::new(&[1e-6_f32], device)?)?;
+            let p_normed = p_proj.broadcast_div(&p_norm_safe)?;
 
-            let j_norm = j_emb.sqr()?.sum_keepdim(candle_core::D::Minus1)?.sqrt()?;
-            let j_norm = j_norm.broadcast_add(&Tensor::new(&[1e-6_f32], device)?)?;
-            let j_normed = j_emb.broadcast_div(&j_norm)?;
+            let j_norm = j_proj.sqr()?.sum_keepdim(candle_core::D::Minus1)?.sqrt()?;
+            let j_norm_safe = j_norm.broadcast_add(&Tensor::new(&[1e-6_f32], device)?)?;
+            let j_normed = j_proj.broadcast_div(&j_norm_safe)?;
 
-            let loss = loss::mse(&p_normed, &j_normed)?;
+            // Cosine Similarity Matrix: CosineSim = Anchor * Positive^T => [B, B]
+            let sim_matrix = p_normed.matmul(&j_normed.t()?)?;
+
+            // Application de la température apprenable (tau = exp(log_tau))
+            let tau = log_tau.exp()?;
+            let scaled_sim = sim_matrix.broadcast_mul(&tau)?;
+
+            // InfoNCE Loss (La Diagonale est la cible parfaite '1')
+            let b_len = scaled_sim.dim(0)?;
+            let targets: Vec<u32> = (0..b_len as u32).collect();
+            let target_tensor = Tensor::new(targets.as_slice(), device)?;
+
+            let loss = loss::cross_entropy(&scaled_sim, &target_tensor)?;
+
+            // ⚡ Le Backward foudroie 100% de la structure Chimera depuis l'Espace de Contraste !
             opt.backward_step(&loss)?;
             total_loss += loss.to_scalar::<f32>()?;
             batch_count += 1;
@@ -274,9 +383,10 @@ fn run_contrastive_training(
         };
         final_loss = avg_loss;
         if epoch % 5 == 0 || epoch == 1 {
+            let current_tau = log_tau.exp()?.to_scalar::<f32>()?;
             println!(
-                "   [CONTRASTIVE] Epoch {:03}/{} | MSE Loss: {:.6}",
-                epoch, epochs, avg_loss
+                "   [CONTRASTIVE InfoNCE] Epoch {:03}/{} | Batch Size: {} | Tau InfoNCE: {:.4} | Loss: {:.6}",
+                epoch, epochs, batch_size, current_tau, avg_loss
             );
         }
     }

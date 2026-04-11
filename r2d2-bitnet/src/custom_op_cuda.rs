@@ -9,10 +9,10 @@ use tracing::{info, warn};
 
 /// Définition canonique de l'opération tensorielle asymétrique 1.58b
 #[allow(dead_code)]
-struct BitNetW1A8MatMulOp {
-    m: usize,
-    n: usize,
-    k: usize, // Dimension interne K (avant l'emballage uint8_t)
+pub struct BitNetW1A8MatMulOp {
+    pub m: usize,
+    pub n: usize,
+    pub k: usize, // Dimension interne K (avant l'emballage uint8_t)
 }
 
 impl CustomOp2 for BitNetW1A8MatMulOp {
@@ -91,6 +91,153 @@ impl CustomOp2 for BitNetW1A8MatMulOp {
             candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev.clone()),
             out_shape,
         ))
+    }
+
+    fn bwd(
+        &self,
+        arg1: &Tensor,
+        _arg2: &Tensor,
+        _res: &Tensor,
+        grad_res: &Tensor,
+    ) -> Result<(Option<Tensor>, Option<Tensor>)> {
+        // arg1: act [M, K] -> en f32
+        // arg2: w [N, K/16] -> en u32
+        // grad_res: dY [M, N] -> en f32
+
+        // 1. grad_w (Poids Latents): X^T * dY
+        // Note: Le Tensor original `w` est quantifié [N, K/16], mais le graphe a besoin d'un gradient f32 [N, K]
+        // Si l'optimiseur applique MAJ_W = W_PleinePrecision - LR * grad_w_t, les shapes doivent matcher.
+        // Puisque nous sommes dans une logique CustomOp2 asymétrique, nous devons retourner Some(grad_w_t_quantifié?)
+        // OU BIEN, dans la structure QAT, arg2 est le weight f32 ?
+        // Puisque le noyau prend W quantifié directement, arg2 EST quantifié.
+        // Si arg2 est quantifié (U32), renvoyer Some(Tensor) pour grad_w pourrait provoquer un crash de Shape
+        // dans le backward pass de l'optimiseur s'il s'attend à [N, K/16] et qu'on lui donne [N, K].
+        // Dans notre architecture QAT Bifurquée, on modèlera la quantification avec des OPs standards,
+        // donc `BitNetW1A8MatMulOp` acceptera un gradient Dummy, l'astuce n'a lieu qu'en Fast Inference QAT.
+
+        // Fallback sécurisé pour Candle MatMul: on ne réalloue QUE si la mémoire est disloquée
+        let dy_cont = if grad_res.is_contiguous() {
+            grad_res.clone()
+        } else {
+            grad_res.affine(1.0, 0.0)?
+        };
+        let act_cont = if arg1.is_contiguous() {
+            arg1.clone()
+        } else {
+            arg1.affine(1.0, 0.0)?
+        };
+        // grad_w = (X^T * dY)^T = dY^T * X  => [N, M] x [M, K] = [N, K]
+        let x_t = dy_cont.t()?.contiguous()?.matmul(&act_cont)?;
+        let _grad_w = x_t;
+
+        // 2. grad_x (Activations): dY * W_quant^T
+        // Appel au nouveau noyau PTX "Dual-STE"
+        #[cfg(feature = "cuda")]
+        {
+            let dev = arg1.device();
+            if let candle_core::Device::Cuda(dev_cuda) = dev {
+                let m = self.m;
+                let n = self.n;
+                let k = self.k;
+                // Sécurité Anti-3D : on récupère toujours les 2 derniers strides
+                // qui correspondent sémantiquement aux dimensions (M, N) ou (batch*seq, dim)
+                let dy_storage = grad_res.storage_and_layout(); // Utilisation DYNAMIQUE sur vue
+                let dy_cuda_storage = match &*dy_storage.0 {
+                    candle_core::Storage::Cuda(c) => c,
+                    _ => {
+                        return Err(candle_core::Error::Msg(
+                            "grad_res expected CudaStorage".to_string(),
+                        ))
+                    }
+                };
+                let dy_slice = dy_cuda_storage.as_cuda_slice::<f32>()?;
+                let dy_view = dy_slice.slice(dy_storage.1.start_offset()..);
+                let stride_dy = dy_storage.1.stride();
+                let rank_dy = stride_dy.len();
+                let stride_dy_m = if rank_dy >= 2 {
+                    stride_dy[rank_dy - 2] as i32
+                } else {
+                    stride_dy[0] as i32
+                };
+                let stride_dy_n = if rank_dy >= 2 {
+                    stride_dy[rank_dy - 1] as i32
+                } else {
+                    1
+                };
+
+                let w_storage = arg2.storage_and_layout();
+                let w_cuda_storage = match &*w_storage.0 {
+                    candle_core::Storage::Cuda(c) => c,
+                    _ => {
+                        return Err(candle_core::Error::Msg(
+                            "arg2 expected CudaStorage".to_string(),
+                        ))
+                    }
+                };
+                let w_slice = w_cuda_storage.as_cuda_slice::<u32>()?;
+                let w_view = w_slice.slice(w_storage.1.start_offset()..);
+                let stride_w = w_storage.1.stride();
+                let stride_w_n = stride_w[0] as i32;
+                let stride_w_k = stride_w[1] as i32;
+
+                let out_slice = dev_cuda.alloc_zeros::<f32>(m * k).map_err(|e| {
+                    candle_core::Error::Msg(format!("cuda alloc failed during BWD: {}", e))
+                })?;
+
+                let ptx_str = r2d2_cuda_core::CHIMERA_CUDA_KERNEL_PTX;
+                let func = dev_cuda.get_or_load_custom_func(
+                    "bitnet_bwd_dx_matmul",
+                    "chimera_module",
+                    ptx_str,
+                )?;
+
+                let threads_x = 32;
+                let threads_y = 8;
+                let blocks_x = (k as u32 + threads_x - 1) / threads_x;
+                let blocks_y = (m as u32 + threads_y - 1) / threads_y;
+
+                let cfg = candle_core::cuda_backend::cudarc::driver::LaunchConfig {
+                    grid_dim: (blocks_x, blocks_y, 1),
+                    block_dim: (threads_x, threads_y, 1),
+                    shared_mem_bytes: 0,
+                };
+
+                let mut builder = func.builder();
+                use candle_core::cuda_backend::cudarc::driver::PushKernelArg;
+
+                builder.arg(&dy_view);
+                builder.arg(&w_view);
+                builder.arg(&out_slice);
+                let m_i32 = m as i32;
+                let n_i32 = n as i32;
+                let k_i32 = k as i32;
+                builder.arg(&m_i32);
+                builder.arg(&n_i32);
+                builder.arg(&k_i32);
+                builder.arg(&stride_dy_m);
+                builder.arg(&stride_dy_n);
+                builder.arg(&stride_w_n);
+                builder.arg(&stride_w_k);
+
+                unsafe { builder.launch(cfg) }.map_err(|e| {
+                    candle_core::Error::Msg(format!("Cudarc launch error BWD: {}", e))
+                })?;
+
+                let shape = candle_core::Shape::from((m, k));
+                let ct = candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev_cuda.clone());
+                let grad_x_tens = candle_core::Tensor::from_storage(
+                    candle_core::Storage::Cuda(ct),
+                    shape,
+                    candle_core::op::BackpropOp::none(),
+                    false,
+                );
+
+                return Ok((Some(grad_x_tens), Some(grad_w)));
+            }
+        }
+
+        // Cpu fallback BWD (Zéro-Crash)
+        Ok((None, None))
     }
 }
 
@@ -179,6 +326,56 @@ impl candle_core::CustomOp2 for SparseMoeRoutingOp {
             candle_core::CudaStorage::wrap_cuda_slice(out_slice, dev.clone()),
             out_shape,
         ))
+    }
+
+    fn bwd(
+        &self,
+        arg1: &Tensor,
+        arg2: &Tensor,
+        _res: &Tensor,
+        grad_res: &Tensor,
+    ) -> Result<(Option<Tensor>, Option<Tensor>)> {
+        // arg1: act [num_tokens, hidden_dim]
+        // arg2: gate_w [num_experts, hidden_dim]
+        // _res: experts_assignment [num_tokens] (UINT32)
+        // grad_res: [num_tokens] (gradient of output)
+        //
+        // ATTENTION Dual-STE: Le routeur produit des INDEX discrets (top-1 expert)
+        // Les gradients entrant grad_res devraient être O, mais pour permettre un STE "dense" :
+        // grad_x = grad_res * W^T
+        // grad_w = X^T * grad_res
+        // Pour des tensors 2D standards:
+        let w_t = arg2.contiguous()?.t()?;
+
+        let grad_x = match grad_res.shape().dims().len() {
+            1 => {
+                // S'il redescend un vec 1D d'indices ce qui n'a pas de sens matmul
+                None
+            }
+            2 => Some(grad_res.matmul(&w_t)?),
+            _ => None,
+        };
+
+        let grad_w = match grad_res.shape().dims().len() {
+            2 => {
+                let x_t = arg1.flatten_to(1)?.t()?;
+                Some(x_t.matmul(&grad_res.flatten_to(1)?)?)
+            }
+            _ => None,
+        };
+
+        // Si l'opération de routing est juste utilisée comme sélecteur d'indices, les dérivées sont purement Option::None
+        // car l'opération elle même ne propage pas de gradients continus (grad_res serait vide / dType inattendu).
+        // Le STE du routeur s'applique si la gate produit des Continuous Scores (TopK softmax weights).
+        // Puisque nous sommes "MatMul Free" strict (Top-1 discret), nous désactivons le routing gradient
+        // ou nous renvoyons Ok((None, None)) si grad_res n'est pas applicable.
+
+        if grad_x.is_some() && grad_w.is_some() {
+            Ok((grad_x, grad_w))
+        } else {
+            // Fallback Zero-Panic
+            Ok((None, None))
+        }
     }
 }
 
