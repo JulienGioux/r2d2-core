@@ -3,7 +3,10 @@ description: Consultation d'Architecture Core (RustyMaster)
 ---
 
 **Quand utiliser ce workflow :** 
-Lorsque l'utilisateur te demande de concevoir une nouvelle architecture, de refactorer un module critique, ou d'implémenter des patterns complexes (ex: Typestate, NewType, Hexagonal Architecture) en Rust.
+Lorsque l'utilisateur te demande de concevoir une nouvelle architecture, de refactorer un module critique, ou d'implémenter des patterns complexes (ex: Typestate, NewType, Hexagonal Architecture) en Rust. Ou même simplement de demander conseils ou vérifications... Du simple conseil en passant par l'audit complet, la review de code, l'optimisation, la recherche de bug, des pistes... tout !
+
+**Comment optimiser les réponses**
+Pour obtenir le meilleur de nos experts, il faut prendre en compte le fait qu'ils ne connaissent pas le projet, ont une mémoire très limité, n'ont pas accès au dépot ni àquoi que ce soit concernant votre projet et votre question. Il faut donc fournir un maximum de contexte et d'information à différents niveau pour qu'il conceptualisent suffisament votre architecture, vos contraintes, vos besoins... A vous de poser les bonnes questions de la bonne façon pour obtenir des réponses justes et pertinentes.
 
 **Protocole d'engagement :**
 1. **Analyse Locale :** Tu analyses le besoin et identifies les fichiers pertinents. Tu construis ta propre solution préliminaire.
