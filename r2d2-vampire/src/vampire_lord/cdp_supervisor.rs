@@ -1,10 +1,10 @@
+use chromiumoxide::Browser;
+use r2d2_browser::{BrowserError, SovereignBrowser};
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
-use std::collections::HashMap;
-use tracing::{info, error, warn};
-use r2d2_browser::{SovereignBrowser, BrowserError};
-use chromiumoxide::Browser;
-use std::sync::{Arc, OnceLock};
+use tracing::{error, info, warn};
 
 /// Message entrant pour le superviseur CDP
 pub enum SupervisorCommand {
@@ -20,14 +20,16 @@ pub enum SupervisorCommand {
 static SUPERVISOR_TX: OnceLock<mpsc::Sender<SupervisorCommand>> = OnceLock::new();
 
 pub fn get_supervisor() -> mpsc::Sender<SupervisorCommand> {
-    SUPERVISOR_TX.get_or_init(|| {
-        let (tx, rx) = mpsc::channel(32);
-        tokio::spawn(async move {
-            let mut supervisor = VampireSupervisor::new(rx);
-            supervisor.run().await;
-        });
-        tx
-    }).clone()
+    SUPERVISOR_TX
+        .get_or_init(|| {
+            let (tx, rx) = mpsc::channel(32);
+            tokio::spawn(async move {
+                let mut supervisor = VampireSupervisor::new(rx);
+                supervisor.run().await;
+            });
+            tx
+        })
+        .clone()
 }
 
 /// Le véritable Superviseur OTP (Erlang-Style) sans aucun Mutex global.
@@ -79,7 +81,12 @@ impl VampireSupervisor {
     }
 
     async fn handle_command(&mut self, cmd: SupervisorCommand) {
-        let SupervisorCommand::AskExpert { expert_name, target_url, prompt, responder } = cmd;
+        let SupervisorCommand::AskExpert {
+            expert_name,
+            target_url,
+            prompt,
+            responder,
+        } = cmd;
         let name = expert_name.clone();
 
         // On crée l'acteur de l'expert s'il n'existe pas.
@@ -94,10 +101,12 @@ impl VampireSupervisor {
 
             let (tx, worker_rx) = mpsc::channel(10);
             self.workers.insert(name.clone(), tx);
-            
+
             let n2 = name.clone();
             self.join_set.spawn(async move {
-                let res = crate::tools::notebook_lm::chrome_actor_loop(worker_rx, n2.clone(), browser).await;
+                let res =
+                    crate::tools::notebook_lm::chrome_actor_loop(worker_rx, n2.clone(), browser)
+                        .await;
                 (n2, res)
             });
             info!("👷 Superviseur: Acteur CDP Spawné pour '{}'", name);
@@ -105,27 +114,47 @@ impl VampireSupervisor {
 
         // Transmission au Worker
         if let Some(worker_tx) = self.workers.get(&name) {
-            let fwd = SupervisorCommand::AskExpert { expert_name, target_url, prompt, responder };
+            let fwd = SupervisorCommand::AskExpert {
+                expert_name,
+                target_url,
+                prompt,
+                responder,
+            };
             if worker_tx.send(fwd).await.is_err() {
                 // Le worker est mort juste avant / backpressure pleine. On nettoiera au join_next.
-                error!("Superviseur: Le worker '{}' n'a pas pu recevoir le message.", name);
+                error!(
+                    "Superviseur: Le worker '{}' n'a pas pu recevoir le message.",
+                    name
+                );
             }
         }
     }
 
-    fn handle_worker_exit(&mut self, res: Option<Result<(String, anyhow::Result<()>), tokio::task::JoinError>>) {
+    fn handle_worker_exit(
+        &mut self,
+        res: Option<Result<(String, anyhow::Result<()>), tokio::task::JoinError>>,
+    ) {
         if let Some(res) = res {
             match res {
                 Ok((expert_name, result)) => {
                     self.workers.remove(&expert_name);
                     if let Err(e) = result {
-                        error!("☠️ Superviseur: Acteur '{}' a crashé: {}. Auto-Heal préparé.", expert_name, e);
+                        error!(
+                            "☠️ Superviseur: Acteur '{}' a crashé: {}. Auto-Heal préparé.",
+                            expert_name, e
+                        );
                     } else {
-                        info!("🧹 Superviseur: Acteur '{}' s'est arrêté proprement.", expert_name);
+                        info!(
+                            "🧹 Superviseur: Acteur '{}' s'est arrêté proprement.",
+                            expert_name
+                        );
                     }
                 }
                 Err(join_err) => {
-                    error!("☠️ Superviseur: Tâche Acteur annulée ou a paniqué: {}", join_err);
+                    error!(
+                        "☠️ Superviseur: Tâche Acteur annulée ou a paniqué: {}",
+                        join_err
+                    );
                     // S'il panique, impossible de savoir son nom proprement, on peut le purger si c'était le seul
                     // mais le Rust pur ne panique pas.
                 }

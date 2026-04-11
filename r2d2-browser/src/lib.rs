@@ -181,7 +181,7 @@ impl SovereignBrowser {
         for p in &pages {
             let url = p.url().await.unwrap_or_default();
             if url.is_none() || url.as_ref().is_some_and(|u| u == "about:blank") {
-                 return Ok(Arc::new(p.clone()));
+                return Ok(Arc::new(p.clone()));
             }
         }
 

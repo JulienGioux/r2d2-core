@@ -94,73 +94,77 @@ pub async fn chrome_actor_loop(
             responder,
             ..
         } = command;
-            // 2. Récupération ou ancrage
-            let notebook_uuid = target_url
-                .split("/notebook/")
-                .nth(1)
-                .unwrap_or("")
-                .split('/')
-                .next()
-                .unwrap_or(if target_url.contains("notebooklm") {
-                    "notebooklm"
-                } else {
-                    ""
-                });
+        // 2. Récupération ou ancrage
+        let notebook_uuid = target_url
+            .split("/notebook/")
+            .nth(1)
+            .unwrap_or("")
+            .split('/')
+            .next()
+            .unwrap_or(if target_url.contains("notebooklm") {
+                "notebooklm"
+            } else {
+                ""
+            });
 
-            if active_tab.is_none() {
-                info!(
-                    "Ouverture/Reuse de l'onglet expert distant : {} (Matcher: {})",
-                    expert_name, notebook_uuid
-                );
+        if active_tab.is_none() {
+            info!(
+                "Ouverture/Reuse de l'onglet expert distant : {} (Matcher: {})",
+                expert_name, notebook_uuid
+            );
 
-                match SovereignBrowser::get_or_new_tab(&browser, notebook_uuid).await {
-                    Ok(t) => active_tab = Some(t),
-                    Err(e) => {
-                        let _ = responder
-                            .send(Err(anyhow::anyhow!("Échec CDP get_or_new_tab Async: {}", e)));
-                        continue;
-                    }
-                }
-            }
-
-            let tab = active_tab.as_ref().unwrap();
-
-            let current_url = tab.url().await.unwrap_or_default();
-            let url_str: &str = current_url.as_deref().unwrap_or("");
-
-            if !url_str.starts_with(&target_url) {
-                info!("Redirection du Pont CDP vers l'Expert : {}", target_url);
-                let _ = tab.goto(&target_url).await;
-                let _ = tab.wait_for_navigation().await;
-                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            }
-
-            let api = crate::vampire_lord::notebook_api::NotebookApi::new(tab.clone()).await;
-
-            // Exécution RPC pure Asynchrone Zero-Scraping
-            let rpc_result = api.chat_ask(notebook_uuid, &prompt).await;
-
-            match rpc_result {
-                Ok(response_text) => {
-                    // Écriture du résultat dans output.txt pour le Chef
-                    if let Err(e) =
-                        std::fs::write("/home/jgx/source/R2D2/output.txt", &response_text)
-                    {
-                        error!("Impossible d'écrire dans output.txt : {}", e);
-                    } else {
-                        info!("✅ Résultat NotebookLM sauvegardé dans /home/jgx/source/R2D2/output.txt");
-                    }
-                    let _ = responder.send(Ok(response_text));
-                }
+            match SovereignBrowser::get_or_new_tab(&browser, notebook_uuid).await {
+                Ok(t) => active_tab = Some(t),
                 Err(e) => {
-                    // Si l'erreur provient d'un context invalidé (par ex page fermée), reset active_tab
-                    // pour forcer la réouverture au prochain appel ! (Auto-Heal local)
-                    if e.to_string().contains("Session closed") || e.to_string().contains("Target closed") {
-                       active_tab = None;
-                    }
-                    let _ = responder.send(Err(e));
+                    let _ = responder.send(Err(anyhow::anyhow!(
+                        "Échec CDP get_or_new_tab Async: {}",
+                        e
+                    )));
+                    continue;
                 }
             }
+        }
+
+        let tab = active_tab.as_ref().unwrap();
+
+        let current_url = tab.url().await.unwrap_or_default();
+        let url_str: &str = current_url.as_deref().unwrap_or("");
+
+        if !url_str.starts_with(&target_url) {
+            info!("Redirection du Pont CDP vers l'Expert : {}", target_url);
+            let _ = tab.goto(&target_url).await;
+            let _ = tab.wait_for_navigation().await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+
+        let api = crate::vampire_lord::notebook_api::NotebookApi::new(tab.clone()).await;
+
+        // Exécution RPC pure Asynchrone Zero-Scraping
+        let rpc_result = api.chat_ask(notebook_uuid, &prompt).await;
+
+        match rpc_result {
+            Ok(response_text) => {
+                // Écriture du résultat dans output.txt pour le Chef
+                if let Err(e) = std::fs::write("/home/jgx/source/R2D2/output.txt", &response_text) {
+                    error!("Impossible d'écrire dans output.txt : {}", e);
+                } else {
+                    info!(
+                        "✅ Résultat NotebookLM sauvegardé dans /home/jgx/source/R2D2/output.txt"
+                    );
+                }
+                let _ = responder.send(Ok(response_text));
+            }
+            Err(e) => {
+                // Si l'erreur provient d'un context invalidé (par ex page fermée), reset active_tab
+                // pour forcer la réouverture au prochain appel ! (Auto-Heal local)
+                if e.to_string().contains("Session closed")
+                    || e.to_string().contains("Target closed")
+                {
+                    active_tab = None;
+                }
+                let _ = responder.send(Err(e));
+            }
+        }
     }
 
     Ok(())
