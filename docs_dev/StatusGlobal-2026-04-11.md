@@ -141,6 +141,7 @@ Le système vital interdisant à l'IA de propager un mensonge industriel.
 | **R2D2-Vampire/MCP** | Connectivité logicielle (API/Outils) | 🟢 SCELÉ | **100%** |
 | **R2D2-Paradox** | Cybersécurité et Validation Logique | 🟡 ÉVOLUTIF | **85%** |
 | **R2D2-UI** | Console Administrateur Clients | 🟠 BACKLOG | **80%** |
+| **R2D2-Blackboard**| Typestate et Base Vectorielle Actor-Model | 🟢 SCELÉ | **100%** |
 | **Système Complet** | Intégration Continue (PIPELINE CI/CD)| 🟢 AU VERT | **95%** |
 
 *Note: La compilation complète du projet (Code Cuda, Rust Strict LLVM-COV) garantit actuellement "0 Warnings / 0 Errors" selon l'audit local CI.*
