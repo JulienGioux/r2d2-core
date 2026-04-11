@@ -1752,20 +1752,41 @@ async fn handle_chat(
 
                                 let bb = std::sync::Arc::clone(&state.blackboard);
                                 Box::pin(async move {
-                                    use r2d2_cortex::agent::CognitiveAgent;
-                                    let mut embedder = r2d2_cortex::models::minilm_embedder::MiniLmEmbedderAgent::new();
-                                    if let Err(e) = embedder.load().await {
-                                        return Ok(
-                                            serde_json::json!({ "status": "error", "message": format!("MiniLM Sub-Agent failed to load: {}", e) }),
-                                        );
-                                    }
+                                    use r2d2_adapter_candle::CandleEmbedder;
+                                    use r2d2_kernel::ports::TextEmbedder;
+                                    use r2d2_registry::{fetcher::ModelFetcher, ModelRegistry};
 
-                                    let goal_vec = match embedder.embed_raw(&task_goal, true).await
+                                    let reg = ModelRegistry::new("data/store/manifests/");
+                                    let (_, embedder_config) = reg
+                                        .find_by_name(&r2d2_registry::types::ModelId(
+                                            "minilm_l6_v2".to_string(),
+                                        ))
+                                        .await
+                                        .expect("Manifest missing");
+                                    let local_manifest = ModelFetcher::ensure_downloaded(
+                                        &embedder_config,
+                                        "sentence-transformers/all-MiniLM-L6-v2",
+                                        "main",
+                                        "model.safetensors",
+                                    )
+                                    .await
+                                    .expect("Download failure");
+
+                                    let embedder = tokio::task::spawn_blocking(move || {
+                                        CandleEmbedder::new(&local_manifest)
+                                            .expect("Candle failure")
+                                    })
+                                    .await
+                                    .expect("Tokio panic");
+
+                                    let goal_vec: Vec<f32> = match embedder
+                                        .embed_text(&task_goal)
+                                        .await
                                     {
-                                        Ok(v) => v,
-                                        Err(e) => {
+                                        Ok(v) => v.data,
+                                        Err(_e) => {
                                             return Ok(
-                                                serde_json::json!({"status": "error", "message": format!("MiniLM embed error: {}", e)}),
+                                                serde_json::json!({"status": "error", "message": "unimplemented"}),
                                             )
                                         }
                                     };
@@ -1810,7 +1831,8 @@ async fn handle_chat(
                                                 scored_chunks.push((tag, text, 0.0));
                                                 continue;
                                             }
-                                            if let Ok(vec) = embedder.embed_raw(&text, false).await
+                                            if let Ok(vec) =
+                                                embedder.embed_text(&text).await.map(|v| v.data)
                                             {
                                                 // Cosine Similarity en RAM
                                                 let dot: f32 = goal_vec
@@ -1867,7 +1889,6 @@ async fn handle_chat(
                                                 final_res = format!("(RAG GLOBAL) Le sous-agent a scanné toute la base pour : '{}'.\n[FRAGMENTS BDD]\n{}", task_goal, summary);
                                             }
                                             Err(e) => {
-                                                let _ = embedder.unload().await;
                                                 return Ok(
                                                     serde_json::json!({"status": "error", "message": format!("PostgresBlackboard error: {}", e)}),
                                                 );
@@ -1875,7 +1896,6 @@ async fn handle_chat(
                                         }
                                     }
 
-                                    let _ = embedder.unload().await;
                                     Ok(serde_json::json!({
                                         "status": "success",
                                         "sub_agent_report": final_res

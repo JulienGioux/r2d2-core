@@ -2,10 +2,8 @@ use anyhow::Result;
 use r2d2_blackboard::PostgresBlackboard;
 use r2d2_circadian::CircadianDaemon;
 use r2d2_cortex::{
-    error::CortexError,
     models::{
-        audio_agent::AudioAgent, bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent,
-        reasoning_agent::ReasoningAgent, vision_agent::VisionAgentLlava,
+        audio_agent::AudioAgent, reasoning_agent::ReasoningAgent, vision_agent::VisionAgentLlava,
         vision_agent_qwen::VisionAgentQwen,
     },
     CortexRegistry,
@@ -53,10 +51,82 @@ async fn main() -> Result<()> {
     info!("Chargement du Registre Cortex (Plugins IA)...");
     let cortex = Arc::new(CortexRegistry::new());
 
-    cortex
-        .register_agent(Box::new(MiniLmEmbedderAgent::new()))
-        .await;
-    cortex.register_agent(Box::new(BitNetAgent::new())).await;
+    use r2d2_adapter_candle::CandleEmbedder;
+    use r2d2_cortex::error::CortexError;
+    use r2d2_kernel::ports::TextEmbedder;
+    use r2d2_registry::{fetcher::ModelFetcher, manifest::ModelManifest, ModelRegistry};
+
+    struct CandleEmbedderAgent {
+        name: String,
+        manifest: ModelManifest,
+        embedder: Option<Arc<CandleEmbedder>>,
+    }
+
+    #[async_trait::async_trait]
+    impl r2d2_cortex::agent::CognitiveAgent for CandleEmbedderAgent {
+        fn name(&self) -> &str {
+            &self.name
+        }
+        async fn load(&mut self) -> Result<(), CortexError> {
+            tracing::info!(
+                "🔌 [CORTEX] Circadian Daemon: Download & Hot-Swap pour '{}'",
+                self.name
+            );
+            let local_manifest = ModelFetcher::ensure_downloaded(
+                &self.manifest,
+                "sentence-transformers/all-MiniLM-L6-v2",
+                "main",
+                "model.safetensors",
+            )
+            .await
+            .map_err(|e| CortexError::LoadError(e.to_string()))?;
+
+            tracing::info!("   [CORTEX] Lancement de l'I/O Bloquant (mmap vers VRAM/RAM)");
+            let emb: CandleEmbedder =
+                tokio::task::spawn_blocking(move || CandleEmbedder::new(&local_manifest))
+                    .await
+                    .map_err(|e| CortexError::LoadError(e.to_string()))?
+                    .map_err(|e| CortexError::LoadError(e.to_string()))?;
+
+            self.embedder = Some(Arc::new(emb));
+            Ok(())
+        }
+        async fn unload(&mut self) -> Result<(), CortexError> {
+            tracing::info!(
+                "   [CORTEX] Drop inconditionnel des vues RAM pour '{}'.",
+                self.name
+            );
+            self.embedder = None;
+            Ok(())
+        }
+        fn is_active(&self) -> bool {
+            self.embedder.is_some()
+        }
+        async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
+            if let Some(emb) = &self.embedder {
+                let vec_f32 = emb
+                    .embed_text(prompt)
+                    .await
+                    .map_err(|e| CortexError::InferenceError(format!("{:?}", e)))?;
+                Ok(serde_json::to_string(&vec_f32.data).unwrap_or_default())
+            } else {
+                Err(CortexError::NotActive)
+            }
+        }
+    }
+
+    let reg = ModelRegistry::new("data/store/manifests/");
+    if let Some((_, embedder_config)) = reg
+        .find_by_name(&r2d2_registry::types::ModelId("minilm_l6_v2".to_string()))
+        .await
+    {
+        let glued_agent = CandleEmbedderAgent {
+            name: "Multilingual-E5-Small".to_string(),
+            manifest: embedder_config,
+            embedder: None,
+        };
+        cortex.register_agent(Box::new(glued_agent)).await;
+    }
     cortex.register_agent(Box::new(AudioAgent::new())).await;
     cortex
         .register_agent(Box::new(VisionAgentLlava::new()))

@@ -1,0 +1,19 @@
+[package]
+name = "r2d2-mcp-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Core MCP (Model Context Protocol) Framework for R2D2 Sovereign Ecosystem"
+
+[dependencies]
+tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
+serde_json = "1.0"
+thiserror = { workspace = true }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.18"
+anyhow = { workspace = true }
+async-trait = "0.1.89"
+serde = { version = "1.0.228", features = ["derive"] }
+rkyv = { version = "0.7", features = ["validation"] }

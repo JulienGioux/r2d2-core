@@ -31,10 +31,15 @@ uuid = "{}"
 name = "Nomic-Test"
 version = "1.5.0"
 family = "embedding"
+domain_role = "embedder"
 
 [topology]
 architecture = "Bert"
 quantization = "fp32"
+backend = "LocalCandle"
+device = "cpu"
+
+[storage]
 
 [metrics]
 optimal_tasks = ["RAG"]

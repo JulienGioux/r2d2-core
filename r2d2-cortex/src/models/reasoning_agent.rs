@@ -5,8 +5,8 @@ use tracing::{info, instrument, warn};
 use crate::agent::CognitiveAgent;
 use crate::error::CortexError;
 use crate::memory::SemanticMemory;
-use crate::models::minilm_embedder::MiniLmEmbedderAgent;
 use crate::security::vault::Vault;
+use r2d2_kernel::ports::{TextEmbedder, TextGenerator};
 use reqwest::Client;
 use serde_json::json;
 
@@ -67,12 +67,12 @@ pub struct ReasoningAgent {
     name: String,
     active: bool,
     http_client: Option<Client>,
-    embedder: Option<MiniLmEmbedderAgent>,
+    embedder: Option<std::sync::Arc<dyn TextEmbedder>>,
     pub memory: Option<SemanticMemory>,
     pub provider: ModelProvider,
     pub history: Vec<ChatMessage>,
     pub mcp_hub: std::sync::Arc<tokio::sync::Mutex<Option<crate::mcp_hub::McpHub>>>,
-    pub bitnet: Option<crate::models::bitnet_agent::BitNetAgent>,
+    pub bitnet: Option<std::sync::Arc<dyn TextGenerator>>,
 }
 
 impl Default for ReasoningAgent {
@@ -663,7 +663,7 @@ impl ReasoningAgent {
                     "Extraction de la mémoire vectorielle interne (RAG)...".to_string(),
                 ))
                 .await;
-            if let Ok(vec_f32) = embedder.embed_raw(prompt, true).await {
+            if let Ok(vec_f32) = embedder.embed_text(prompt).await.map(|v| v.data) {
                 if let Ok(results) = mem.search(&vec_f32, 3) {
                     for res in results.iter() {
                         context_blocks.push(res.clone());
@@ -899,7 +899,7 @@ impl ReasoningAgent {
         let mut context_blocks = Vec::new();
         if let (Some(embedder), Some(mem)) = (&mut self.embedder, &self.memory) {
             info!("   [RAG] Searching semantic memory for query...");
-            if let Ok(vec_f32) = embedder.embed_raw(prompt, true).await {
+            if let Ok(vec_f32) = embedder.embed_text(prompt).await.map(|v| v.data) {
                 if let Ok(results) = mem.search(&vec_f32, 3) {
                     for (i, res) in results.iter().enumerate() {
                         info!(
@@ -968,9 +968,9 @@ impl ReasoningAgent {
         let mut local_response_opt = None;
         let is_trivial = prompt.len() < 40 && !prompt.contains('?');
 
-        if let Some(mut bitnet) = self.bitnet.take() {
-            info!("🧠 [ReasoningAgent] Edge Inference Request to R2D2-BitNet...");
-            if let Ok(resp) = bitnet.generate_thought(prompt).await {
+        if let Some(bitnet) = self.bitnet.as_ref() {
+            tracing::info!("🧠 [ReasoningAgent] Edge Inference Request to R2D2-BitNet...");
+            if let Ok(resp) = bitnet.generate(prompt).await {
                 // Heuristique simple: on juge la réponse locale
                 if is_trivial {
                     info!("🧠 [ReasoningAgent] Tâche triviale, confiance haute dans BitNet.");
@@ -984,7 +984,6 @@ impl ReasoningAgent {
                     bitnet_confidence = 0.35;
                 }
             }
-            self.bitnet = Some(bitnet);
         }
 
         // 3. Routage API Multi-Provider Intégrant l'Historique
@@ -1164,13 +1163,7 @@ impl CognitiveAgent for ReasoningAgent {
         self.http_client = Some(client);
 
         // Brique VIII : Chargement de la Mémoire Sémantique Zéro-Copy et de son Embedder
-        info!("   [CORTEX] Booting RAG subsystem (MiniLM + Mmap)...");
-        let mut embedder = MiniLmEmbedderAgent::new();
-        if embedder.load().await.is_ok() {
-            self.embedder = Some(embedder);
-        } else {
-            warn!("   [CORTEX] Failed to load embedder, RAG will be disabled.");
-        }
+        info!("   [CORTEX] Booting RAG subsystem (MiniLM + Mmap)... délégué à l'Orchestrateur.");
 
         match SemanticMemory::load("knowledge.bin", "knowledge_meta.json") {
             Ok(mem) => {
@@ -1185,13 +1178,7 @@ impl CognitiveAgent for ReasoningAgent {
             }
         }
 
-        info!("   [CORTEX] Initialisation du Edge Node R2D2-BitNet...");
-        let mut bitnet_agent = crate::models::bitnet_agent::BitNetAgent::new();
-        if bitnet_agent.load().await.is_ok() {
-            self.bitnet = Some(bitnet_agent);
-        } else {
-            warn!("   [CORTEX] ⚠️ Brique BitNet indisponible (local fallback offline).");
-        }
+        info!("   [CORTEX] Initialisation du Edge Node R2D2-BitNet déléguée à l'Orchestrateur via Injection de Dépendances.");
 
         self.active = true;
 
@@ -1202,12 +1189,8 @@ impl CognitiveAgent for ReasoningAgent {
     async fn unload(&mut self) -> Result<(), CortexError> {
         warn!("🔻 [ReasoningAgent] Deactivating ParadoxEngine Router...");
         self.http_client = None;
-        if let Some(mut embedder) = self.embedder.take() {
-            let _ = embedder.unload().await;
-        }
-        if let Some(mut bitnet) = self.bitnet.take() {
-            let _ = bitnet.unload().await;
-        }
+        self.embedder = None;
+        self.bitnet = None;
         self.memory = None;
         self.active = false;
         Ok(())

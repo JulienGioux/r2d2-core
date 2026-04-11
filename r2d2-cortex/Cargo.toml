@@ -51,13 +51,5 @@ cuda = ["r2d2-bitnet/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transf
 metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
 
 [[bin]]
-name = "benchmark_tokenizers"
-path = "src/bin/benchmark_tokenizers.rs"
-
-[[bin]]
 name = "test_gemini"
 path = "test_gemini.rs"
-
-[[bin]]
-name = "train_cuda_sft"
-path = "src/bin/train_cuda_sft.rs"

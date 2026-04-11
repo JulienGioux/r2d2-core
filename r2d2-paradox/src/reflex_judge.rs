@@ -1,12 +1,9 @@
 use anyhow::Result;
 use pgvector::Vector;
 use r2d2_blackboard::PostgresBlackboard;
-use r2d2_cortex::agent::CognitiveAgent;
-use r2d2_cortex::models::minilm_embedder::MiniLmEmbedderAgent;
+use r2d2_kernel::ports::TextEmbedder;
 use std::sync::Arc;
 use tracing::{info, warn};
-
-/// Actions de Routage Hybride
 /// Définit l'instruction claire du Système 1 pour l'Orchestrateur (Architecture Hexagonale)
 pub enum RoutingAction {
     /// Action connue en mémoire, on doit exécuter directement ce payload sans réflexion LLM.
@@ -20,7 +17,7 @@ pub enum RoutingAction {
 /// Système 1 de Kahneman : Le juge réflexe (Mémoire Vectorielle via pgvector)
 /// Évaluation sémantique ultra-rapide (MiniLM Local -> Postgres pgvector HNSW)
 pub struct ReflexJudge {
-    embedder: MiniLmEmbedderAgent,
+    embedder: Option<Arc<dyn TextEmbedder>>,
     blackboard: Option<Arc<PostgresBlackboard>>,
     cognitive_threshold: f32, // Seuil à partir duquel on escalade au Système 2
 }
@@ -28,7 +25,7 @@ pub struct ReflexJudge {
 impl ReflexJudge {
     pub fn new() -> Self {
         Self {
-            embedder: MiniLmEmbedderAgent::new(),
+            embedder: None,
             blackboard: None,
             cognitive_threshold: 0.90, // Cosinus > 0.90 => Similarité extrêmement forte
         }
@@ -47,31 +44,36 @@ impl ReflexJudge {
         self
     }
 
+    pub fn with_embedder(mut self, embedder: Arc<dyn TextEmbedder>) -> Self {
+        self.embedder = Some(embedder);
+        self
+    }
+
     /// Charge le modèle Candle Bare-Metal.
     pub async fn initialize(&mut self) -> Result<()> {
-        info!("🧠 [SYSTÈME 1] Initialisation de la Mémoire Réflexe (MiniLM)...");
-        self.embedder
-            .load()
-            .await
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        info!("🧠 [SYSTÈME 1] Initialisation de la Mémoire Réflexe via injection...");
 
         // Ancrage Sémantique de ce qui est "interdit"
         if let Some(bb) = &self.blackboard {
             let danger_concept = "Erreur, contradiction critique, absurde, faux, mensonge, impossible, violation, sécurité compromise.";
-            let embed_danger = self
-                .embedder
-                .embed_raw(danger_concept, true)
-                .await
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            if let Some(embedder) = &self.embedder {
+                let embed_danger = embedder
+                    .embed_text(danger_concept)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?
+                    .data;
 
-            // Sauvegarde dans le Blackboard comme Réflexe pré-défini
-            bb.save_reflex(
-                Vector::from(embed_danger),
-                r#"{"action": "escalate", "reason": "danger_sémantique"}"#,
-            )
-            .await?;
+                // Sauvegarde dans le Blackboard comme Réflexe pré-défini
+                bb.save_reflex(
+                    Vector::from(embed_danger),
+                    r#"{"action": "escalate", "reason": "danger_sémantique"}"#,
+                )
+                .await?;
 
-            info!("🧠 [SYSTÈME 1] Ancrage sémantique du Danger (Dissonance) écrit dans PostgreSQL (pgvector).");
+                info!("🧠 [SYSTÈME 1] Ancrage sémantique du Danger (Dissonance) écrit dans PostgreSQL (pgvector).");
+            } else {
+                warn!("⚠️ [SYSTÈME 1] Aucun Embedder lié. L'ancrage sémantique est ignoré.");
+            }
         } else {
             warn!("⚠️ [SYSTÈME 1] Aucun Blackboard lié. La base réflexe ne sera pas joignable.");
         }
@@ -83,12 +85,15 @@ impl ReflexJudge {
     /// Renvoie une directive `RoutingAction` découplée de l'exécution pure.
     #[tracing::instrument(skip(self, stimulus))]
     pub async fn hybrid_evaluate(&mut self, stimulus: &str) -> Result<RoutingAction> {
-        if !self.embedder.is_active() {
-            warn!(
-                "⚠️ [SYSTÈME 1] MiniLM non chargé. Fallback vers le Cortex Cognitif (Système 2)."
-            );
-            return Ok(RoutingAction::Cognitive(stimulus.to_string()));
-        }
+        let embedder = match &self.embedder {
+            Some(e) => e,
+            None => {
+                warn!(
+                    "⚠️ [SYSTÈME 1] Embedder non injecté. Fallback vers le Cortex Cognitif (Système 2)."
+                );
+                return Ok(RoutingAction::Cognitive(stimulus.to_string()));
+            }
+        };
 
         let bb = match &self.blackboard {
             Some(b) => b,
@@ -99,11 +104,11 @@ impl ReflexJudge {
         };
 
         // 1. Vectorisation Locale Bare-Metal (< 30ms)
-        let thought_embed = self
-            .embedder
-            .embed_raw(stimulus, false)
+        let thought_embed = embedder
+            .embed_text(stimulus)
             .await
-            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .data;
 
         info!("⚡ [SYSTÈME 1] Requête de la mémoire réflexe distante (PostgreSQL)...");
 

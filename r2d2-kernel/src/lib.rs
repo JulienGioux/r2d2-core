@@ -4,6 +4,8 @@
 //! Il implémente le Typestate Pattern strict pour garantir qu'aucune donnée
 //! n'est traitée ou mémorisée sans avoir été formellement auditée par le Paradox Engine.
 
+pub mod ports;
+
 use r2d2_secure_mem::SecureMemGuard;
 use thiserror::Error;
 use zeroize::Zeroize;
