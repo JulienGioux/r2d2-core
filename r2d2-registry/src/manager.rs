@@ -120,6 +120,7 @@ impl ModelRegistry {
                 }
                 Err(e) => {
                     warn!("Ignoré (Metadata Incomplètes) - {:?}: {}", model_dir, e);
+                    println!("Error loading manifest: {:?}", e);
                 }
             }
         }
@@ -165,10 +166,15 @@ uuid = "a3bc9dfc-ab84-489e-8c34-eb54e3d3b76a"
 name = "Chimera-Test"
 version = "1.0.0"
 family = "bitmamba"
+domain_role = "generator"
 
 [topology]
 architecture = "SSM"
 quantization = "1.58b"
+backend = "LocalCandle"
+device = "cpu"
+
+[storage]
 
 [metrics]
 optimal_tasks = ["reasoning"]

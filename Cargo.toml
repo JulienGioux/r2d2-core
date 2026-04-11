@@ -12,8 +12,17 @@ members = [
     "r2d2-circadian",
     "r2d2-sensory",
     "r2d2-chunker", "r2d2-ui", "r2d2-tokenizer", "r2d2-cuda-core", "r2d2-registry"
-, "r2d2-forge", "r2d2-orchestrator"]
+, "r2d2-forge", "r2d2-orchestrator", "r2d2-adapter-candle", "r2d2-adapter-mcp", "r2d2-vampire", "r2d2-mcp-core", "r2d2-browser", "r2d2-surfer", "r2d2-bridge"]
+
+default-members = [
+    "r2d2-kernel",
+    "r2d2-jsonai",
+    "r2d2-cortex",
+    "r2d2-mcp-core"
+]
+
 resolver = "2"
+
 
 [workspace.package]
 version = "8.2.0"

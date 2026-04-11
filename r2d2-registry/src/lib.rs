@@ -4,6 +4,7 @@
 
 pub mod dataset_manifest;
 pub mod domain;
+pub mod fetcher;
 pub mod manager;
 pub mod manifest;
 pub mod types;

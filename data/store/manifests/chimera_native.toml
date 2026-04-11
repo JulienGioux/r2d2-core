@@ -1,0 +1,20 @@
+[identity]
+uuid = "a12e4567-e89b-12d3-a456-426614174111"
+name = "chimera_native"
+domain_role = "generator"
+version = "0.1.0"
+family = "bitmamba"
+author = "sovereign_builder"
+
+[topology]
+backend = "LocalBitNet"
+architecture = "ChimeraMamba"
+quantization = "1.58b"
+parameters = 3_000_000_000
+context_window = 4096
+
+[storage]
+# weights_path = "weights/chimera_v1.safetensors"
+
+[format]
+TaskTypology = "causal_lm"

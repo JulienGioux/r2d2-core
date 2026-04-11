@@ -13,11 +13,7 @@ pub mod vampire;
 
 use anyhow::Result;
 use r2d2_blackboard::{GlobalBlackboard, PostgresBlackboard};
-use r2d2_cortex::{
-    error::CortexError,
-    models::{bitnet_agent::BitNetAgent, minilm_embedder::MiniLmEmbedderAgent},
-    CortexRegistry,
-};
+use r2d2_cortex::{error::CortexError, CortexRegistry};
 use r2d2_kernel::{Fragment, KernelError, Signal};
 use r2d2_paradox::ParadoxSolver;
 use std::sync::Arc;
@@ -27,6 +23,72 @@ use actuator::PhysicalExecutorAdapter;
 use proxy::SemanticProxy;
 use registry::ToolRegistry;
 pub use vampire::VampireWorker;
+
+use r2d2_adapter_candle::CandleEmbedder;
+use r2d2_kernel::ports::TextEmbedder;
+use r2d2_registry::{fetcher::ModelFetcher, manifest::ModelManifest, ModelRegistry};
+
+struct CandleEmbedderAgent {
+    name: String,
+    manifest: ModelManifest,
+    embedder: Option<Arc<CandleEmbedder>>,
+}
+
+#[async_trait::async_trait]
+impl r2d2_cortex::agent::CognitiveAgent for CandleEmbedderAgent {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    async fn load(&mut self) -> Result<(), CortexError> {
+        tracing::info!("🔌 [CORTEX] Download & Hot-Swap HF pour '{}'", self.name);
+
+        let local_manifest = ModelFetcher::ensure_downloaded(
+            &self.manifest,
+            "sentence-transformers/all-MiniLM-L6-v2",
+            "main",
+            "model.safetensors",
+        )
+        .await
+        .map_err(|e| CortexError::LoadError(e.to_string()))?;
+
+        tracing::info!("   [CORTEX] Lancement de l'I/O Bloquant (mmap vers VRAM/RAM)");
+
+        let emb: CandleEmbedder =
+            tokio::task::spawn_blocking(move || CandleEmbedder::new(&local_manifest))
+                .await
+                .map_err(|e| CortexError::LoadError(e.to_string()))?
+                .map_err(|e| CortexError::LoadError(e.to_string()))?;
+
+        self.embedder = Some(Arc::new(emb));
+        Ok(())
+    }
+
+    async fn unload(&mut self) -> Result<(), CortexError> {
+        tracing::info!(
+            "   [CORTEX] Drop inconditionnel des vues RAM pour '{}'.",
+            self.name
+        );
+        self.embedder = None;
+        Ok(())
+    }
+
+    fn is_active(&self) -> bool {
+        self.embedder.is_some()
+    }
+
+    async fn generate_thought(&mut self, prompt: &str) -> Result<String, CortexError> {
+        if let Some(emb) = &self.embedder {
+            let vec_f32 = emb
+                .embed_text(prompt)
+                .await
+                .map_err(|e| CortexError::InferenceError(format!("{:?}", e)))?;
+            Ok(serde_json::to_string(&vec_f32.data).unwrap_or_default())
+        } else {
+            Err(CortexError::NotActive)
+        }
+    }
+}
 
 /// Le chef d'orchestre qui relie le MCP à l'Essaim R2D2
 pub struct McpGateway {
@@ -45,19 +107,18 @@ impl McpGateway {
         info!("Initialisation du Registre Cortex (Plug & Play)...");
         let cortex = Arc::new(CortexRegistry::new());
 
-        // Configuration de l'Agent d'Embedding par défaut
-        let embedder = Box::new(MiniLmEmbedderAgent::new());
-        cortex.register_agent(embedder).await;
-
-        // Configuration du Cœur Cognitif Natif (R2D2-BitNet)
-        let bitnet_core = Box::new(BitNetAgent::new());
-        cortex.register_agent(bitnet_core).await;
-
-        // Activation immédiate pour charger les poids en RAM (Hot-Load)
-        cortex
-            .activate("Multilingual-E5-Small")
+        let reg = ModelRegistry::new("data/store/manifests/");
+        if let Some((_, embedder_config)) = reg
+            .find_by_name(&r2d2_registry::types::ModelId("minilm_l6_v2".to_string()))
             .await
-            .map_err(|e: CortexError| anyhow::anyhow!(e))?;
+        {
+            let glued_agent = CandleEmbedderAgent {
+                name: "Multilingual-E5-Small".to_string(),
+                manifest: embedder_config,
+                embedder: None,
+            };
+            cortex.register_agent(Box::new(glued_agent)).await;
+        }
 
         Ok(Self {
             validator: ParadoxSolver::new(),

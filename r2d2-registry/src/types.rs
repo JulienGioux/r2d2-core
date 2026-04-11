@@ -57,6 +57,32 @@ pub trait EngineMode: Send + Sync + 'static {
     type Payload: Send + Sync;
 }
 
+/// Rôle du modèle dans l'architecture (DDD)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DomainRole {
+    Embedder,
+    Generator,
+    Agent,
+}
+
+/// Dispositif d'exécution physique
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetDevice {
+    Cpu,
+    Gpu(usize),
+}
+
+/// Backend d'exécution physique
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BackendType {
+    LocalCandle,
+    LocalBitNet,
+    RemoteMCP,
+    Mock,
+}
+
 /// État représentant l'inférence causale de type "Next Token Prediction"
 #[derive(Debug, Clone)]
 pub struct StateCausal;

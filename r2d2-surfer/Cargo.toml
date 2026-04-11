@@ -1,0 +1,21 @@
+[package]
+name = "r2d2-surfer"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+description = "Sovereign Web Surfer MCP Module"
+
+[dependencies]
+r2d2-mcp-core = { version = "8.2.0", path = "../r2d2-mcp-core" }
+r2d2-browser = { version = "8.2.0", path = "../r2d2-browser" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.18"
+anyhow = { workspace = true }
+async-trait = "0.1.89"
+headless_chrome = { version = "1.0.21" }

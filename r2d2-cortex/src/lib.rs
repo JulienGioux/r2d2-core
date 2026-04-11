@@ -13,7 +13,7 @@ pub mod memory;
 pub mod models;
 pub mod registry;
 pub mod security;
-pub mod store;
+// store is removed
 pub mod training;
 pub mod workspace;
 
@@ -22,7 +22,5 @@ pub use error::CortexError;
 pub use agent::CognitiveAgent;
 pub use catalog::{CognitiveSense, CortexCatalog, ModelDescriptor};
 pub use registry::CortexRegistry;
-pub use store::{BertTopology, ModelStore};
-
 pub mod trainer;
 pub use trainer::ChimeraTrainer;

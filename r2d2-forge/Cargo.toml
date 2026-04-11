@@ -5,5 +5,28 @@ edition = "2021"
 
 [dependencies]
 r2d2-registry = { path = "../r2d2-registry" }
+r2d2-adapter-candle = { path = "../r2d2-adapter-candle" }
+r2d2-cortex = { path = "../r2d2-cortex" }
+r2d2-kernel = { path = "../r2d2-kernel" }
+r2d2-chunker = { path = "../r2d2-chunker" }
+r2d2-tokenizer = { path = "../r2d2-tokenizer" }
+serde_json = "1.0"
+tokenizers = "0.19.1"
 anyhow.workspace = true
 tracing = "0.1"
+tokio = { version = "1.36", features = ["full"] }
+bytemuck = "1.15"
+
+# Dependencies for training and SFT
+candle-core = "0.10.2"
+candle-transformers = "0.10.2"
+candle-nn = "0.10.2"
+toml = "0.8"
+uuid = { version = "1.7", features = ["v4"] }
+clap = { version = "4.5", features = ["derive"] }
+r2d2-bitnet = { path = "../r2d2-bitnet" }
+hf-hub = { version = "0.4", features = ["tokio"] }
+tracing-subscriber = "0.3"
+
+[features]
+cuda = ["r2d2-bitnet/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]

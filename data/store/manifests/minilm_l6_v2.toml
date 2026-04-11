@@ -1,0 +1,21 @@
+[identity]
+uuid = "123e4567-e89b-12d3-a456-426614174000"
+name = "minilm_l6_v2"
+domain_role = "embedder"
+version = "1.0.0"
+family = "embedding"
+author = "sentence-transformers"
+
+[topology]
+backend = "LocalCandle"
+architecture = "Bert"
+quantization = "fp32"
+parameters = 22_000_000
+context_window = 512
+
+[storage]
+# paths relative to data/store
+# weights_path = "weights/minilm_l6_v2.safetensors"
+
+[format]
+TaskTypology = "contrastive_embedding"
