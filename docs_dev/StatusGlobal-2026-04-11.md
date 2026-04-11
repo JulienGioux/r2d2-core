@@ -109,8 +109,10 @@ Le système vital interdisant à l'IA de propager un mensonge industriel.
 * **✅ Fonctionnalités Actives (Ce qui marche)** :
   * Serveurs MCP natifs (Execution Terminal et Hub NotebookLM validés).
   * Architecture RPC "Zero-UI" souveraine pour Forge locale et Chat synchrone (Timeout VAMPIRE corrigés à 120s pour la latence Gemini).
+  * Refonte Actor-Model Hybride : Isolation "Zero-Panic", Backpressure forte via MPSC et "Anti-Starvation" (Threads OS non-restreints gérés dyamiquement via Registre).
 * **🚧 À Améliorer (Roadmap)** :
   * Migration finale du Scraping DOM vers RPC d'abonnement (Affinage de `execute_rpc`).
+  * Planification d'une surcouche de type Erlang/OTP avec substitution vers un Framework CDP Asynchrone natif (Fantoccini) pour s'affranchir du surcoût de RAM système.
 
 ### 🎛️ 6. L'Interface d'Interaction Humaine (R2D2-UI)
 * **État d'achèvement** : **80%**

@@ -173,7 +173,68 @@ async fn handle_request(server: Arc<SuperMcpServer>, req: McpRequest) -> Option<
                 }),
             ))
         }
-        "resources/list" => Some(McpResponse::success(id, json!({ "resources": [] }))),
+        "resources/list" => {
+            let mut resource_list = Vec::new();
+            if let Some(resolver) = &server.dynamic_resource_resolver {
+                resource_list = resolver.list_dynamic_resources().await;
+            }
+            Some(McpResponse::success(
+                id,
+                json!({ "resources": resource_list }),
+            ))
+        }
+        "resources/templates/list" => {
+            let mut template_list = Vec::new();
+            if let Some(resolver) = &server.dynamic_resource_resolver {
+                template_list = resolver.list_dynamic_resource_templates().await;
+            }
+            Some(McpResponse::success(
+                id,
+                json!({ "resourceTemplates": template_list }),
+            ))
+        }
+        "resources/read" => {
+            let params = req.params.unwrap_or(json!({}));
+            let uri = params.get("uri").and_then(|u| u.as_str()).unwrap_or("");
+            if let Some(resolver) = &server.dynamic_resource_resolver {
+                match resolver.read_dynamic_resource(uri).await {
+                    Some(Ok(text)) => Some(McpResponse::success(
+                        id,
+                        json!({
+                            "contents": [
+                                {
+                                    "uri": uri,
+                                    "mimeType": "text/markdown",
+                                    "text": text
+                                }
+                            ]
+                        }),
+                    )),
+                    Some(Err(e)) => {
+                        error!(
+                            "Erreur asynchrone lors de la lecture de la ressource '{}': {}",
+                            uri, e
+                        );
+                        Some(McpResponse::error(
+                            id,
+                            -32603,
+                            &format!("Erreur execution: {}", e),
+                        ))
+                    }
+                    None => Some(McpResponse::error(
+                        id,
+                        -32601,
+                        &format!("Ressource introuvable ou non supportée: {}", uri),
+                    )),
+                }
+            } else {
+                Some(McpResponse::error(
+                    id,
+                    -32601,
+                    "Aucun résolveur de ressources n'est configuré.",
+                ))
+            }
+        }
         "tools/call" => {
             let params = req.params.unwrap_or(json!({}));
             let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
@@ -183,10 +244,9 @@ async fn handle_request(server: Arc<SuperMcpServer>, req: McpRequest) -> Option<
                 // Exécution interne (Asynchrone statique)
                 match tool.call(arguments).await {
                     Ok(res) => {
-                        let text_val = if res.is_string() {
-                            res.as_str().unwrap().to_string()
-                        } else {
-                            res.to_string()
+                        let text_val = match res.as_str() {
+                            Some(s) => s.to_string(),
+                            None => res.to_string(),
                         };
                         Some(McpResponse::success(
                             id,
@@ -208,10 +268,9 @@ async fn handle_request(server: Arc<SuperMcpServer>, req: McpRequest) -> Option<
                 // Dispatch Dynamique
                 match resolver.call_dynamic_tool(tool_name, arguments).await {
                     Some(Ok(res)) => {
-                        let text_val = if res.is_string() {
-                            res.as_str().unwrap().to_string()
-                        } else {
-                            res.to_string()
+                        let text_val = match res.as_str() {
+                            Some(s) => s.to_string(),
+                            None => res.to_string(),
                         };
                         Some(McpResponse::success(
                             id,

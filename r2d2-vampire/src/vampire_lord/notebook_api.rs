@@ -6,13 +6,6 @@ pub struct NotebookApi {
     pub tab: Arc<Tab>,
 }
 
-impl Drop for NotebookApi {
-    fn drop(&mut self) {
-        info!("♻️ Auto-Cleanup: Destitution de l'API Notebook et fermeture du pont CDP...");
-        r2d2_browser::SovereignBrowser::shutdown_windows_bridge();
-    }
-}
-
 impl NotebookApi {
     pub fn new(tab: Arc<Tab>) -> Self {
         let api = Self { tab };
@@ -159,7 +152,7 @@ impl NotebookApi {
 
     /// PURE RPC: Ask a question directly via batchexecute GenerateFreeFormStreamed instead of DOM injection
     pub fn chat_ask(&self, notebook_uuid: &str, prompt: &str) -> anyhow::Result<String> {
-        info!("💬 Envoi RPC de la question vers NotebookLM...");
+        info!("💬 Envoi RPC de la question vers NotebookLM (Attente Stream Muted Tarpit-Cut)...");
         let js = format!(
             r#"
             window.__r2d2_chat_result = null;
@@ -169,7 +162,7 @@ impl NotebookApi {
                     let csrfToken = window.WIZ_global_data?.SNlM0e || (document.body.innerHTML.match(/"SNlM0e":"([^"]+)"/) || [])[1];
                     let sessionId = window.WIZ_global_data?.FdrFJe || (document.body.innerHTML.match(/"FdrFJe":"([^"]+)"/) || [])[1];
                     if (!csrfToken) {{
-                        window.__r2d2_chat_error = "Missing CSRF Token (SNlM0e)";
+                        window.__r2d2_chat_error = JSON.stringify({{ error: "Missing CSRF Token (SNlM0e)" }});
                         return;
                     }}
                     
@@ -206,143 +199,123 @@ impl NotebookApi {
                     }});
                     
                     if (!resp.ok) {{
-                        window.__r2d2_chat_error = "HTTP " + resp.status;
+                        window.__r2d2_chat_error = JSON.stringify({{ error: "HTTP " + resp.status }});
                         return;
                     }}
-                    let text = await resp.text();
-                    window.__r2d2_chat_result = text;
+                    
+                    let reader = resp.body.getReader();
+                    let decoder = new TextDecoder("utf-8");
+                    let accumulated = "";
+                    
+                    while (true) {{
+                        let {{done, value}} = await reader.read();
+                        if (value) {{
+                            accumulated += decoder.decode(value, {{stream: !done}});
+                        }}
+                        
+                        // Parse manually the latest good block
+                        let chunks = accumulated.split('\n');
+                        let last_line = chunks.pop() || ""; // usually incomplete
+                        
+                        for (let line of chunks) {{
+                            line = line.trim();
+                            if (!line) continue;
+                            if (line.startsWith(")]}}'")) line = line.substring(4);
+                            
+                            try {{
+                                let data = JSON.parse(line);
+                                if (!Array.isArray(data)) continue;
+                                for(let item of data) {{
+                                    if(Array.isArray(item) && item.length >= 3 && item[0] === "wrb.fr") {{
+                                        let inner = JSON.parse(item[2]);
+                                        if (Array.isArray(inner) && Array.isArray(inner[0]) && typeof inner[0][0] === "string") {{
+                                            // on bufferise le texte fur à mesure
+                                            let ans_text = inner[0][0];
+                                            window.__r2d2_chat_buffer = ans_text;
+                                            // on désactive l'early return au flag 1 car Google semble l'envoyer par segment/paragraphe désormais !
+                                        }}
+                                    }}
+                                }}
+                            }} catch(e) {{
+                                // IGNORER silent fail
+                            }}
+                        }}
+                        accumulated = last_line;
+                        
+                        if (done) {{
+                            if (window.__r2d2_chat_buffer) {{
+                                window.__r2d2_chat_result = JSON.stringify({{ data: window.__r2d2_chat_buffer }});
+                            }} else {{
+                                window.__r2d2_chat_error = JSON.stringify({{ error: "Stream closed without data" }});
+                            }}
+                            break;
+                        }}
+                    }}
                 }} catch (e) {{
-                    window.__r2d2_chat_error = e.toString();
+                    window.__r2d2_chat_error = JSON.stringify({{ error: e.toString() }});
                 }}
-            }})()
+            }})();
             "#,
             prompt, notebook_uuid
         );
 
-        // On n'attend pas la Propmise (false), le JS tourne en background dans Chrome.
-        self.tab.evaluate(&js, false)?;
+        // Appel CDP "Fire and Forget" (false). On ne sera pas piégé par la guillotine des 30s de headless_chrome.
+        let _ = self.tab.evaluate(&js, false)?;
 
-        // Boucle de polling courte pour récupérer le résultat sans Timeout CDP
-        let mut final_data: Option<String> = None;
-        let mut error_data: Option<String> = None;
+        // Boucle de Polling Saine de 120s max.
+        // Puisque nous sommes dans l'acteur MPSC (un thread séparé `spawn_blocking`), le `thread::sleep` ne ruine pas l'Executor Tokio
+        // et son OS Thread est à 0% d'utilisation CPU entre chaque tick.
+        for _ in 0..240 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
 
-        for i in 0..120 {
-            // Max 120 secondes
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            info!("⏳ RPC Polling - Vérification #{} ...", i + 1);
-
+            // Check Erreur fatale
             if let Ok(res) = self.tab.evaluate("window.__r2d2_chat_error", false) {
                 if let Some(val) = res.value.as_ref().and_then(|v| v.as_str()) {
-                    error_data = Some(val.to_string());
-                    break;
+                    let _ = self.tab.evaluate("window.__r2d2_chat_error = null", false);
+                    if let Ok(json_err) = serde_json::from_str::<serde_json::Value>(val) {
+                        return Err(anyhow::anyhow!(
+                            "RPC Chat Error: {}",
+                            json_err.get("error").unwrap_or(&serde_json::Value::Null)
+                        ));
+                    } else {
+                        return Err(anyhow::anyhow!("RPC Chat Error: {}", val));
+                    }
                 }
             }
+
+            // Check Résultat glorieux
             if let Ok(res) = self.tab.evaluate("window.__r2d2_chat_result", false) {
                 if let Some(val) = res.value.as_ref().and_then(|v| v.as_str()) {
-                    final_data = Some(val.to_string());
-                    break;
-                }
-            }
-        }
-
-        // Nettoyage de l'espace global
-        let _ = self.tab.evaluate(
-            "window.__r2d2_chat_result = null; window.__r2d2_chat_error = null;",
-            false,
-        );
-
-        if let Some(err) = error_data {
-            error!("RPC Chat Error: {}", err);
-            return Err(anyhow::anyhow!("Chat Fetch Error: {}", err));
-        }
-
-        if let Some(data) = final_data {
-            let parsed_answer = Self::parse_generate_freeform_stream(&data);
-            if parsed_answer.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "Réponse RPC interceptée mais vide de contenu"
-                ));
-            }
-            return Ok(parsed_answer);
-        }
-
-        Err(anyhow::anyhow!(
-            "Aucune réponse validable de l'API chat_ask (Timeout 120s)"
-        ))
-    }
-
-    /// Extract the Markdown formatted answer from the chunked JSON stream returned by GenerateFreeFormStreamed
-    fn parse_generate_freeform_stream(response_text: &str) -> String {
-        let mut clean_text = response_text.trim();
-        if clean_text.starts_with(")]}'") {
-            clean_text = &clean_text[4..];
-        }
-
-        let mut best_marked_answer = String::new();
-        let mut best_unmarked_answer = String::new();
-
-        for line in clean_text.split('\n') {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(data) = serde_json::from_str::<serde_json::Value>(line) {
-                if let Some(arr) = data.as_array() {
-                    for item in arr {
-                        if let Some(item_arr) = item.as_array() {
-                            if item_arr.len() < 3 {
-                                continue;
+                    let _ = self.tab.evaluate("window.__r2d2_chat_result = null", false);
+                    match serde_json::from_str::<serde_json::Value>(val) {
+                        Ok(parsed) => {
+                            if let Some(data) = parsed.get("data").and_then(|d| d.as_str()) {
+                                return Ok(data.to_string());
+                            } else {
+                                return Err(anyhow::anyhow!(
+                                    "RPC Chat JSON sans attribut 'data': {}",
+                                    val
+                                ));
                             }
-                            if item_arr[0].as_str() != Some("wrb.fr") {
-                                continue;
-                            }
-
-                            // Extract inner JSON from item[2]
-                            if let Some(inner_json_str) = item_arr[2].as_str() {
-                                if let Ok(inner_data) =
-                                    serde_json::from_str::<serde_json::Value>(inner_json_str)
-                                {
-                                    if let Some(inner_arr) = inner_data.as_array() {
-                                        if let Some(first) =
-                                            inner_arr.first().and_then(|v| v.as_array())
-                                        {
-                                            if let Some(text) =
-                                                first.first().and_then(|v| v.as_str())
-                                            {
-                                                // Check if it's the "marked" final answer
-                                                let is_answer = first.len() > 4
-                                                    && first[4].as_array().is_some_and(|a| {
-                                                        a.last().and_then(|last| last.as_u64())
-                                                            == Some(1)
-                                                    });
-
-                                                if is_answer
-                                                    && text.len() > best_marked_answer.len()
-                                                {
-                                                    best_marked_answer = text.to_string();
-                                                } else if !is_answer
-                                                    && text.len() > best_unmarked_answer.len()
-                                                {
-                                                    best_unmarked_answer = text.to_string();
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        }
+                        Err(e) => {
+                            return Err(anyhow::anyhow!(
+                                "Erreur parse JSON final stream payload: {} | Payload: {}",
+                                e,
+                                val
+                            ));
                         }
                     }
                 }
             }
         }
 
-        if !best_marked_answer.is_empty() {
-            best_marked_answer
-        } else {
-            best_unmarked_answer
-        }
+        Err(anyhow::anyhow!(
+            "Aucune réponse de NotebookLM. Timeout (120s) imposé par le Polling de l'Architecte."
+        ))
     }
 
+    /// Extract the Markdown formatted answer from the chunked JSON stream returned by GenerateFreeFormStreamed
     /// Extrait le rapport d'une réponse de POLL_RESEARCH
     fn extract_poll_report(
         res: &serde_json::Value,

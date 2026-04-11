@@ -28,3 +28,4 @@ r2d2-mcp-core = { version = "8.2.0", path = "../r2d2-mcp-core" }
 r2d2-browser = { version = "8.2.0", path = "../r2d2-browser" }
 rkyv = { version = "0.7", features = ["validation"] }
 directories = "6.0.0"
+url = "2.5.8"

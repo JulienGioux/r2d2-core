@@ -27,12 +27,21 @@ pub trait DynamicToolResolver: Send + Sync {
     ) -> Option<Result<serde_json::Value, anyhow::Error>>;
 }
 
+/// Interface pour autoriser la résolution dynamique Just-In-Time de Ressources et Templates MCP
+#[async_trait]
+pub trait DynamicResourceResolver: Send + Sync {
+    async fn list_dynamic_resources(&self) -> Vec<serde_json::Value>;
+    async fn list_dynamic_resource_templates(&self) -> Vec<serde_json::Value>;
+    async fn read_dynamic_resource(&self, uri: &str) -> Option<Result<String, anyhow::Error>>;
+}
+
 /// Orchestrateur des Outils MCP
 pub struct SuperMcpServer {
     pub name: String,
     pub version: String,
     pub static_tools: HashMap<String, Arc<dyn McpTool>>,
     pub dynamic_resolver: Option<Arc<dyn DynamicToolResolver>>,
+    pub dynamic_resource_resolver: Option<Arc<dyn DynamicResourceResolver>>,
 }
 
 impl SuperMcpServer {
@@ -42,6 +51,7 @@ impl SuperMcpServer {
             version: version.to_string(),
             static_tools: HashMap::new(),
             dynamic_resolver: None,
+            dynamic_resource_resolver: None,
         }
     }
 

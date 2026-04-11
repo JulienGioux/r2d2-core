@@ -31,7 +31,10 @@ impl McpTool for PurgeUntitledTool {
             // Attendre la stabilisation CDP
             std::thread::sleep(std::time::Duration::from_millis(500));
 
-            let tabs = browser.get_tabs().lock().unwrap().clone();
+            let tabs = match browser.get_tabs().lock() {
+                Ok(guard) => guard.clone(),
+                Err(poisoned) => poisoned.into_inner().clone(),
+            };
             let legit_tab = tabs.iter().find(|t| t.get_url().contains("notebooklm.google.com"));
 
             let tab = if let Some(t) = legit_tab {

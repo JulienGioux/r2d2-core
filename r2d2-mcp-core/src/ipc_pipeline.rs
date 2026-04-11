@@ -100,7 +100,13 @@ async fn handle_ipc_client(
             }
 
             // 2. Sérialisation Zero-Copy en sortie
-            let bytes = rkyv::to_bytes::<_, 256>(&response).unwrap();
+            let bytes = match rkyv::to_bytes::<_, 256>(&response) {
+                Ok(b) => b,
+                Err(e) => {
+                    error!("Erreur de sérialisation interne rkyv : {:?}", e);
+                    continue; // Skip silently to keep IPC engine alive
+                }
+            };
 
             let res_len = (bytes.len() as u32).to_le_bytes();
             socket.write_all(&res_len).await?;
