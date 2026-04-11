@@ -156,8 +156,22 @@ impl McpGateway {
             agent_name
         );
 
+        // 3.5. Génération Vectorielle
+        let vec_json = self
+            .cortex
+            .interact_with(
+                "Multilingual-E5-Small",
+                &validated_fragment.expose_payload().payload,
+            )
+            .await
+            .map_err(|e| KernelError::ValidationFailed(format!("Cortex Embedding Error: {}", e)))?;
+        let embed_vec: Vec<f32> = serde_json::from_str(&vec_json)
+            .map_err(|e| KernelError::ValidationFailed(e.to_string()))?;
+
+        let persistent_fragment = validated_fragment.embed(embed_vec);
+
         // 4. Finaliser en SecureMemGuard pour transiter sans fuite RAM (Typestate 4)
-        let guard = validated_fragment.finalize();
+        let guard = persistent_fragment.finalize();
 
         // 4.5. ROUTAGE ET EXÉCUTION RÉFLEXE (SYSTÈME 1)
         {

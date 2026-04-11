@@ -30,3 +30,11 @@ tracing-subscriber = "0.3"
 
 [features]
 cuda = ["r2d2-bitnet/cuda", "candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+
+[[bin]]
+name = "train_cuda_sft"
+path = "src/bin/train_cuda_sft.rs"
+
+[[bin]]
+name = "alchimiste"
+path = "src/bin/alchimiste.rs"

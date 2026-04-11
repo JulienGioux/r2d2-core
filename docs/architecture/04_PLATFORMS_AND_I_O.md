@@ -37,3 +37,7 @@ L'ingestion sensorielle (ex: Mel-Filters) ne doit jamais supposer une géométri
 
 ### 4.6 Hardware Digital Twin (Sensations Somatiques)
 R2D2 possède une conscience de son support matériel. Il surveille en temps réel la télémétrie thermique et électrique (via NVML et lm_sensors). Si une surchauffe est prédite, l'IA réduit dynamiquement son débit de tokens ou bascule ses calculs critiques vers des cœurs CPU plus économes (Throttling prédictif).
+
+### 4.7 Isolation d'Exécution et Sandboxing (Podman)
+L'intégralité du socle d'I/O et de l'environnement d'exécution (serveur RPC, base de données, inférence) est circonscrit au sein d'un **conteneur Podman (image Fedora)**. Le système ne présuppose aucune confiance envers le shell hôte natif (Windows/WSL).
+- **Conséquence de sécurité :** Même en cas de compromission LLM conduisant à la génération d'une commande système malveillante via l'outil `run_command`, la charge active reste confinée dans le namespace isolé du container (Syscalls bridés, PID et Networking isolés), ne menaçant jamais le Trusted Computing Base (TCB) de l'OS maître.
