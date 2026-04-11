@@ -2,13 +2,22 @@ use chromiumoxide::Page;
 use std::sync::Arc;
 use tracing::{error, info};
 
+use crate::vampire_lord::types::*;
+
+#[derive(Clone)]
 pub struct NotebookApi {
     pub tab: Arc<Page>,
+    pub base_url: String,
+    pub request_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 impl NotebookApi {
-    pub async fn new(tab: Arc<Page>) -> Self {
-        let api = Self { tab };
+    pub async fn new(tab: Arc<Page>, base_url: Option<String>) -> Self {
+        let api = Self {
+            tab,
+            base_url: base_url.unwrap_or_else(|| "https://notebooklm.google.com".to_string()),
+            request_semaphore: Arc::new(tokio::sync::Semaphore::new(3)), // Token-bucket limit (WAF protect)
+        };
         api.inject_hud().await;
         api
     }
@@ -52,6 +61,7 @@ impl NotebookApi {
         path: &str,
         params: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
+        let _permit = self.request_semaphore.acquire().await?;
         let params_str = serde_json::to_string(&params)?;
 
         let js = format!(
@@ -141,113 +151,159 @@ impl NotebookApi {
         ))
     }
 
-    /// PURE RPC: Async Promise-based evaluation with native 120s Tokio Timeout.
-    /// Éradication complète du Polling de Scraping DOM de l'ancienne version.
+    /// PURE RPC: Reqwest-Hijacking avec intégration native Tokio et modèle d'acteurs
     pub async fn chat_ask(&self, notebook_uuid: &str, prompt: &str) -> anyhow::Result<String> {
-        info!("💬 Envoi RPC de la question vers NotebookLM (Mode Promise Async natif CDP)...");
-        let js = format!(
-            r#"
-            (async function() {{
-                try {{
-                    let csrfToken = window.WIZ_global_data?.SNlM0e || (document.body.innerHTML.match(/"SNlM0e":"([^"]+)"/) || [])[1];
-                    let sessionId = window.WIZ_global_data?.FdrFJe || (document.body.innerHTML.match(/"FdrFJe":"([^"]+)"/) || [])[1];
-                    if (!csrfToken) return JSON.stringify({{ error: "Missing CSRF Token (SNlM0e)" }});
-                    
-                    let question = {:?};
-                    let notebookId = {:?};
-                    let conversationId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : ""; 
-                    
-                    let params = [
-                        [], question, null, [2, null, [1], [1]], conversationId, null, null, notebookId, 1
-                    ];
-                    let paramsJson = JSON.stringify(params);
-                    let freq = JSON.stringify([null, paramsJson]);
-                    
-                    let formData = new URLSearchParams();
-                    formData.append('f.req', freq);
-                    formData.append('at', csrfToken);
-                    
-                    let url = "/_/LabsTailwindUi/data/google.internal.labs.tailwind.orchestration.v1.LabsTailwindOrchestrationService/GenerateFreeFormStreamed?rt=c";
-                    if (sessionId) url += "&f.sid=" + sessionId;
-                    
-                    let resp = await fetch(url, {{
-                        method: 'POST',
-                        headers: {{ 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' }},
-                        body: formData.toString()
-                    }});
-                    
-                    if (!resp.ok) return JSON.stringify({{ error: "HTTP " + resp.status }});
-                    
-                    let reader = resp.body.getReader();
-                    let decoder = new TextDecoder("utf-8");
-                    let accumulated = "";
-                    let final_buffer = null;
-                    
-                    while (true) {{
-                        let {{done, value}} = await reader.read();
-                        if (value) accumulated += decoder.decode(value, {{stream: !done}});
-                        
-                        let chunks = accumulated.split('\n');
-                        let last_line = chunks.pop() || "";
-                        
-                        for (let line of chunks) {{
-                            line = line.trim();
-                            if (!line) continue;
-                            if (line.startsWith(")]}}'")) line = line.substring(4);
-                            try {{
-                                let data = JSON.parse(line);
-                                if (!Array.isArray(data)) continue;
-                                for(let item of data) {{
-                                    if(Array.isArray(item) && item.length >= 3 && item[0] === "wrb.fr") {{
-                                        let inner = JSON.parse(item[2]);
-                                        if (Array.isArray(inner) && Array.isArray(inner[0]) && typeof inner[0][0] === "string") {{
-                                            final_buffer = inner[0][0];
-                                        }}
-                                    }}
-                                }}
-                            }} catch(e) {{ }}
-                        }}
-                        accumulated = last_line;
-                        
-                        if (done) {{
-                            if (final_buffer) return JSON.stringify({{ data: final_buffer }});
-                            return JSON.stringify({{ error: "Stream closed without data" }});
-                        }}
-                    }}
-                }} catch (e) {{
-                    return JSON.stringify({{ error: e.toString() }});
-                }}
-            }})();
-            "#,
-            prompt, notebook_uuid
-        );
+        tracing::info!("💬 Extraction des secrets CDP pour NotebookLM (Reqwest-Hijacking)...");
 
-        // Appel CDP Natif avec garantie Tokio (Attente réelle sur le bloc JS `await reader.read()`)
-        let timeout_future = tokio::time::timeout(
-            std::time::Duration::from_secs(120),
-            self.tab.evaluate(js.as_str()),
-        );
+        let js = r#"
+            (function() {
+                let csrfToken = window.WIZ_global_data?.SNlM0e || (document.body.innerHTML.match(/"SNlM0e":"([^"]+)"/) || [])[1];
+                let sessionId = window.WIZ_global_data?.FdrFJe || (document.body.innerHTML.match(/"FdrFJe":"([^"]+)"/) || [])[1];
+                let cid = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : ""; 
+                return JSON.stringify({ csrfToken: csrfToken || "", sessionId: sessionId || "", conversationId: cid });
+            })()
+        "#;
 
-        match timeout_future.await {
-            Ok(Ok(remote_obj)) => {
-                if let Some(val) = remote_obj.value().and_then(|v| v.as_str()) {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(val) {
-                        if let Some(err) = parsed.get("error") {
-                            return Err(anyhow::anyhow!("RPC Chat Error: {}", err));
-                        }
-                        if let Some(data) = parsed.get("data").and_then(|d| d.as_str()) {
-                            return Ok(data.to_string());
+        let remote_obj = self.tab.evaluate(js).await?;
+        let json_str = remote_obj
+            .value()
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Échec CDP evaluate"))?;
+        let auth_data: serde_json::Value = serde_json::from_str(json_str)?;
+
+        let csrf_token = auth_data
+            .get("csrfToken")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let session_id = auth_data
+            .get("sessionId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let convo_id = auth_data
+            .get("conversationId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if csrf_token.is_empty() {
+            return Err(anyhow::anyhow!(
+                "Impossible d'extraire le jeton CSRF via le CDP."
+            ));
+        }
+
+        // Récupération souveraine des Cookies HttpOnly via CDP
+        tracing::info!("🍪 Siphonnage des Cookies CDP vers CookieStore Reqwest...");
+        let cookies = self.tab.get_cookies().await?;
+        let url = self.base_url.parse::<reqwest::Url>()?;
+        let jar = std::sync::Arc::new(reqwest::cookie::Jar::default());
+
+        for c in cookies {
+            // Reconstitution du format cookie HTTP
+            let cookie_str = format!(
+                "{}={}; Domain={}; Path={}",
+                c.name, c.value, c.domain, c.path
+            );
+            jar.add_cookie_str(&cookie_str, &url);
+        }
+
+        let client = reqwest::Client::builder()
+            .cookie_provider(jar.clone())
+            .build()?;
+
+        let params = serde_json::json!([
+            [],
+            prompt,
+            serde_json::Value::Null,
+            [2, serde_json::Value::Null, [1], [1]],
+            convo_id,
+            serde_json::Value::Null,
+            serde_json::Value::Null,
+            notebook_uuid,
+            1
+        ]);
+        let params_json = serde_json::to_string(&params)?;
+        let freq =
+            serde_json::to_string(&serde_json::json!([serde_json::Value::Null, params_json]))?;
+
+        let mut target_url = format!("{}/_/LabsTailwindUi/data/google.internal.labs.tailwind.orchestration.v1.LabsTailwindOrchestrationService/GenerateFreeFormStreamed?rt=c", self.base_url);
+        if !session_id.is_empty() {
+            target_url = format!("{}&f.sid={}", target_url, session_id);
+        }
+
+        let mut form_data = std::collections::HashMap::new();
+        form_data.insert("f.req", freq);
+        form_data.insert("at", csrf_token.to_string());
+
+        tracing::info!("🚀 Envoi du POST Reqwest asynchrone (Spawn Chunk Stream)...");
+        let mut response = client.post(&target_url).form(&form_data).send().await?;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "HTTP POST Google Error: {}",
+                response.status()
+            ));
+        }
+
+        let mut final_truth = None;
+        let mut buffer = Vec::new();
+
+        // Récupération Zero-Copy par chunks
+        while let Some(chunk_res) = response.chunk().await? {
+            buffer.extend_from_slice(&chunk_res);
+
+            while let Some(pos) = buffer.iter().position(|&b| b == b'\n') {
+                let line_vec: Vec<u8> = buffer.drain(..=pos).collect();
+                let mut payload = line_vec.as_slice();
+
+                if payload.starts_with(b")]}'\n") {
+                    payload = &payload[5..];
+                }
+
+                let s = String::from_utf8_lossy(payload);
+                let trimmed = s.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    if let Some(truth) = Self::extract_truth_from_chunk(&parsed) {
+                        final_truth = Some(truth);
+                    }
+                }
+            }
+        }
+
+        if let Some(truth) = final_truth {
+            tracing::info!("✅ Vérité extraite du stream !");
+            Ok(truth)
+        } else {
+            Err(anyhow::anyhow!(
+                "Stream terminé, aucune Truth trouvée (Timeout Google ou Structure Invalide)"
+            ))
+        }
+    }
+
+    /// Extracteur robuste "Parse, don't validate" validé par l'Architecte
+    fn extract_truth_from_chunk(payload: &serde_json::Value) -> Option<String> {
+        let arr = payload.as_array()?;
+        for item in arr {
+            let sub = item.as_array()?;
+            if sub.len() >= 3 && sub[0].as_str() == Some("wrb.fr") {
+                if let Some(inner_str) = sub[2].as_str() {
+                    if let Ok(inner_json) = serde_json::from_str::<serde_json::Value>(inner_str) {
+                        if let Some(truth) = inner_json
+                            .as_array()
+                            .and_then(|v| v.first())
+                            .and_then(|v| v.as_array())
+                            .and_then(|v| v.first())
+                            .and_then(|v| v.as_str())
+                        {
+                            return Some(truth.to_string());
                         }
                     }
-                    return Err(anyhow::anyhow!("Erreur parse JSON: {}", val));
                 }
-                Err(anyhow::anyhow!("Réponse inattendue de l'évaluateur JS"))
             }
-            Ok(Err(e)) => Err(anyhow::anyhow!("CDP Evaluation Crash: {}", e)),
-            Err(_) => Err(anyhow::anyhow!(
-                "Timeout critique (120s) sur la Promise de Chat."
-            )),
         }
+        None
     }
 
     /// Extract the Markdown formatted answer from the chunked JSON stream
@@ -607,5 +663,222 @@ impl NotebookApi {
         Err(anyhow::anyhow!(
             "Impossible de trouver le bouton '+ Importer'"
         ))
+    }
+    pub async fn create_artifact(
+        &self,
+        notebook_uuid: &str,
+        instructions: Option<&str>,
+        quantity: QuizQuantity,
+        difficulty: QuizDifficulty,
+    ) -> anyhow::Result<String> {
+        tracing::info!(
+            "Fabrication Artifact (Type: Flashcards/Quiz) pour le carnet {}",
+            notebook_uuid
+        );
+        let params = serde_json::json!([
+            [2],
+            notebook_uuid,
+            [
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                ArtifactType::QuizFlashcard.as_u8(),
+                [],
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                [
+                    serde_json::Value::Null,
+                    [
+                        1, // Variant: flashcards
+                        serde_json::Value::Null,
+                        instructions,
+                        serde_json::Value::Null,
+                        serde_json::Value::Null,
+                        serde_json::Value::Null,
+                        [difficulty.as_u8(), quantity.as_u8()],
+                    ],
+                ]
+            ]
+        ]);
+
+        let root_res = self
+            .execute_rpc(
+                CREATE_ARTIFACT.0,
+                &format!("/notebook/{}", notebook_uuid),
+                params,
+            )
+            .await?;
+
+        // Parse, don't validate: Extract artifact_id at [0][0]
+        let artifact_id = root_res
+            .as_array()
+            .and_then(|arr| arr.first())
+            .and_then(|a| a.as_array()) // nested `[[id]]` or `[id]`
+            .and_then(|arr2| {
+                // Try to get index 0
+                if let Some(id_val) = arr2.first() {
+                    id_val.as_str()
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| {
+                anyhow::anyhow!("Impossible d'extraire l'artifact_id du retour batchexecute")
+            })?;
+
+        Ok(artifact_id.to_string())
+    }
+
+    pub async fn list_artifacts(&self, notebook_uuid: &str) -> anyhow::Result<Vec<ArtifactInfo>> {
+        tracing::info!("Listing des artifacts pour {}", notebook_uuid);
+        let params = serde_json::json!([
+            [2],
+            notebook_uuid,
+            "NOT artifact.status = \"ARTIFACT_STATUS_SUGGESTED\""
+        ]);
+        let res = self
+            .execute_rpc(
+                LIST_ARTIFACTS.0,
+                &format!("/notebook/{}", notebook_uuid),
+                params,
+            )
+            .await?;
+
+        let mut artifacts_list = Vec::new();
+
+        if let Some(arr) = res.as_array() {
+            let inner_arr = if let Some(first) = arr.first() {
+                if first.is_array() {
+                    first.as_array().unwrap()
+                } else {
+                    arr
+                }
+            } else {
+                arr
+            }
+            .clone(); // deep copy if needed to iterate easily
+
+            for item in inner_arr {
+                if let Some(item_arr) = item.as_array() {
+                    if let Some(id_val) = item_arr.first() {
+                        if let Some(id_str) = id_val.as_str() {
+                            let title = item_arr
+                                .get(1)
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.to_string());
+                            let status_code =
+                                item_arr.get(4).and_then(|s| s.as_u64()).unwrap_or(99);
+                            artifacts_list.push(ArtifactInfo {
+                                id: id_str.to_string(),
+                                title,
+                                status: ArtifactStatus::from(status_code),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        Ok(artifacts_list)
+    }
+
+    pub async fn fetch_artifact_data(
+        &self,
+        notebook_uuid: &str,
+        artifact_id: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        tracing::info!(
+            "Téléchargement et Extraction Data pour l'artifact {}",
+            artifact_id
+        );
+        let params = serde_json::json!([
+            format!("[\"{}\"]", artifact_id),
+            serde_json::Value::Null,
+            "generic"
+        ]);
+
+        let res = self
+            .execute_rpc(
+                GET_INTERACTIVE_HTML.0,
+                &format!("/notebook/{}", notebook_uuid),
+                params,
+            )
+            .await?;
+
+        // Extract recursively string fragments looking for <!doctype html
+        fn find_html(v: &serde_json::Value) -> Option<String> {
+            if let Some(s) = v.as_str() {
+                let lower = s.to_lowercase();
+                if lower.contains("<!doctype html") || s.contains("data-app-data=") {
+                    return Some(s.to_string());
+                }
+            }
+            if let Some(arr) = v.as_array() {
+                for item in arr {
+                    if let Some(html) = find_html(item) {
+                        return Some(html);
+                    }
+                }
+            }
+            None
+        }
+
+        let raw_html = find_html(&res).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Impossible de trouver le payload HTML encodé pour l'artifact {}",
+                artifact_id
+            )
+        })?;
+
+        let needle = "data-app-data=\"";
+        if let Some(start_idx) = raw_html.find(needle) {
+            let offset_start = start_idx + needle.len();
+            if let Some(end_idx) = raw_html[offset_start..].find('"') {
+                let absolute_end = offset_start + end_idx;
+                let encoded_json = &raw_html[offset_start..absolute_end];
+                let decoded_json = html_escape::decode_html_entities(encoded_json).to_string();
+                let parsed: serde_json::Value = serde_json::from_str(&decoded_json)?;
+                return Ok(parsed);
+            }
+        }
+        Err(anyhow::anyhow!(
+            "Attribut data-app-data introuvable dans le HTML de l'artifact {}",
+            artifact_id
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parser_valid_truth() {
+        let payload = json!([["wrb.fr", null, "[[\"LA_VERITE_VRAIE\"]]"]]);
+        let res = NotebookApi::extract_truth_from_chunk(&payload);
+        assert_eq!(res, Some("LA_VERITE_VRAIE".to_string()));
+    }
+
+    #[test]
+    fn test_parser_missing_truth() {
+        // Missing the path or not 'wrb.fr'
+        let payload = json!([["other.fr", null, "[[[[\"FAUX_POSITIF\"]]]]"]]);
+        let res = NotebookApi::extract_truth_from_chunk(&payload);
+        assert!(res.is_none(), "Doit retourner None pour le mauvais préfixe");
+
+        // Missing array dimensions
+        let payload2 = json!([["wrb.fr"]]);
+        let res2 = NotebookApi::extract_truth_from_chunk(&payload2);
+        assert!(res2.is_none(), "Doit retourner None sans panic");
+    }
+
+    #[test]
+    fn test_parser_malformed_json() {
+        // inner str n'est pas un JSON valide
+        let payload = json!([["wrb.fr", null, "[{malformed json"]]);
+        let res = NotebookApi::extract_truth_from_chunk(&payload);
+        assert!(res.is_none());
     }
 }

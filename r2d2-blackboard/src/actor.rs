@@ -82,6 +82,22 @@ pub enum BlackboardCommand {
         id: String,
         reply_to: oneshot::Sender<Result<(), BlackboardError>>,
     },
+    EnqueueFlashcardTask {
+        expert_id: String,
+        prompt: Option<String>,
+        difficulty: Option<i32>,
+        quantity: Option<i32>,
+        reply_to: oneshot::Sender<Result<String, BlackboardError>>,
+    },
+    UpdateFlashcardTaskStatus {
+        id: String,
+        new_status: String,
+        google_task_id: Option<String>,
+        reply_to: oneshot::Sender<Result<(), BlackboardError>>,
+    },
+    GetPendingFlashcardTasks {
+        reply_to: oneshot::Sender<Result<Vec<crate::FlashcardTaskRow>, BlackboardError>>,
+    },
 }
 
 /// Moteur asynchrone strictement séquentiel pour garantir l'ordre causal I/O
@@ -182,6 +198,33 @@ impl BlackboardActor {
                 }
                 BlackboardCommand::DeleteMcpTool { id, reply_to } => {
                     let res = self.handle_delete_mcp_tool(id).await;
+                    let _ = reply_to.send(res);
+                }
+                BlackboardCommand::EnqueueFlashcardTask {
+                    expert_id,
+                    prompt,
+                    difficulty,
+                    quantity,
+                    reply_to,
+                } => {
+                    let res = self
+                        .handle_enqueue_flashcard(expert_id, prompt, difficulty, quantity)
+                        .await;
+                    let _ = reply_to.send(res);
+                }
+                BlackboardCommand::UpdateFlashcardTaskStatus {
+                    id,
+                    new_status,
+                    google_task_id,
+                    reply_to,
+                } => {
+                    let res = self
+                        .handle_update_flashcard_status(id, new_status, google_task_id)
+                        .await;
+                    let _ = reply_to.send(res);
+                }
+                BlackboardCommand::GetPendingFlashcardTasks { reply_to } => {
+                    let res = self.handle_get_pending_flashcards().await;
                     let _ = reply_to.send(res);
                 }
             }
@@ -548,5 +591,82 @@ impl BlackboardActor {
             .execute(&self.pool)
             .await?;
         Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn handle_enqueue_flashcard(
+        &self,
+        expert_id: String,
+        prompt: Option<String>,
+        difficulty: Option<i32>,
+        quantity: Option<i32>,
+    ) -> Result<String, BlackboardError> {
+        let task_id = Uuid::new_v4().to_string();
+        // Fallback manuelle si sqlx macro bug
+        sqlx::query(
+            "INSERT INTO flashcard_tasks (id, expert_id, prompt, difficulty, quantity, status) VALUES ($1, $2, $3, $4, $5, 'QUEUED')",
+        )
+        .bind(uuid::Uuid::parse_str(&task_id).unwrap())
+        .bind(expert_id)
+        .bind(prompt)
+        .bind(difficulty)
+        .bind(quantity)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(task_id)
+    }
+
+    #[instrument(skip(self))]
+    async fn handle_update_flashcard_status(
+        &self,
+        id: String,
+        new_status: String,
+        google_task_id: Option<String>,
+    ) -> Result<(), BlackboardError> {
+        sqlx::query(
+            "UPDATE flashcard_tasks SET status = $1, google_task_id = COALESCE($2, google_task_id) WHERE id = $3",
+        )
+        .bind(new_status)
+        .bind(google_task_id)
+        .bind(uuid::Uuid::parse_str(&id).unwrap())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    async fn handle_get_pending_flashcards(
+        &self,
+    ) -> Result<Vec<crate::FlashcardTaskRow>, BlackboardError> {
+        let rows = sqlx::query(
+            "SELECT id, expert_id, prompt, difficulty, quantity, status, google_task_id, created_at, expires_at FROM flashcard_tasks WHERE status IN ('QUEUED', 'GENERATING') ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut tasks = Vec::new();
+        for row in rows {
+            use sqlx::Row;
+            let uuid: uuid::Uuid = row.try_get("id").unwrap_or_default();
+            let status_str: String = row
+                .try_get("status")
+                .unwrap_or_else(|_| "QUEUED".to_string());
+            tasks.push(crate::FlashcardTaskRow {
+                id: uuid.to_string(),
+                expert_id: row.try_get("expert_id").unwrap_or_default(),
+                prompt: row.try_get("prompt").ok(),
+                difficulty: row.try_get("difficulty").ok(),
+                quantity: row.try_get("quantity").ok(),
+                status: status_str.parse().unwrap_or(crate::TaskState::Queued),
+                google_task_id: row.try_get("google_task_id").ok(),
+                created_at: row
+                    .try_get("created_at")
+                    .unwrap_or_else(|_| sqlx::types::chrono::Utc::now()),
+                expires_at: row.try_get("expires_at").ok(),
+            });
+        }
+        Ok(tasks)
     }
 }

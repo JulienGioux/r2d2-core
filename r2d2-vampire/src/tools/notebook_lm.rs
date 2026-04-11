@@ -137,34 +137,50 @@ pub async fn chrome_actor_loop(
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
-        let api = crate::vampire_lord::notebook_api::NotebookApi::new(tab.clone()).await;
+        let api = crate::vampire_lord::notebook_api::NotebookApi::new(tab.clone(), None).await;
+        // Déplacement des strings pour le thread asynchrone éphémère
+        let notebook_uuid_spawn = notebook_uuid.to_string();
 
-        // Exécution RPC pure Asynchrone Zero-Scraping
-        let rpc_result = api.chat_ask(notebook_uuid, &prompt).await;
+        // Délégation "Spawn & Abort" pour éviter l'I/O Starvation de l'Actor
+        tokio::spawn(async move {
+            tracing::info!("🔄 Worker éphémère lancé pour chat_ask (Max 180s)");
 
-        match rpc_result {
-            Ok(response_text) => {
-                // Écriture du résultat dans output.txt pour le Chef
-                if let Err(e) = std::fs::write("/home/jgx/source/R2D2/output.txt", &response_text) {
-                    error!("Impossible d'écrire dans output.txt : {}", e);
-                } else {
-                    info!(
-                        "✅ Résultat NotebookLM sauvegardé dans /home/jgx/source/R2D2/output.txt"
-                    );
+            // Le circuit breaker est délégué ici (180 secondes max)
+            let timeout_result = tokio::time::timeout(
+                std::time::Duration::from_secs(180),
+                api.chat_ask(&notebook_uuid_spawn, &prompt),
+            )
+            .await;
+
+            let final_result = match timeout_result {
+                Ok(Ok(response_text)) => {
+                    // Écriture du résultat dans output.txt pour le Chef
+                    if let Err(e) =
+                        std::fs::write("/home/jgx/source/R2D2/output.txt", &response_text)
+                    {
+                        error!("Impossible d'écrire dans output.txt : {}", e);
+                    } else {
+                        info!(
+                            "✅ Résultat NotebookLM sauvegardé dans /home/jgx/source/R2D2/output.txt"
+                        );
+                    }
+                    Ok(response_text)
                 }
-                let _ = responder.send(Ok(response_text));
-            }
-            Err(e) => {
-                // Si l'erreur provient d'un context invalidé (par ex page fermée), reset active_tab
-                // pour forcer la réouverture au prochain appel ! (Auto-Heal local)
-                if e.to_string().contains("Session closed")
-                    || e.to_string().contains("Target closed")
-                {
-                    active_tab = None;
+                Ok(Err(e)) => {
+                    error!("❌ Erreur Reqwest-Hijacking: {}", e);
+                    // (L'auto-heal CDP de session closed n'est plus forcément gérable ici sans repasser par le canal, mais ce n'est plus critique car CDP ne gère plus la requête).
+                    Err(e)
                 }
-                let _ = responder.send(Err(e));
-            }
-        }
+                Err(_) => {
+                    error!("⏱️ Timeout Circuit Breaker atteint (180s) pour chat_ask !");
+                    Err(anyhow::anyhow!(
+                        "Timeout critique de 180s sur le Stream Google"
+                    ))
+                }
+            };
+
+            let _ = responder.send(final_result);
+        });
     }
 
     Ok(())

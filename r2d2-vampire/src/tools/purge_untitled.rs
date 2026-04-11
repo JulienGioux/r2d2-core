@@ -31,7 +31,7 @@ impl McpTool for PurgeUntitledTool {
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
 
         let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm").await?;
-        let api = NotebookApi::new(tab).await;
+        let api = NotebookApi::new(tab, None).await;
 
         let all_nbs = api.list_notebooks().await?;
         let count_before = all_nbs.len();

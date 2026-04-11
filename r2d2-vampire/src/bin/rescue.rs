@@ -10,7 +10,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let tab =
         r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm.google.com").await?;
-    let api = NotebookApi::new(tab).await;
+    let api = NotebookApi::new(tab, None).await;
     api.tab.goto("https://notebooklm.google.com/").await?;
     api.tab.wait_for_navigation().await?;
 
