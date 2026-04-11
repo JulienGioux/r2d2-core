@@ -116,7 +116,10 @@ impl McpTool for SyncNotebooksTool {
                     if let Some(serde_json::Value::String(val_ref)) = result.value {
                         if let Ok(Value::Object(map)) = serde_json::from_str(&val_ref) {
                             if !map.is_empty() {
-                                let mut guard = store_clone.data.write().unwrap();
+                                let mut guard = match store_clone.data.write() {
+                                    Ok(g) => g,
+                                    Err(poisoned) => poisoned.into_inner(),
+                                };
                                 for (name, url_val) in map {
                                     if let Some(url) = url_val.as_str() {
                                         info!("✅ Découverte Souveraine : '{}' -> {}", name, url);

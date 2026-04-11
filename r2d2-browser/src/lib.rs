@@ -110,8 +110,11 @@ impl SovereignBrowser {
                             json.get("webSocketDebuggerUrl").and_then(|v| v.as_str())
                         {
                             info!("🔌 Attachement furtif au navigateur relais (Chrome Host) via CDP (port 9222) !");
-                            return headless_chrome::Browser::connect(ws_url.to_string())
-                                .map_err(|e| BrowserError::ConnectionFailed(e.to_string()));
+                            return headless_chrome::Browser::connect_with_timeout(
+                                ws_url.to_string(),
+                                std::time::Duration::from_secs(3600), // Empêche la déconnexion iddle CDP de 30s
+                            )
+                            .map_err(|e| BrowserError::ConnectionFailed(e.to_string()));
                         }
                     }
                     break;
@@ -132,6 +135,7 @@ impl SovereignBrowser {
         let options = LaunchOptionsBuilder::default()
             .headless(false)
             .sandbox(false)
+            .idle_browser_timeout(std::time::Duration::from_secs(3600)) // Empêche la déconnexion iddle CDP de 30s en mode local fallback
             .user_data_dir(Some(profile_dir))
             .build()
             .map_err(|e| BrowserError::ProfileCreationError(e.to_string()))?;

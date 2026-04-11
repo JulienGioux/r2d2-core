@@ -81,7 +81,10 @@ impl McpTool for ForgeExpertTool {
 
         // Auto-Indexation
         {
-            let mut guard = self.store.data.write().unwrap();
+            let mut guard = match self.store.data.write() {
+                Ok(g) => g,
+                Err(poisoned) => poisoned.into_inner(),
+            };
             let snake_name = topic.to_lowercase().replace(" ", "_");
             guard.insert(
                 snake_name.clone(),

@@ -50,7 +50,10 @@ impl McpTool for AddNotebookExpertTool {
 
         let snake_name = name.to_lowercase().replace(" ", "_");
 
-        let mut guard = self.store.data.write().unwrap();
+        let mut guard = match self.store.data.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         guard.insert(
             snake_name.clone(),
             ConsultantData {
@@ -104,7 +107,10 @@ impl McpTool for RemoveNotebookExpertTool {
             return Err(anyhow::anyhow!("Le paramètre 'name' est requis"));
         }
 
-        let mut guard = self.store.data.write().unwrap();
+        let mut guard = match self.store.data.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let removed = guard.remove(&name);
         drop(guard);
         self.store.save_disk();
@@ -147,7 +153,10 @@ impl McpTool for ListNotebookExpertsTool {
     }
 
     async fn call(&self, _arguments: Value) -> Result<Value, anyhow::Error> {
-        let guard = self.store.data.read().unwrap();
+        let guard = match self.store.data.read() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let mut list = Vec::new();
         for (name, data) in guard.iter() {
             list.push(format!(
