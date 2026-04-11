@@ -1,5 +1,5 @@
-pub mod github;
 pub mod expert_manager;
+pub mod github;
 
 #[cfg(feature = "cdp_bridge")]
 pub mod notebook_lm;
