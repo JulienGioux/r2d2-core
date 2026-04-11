@@ -167,15 +167,25 @@ impl SovereignBrowser {
             .await
             .map_err(|e| BrowserError::SpawnFailed(format!("Echec lecture pages: {:?}", e)))?;
 
-        for p in pages {
+        // 1. Chercher la perfection: un onglet qui a EXACTEMENT l'URL ciblée
+        for p in &pages {
             let url = p.url().await.unwrap_or_default();
             if url.as_ref().is_some_and(|u| u.contains(url_matcher))
                 || (url.is_none() && url_matcher == "notebooklm")
             {
-                return Ok(Arc::new(p));
+                return Ok(Arc::new(p.clone()));
             }
         }
 
+        // 2. Fallback: Recycler un onglet vide (about:blank) ou un vieil onglet nouveau tag au lieu d'ouvrir à l'infini
+        for p in &pages {
+            let url = p.url().await.unwrap_or_default();
+            if url.is_none() || url.as_ref().is_some_and(|u| u == "about:blank") {
+                return Ok(Arc::new(p.clone()));
+            }
+        }
+
+        // 3. Dernier recours, création
         let new_page = browser
             .new_page("about:blank")
             .await

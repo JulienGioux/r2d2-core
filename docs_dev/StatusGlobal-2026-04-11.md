@@ -115,8 +115,9 @@ Le système vital interdisant à l'IA de propager un mensonge industriel.
   * **[TERMINÉ] Migration Zéro-Scraping** : Le parseur hybride lent (DOM Scraping / `parse_har.js`) a été éradiqué au profit d'un intercepteur asynchrone écoutant nativement la réponse du WebSocket CDP via ses promesses JavaScript encapsulées.
   * **[TERMINÉ] Framework CDP Asynchrone Natif** : Le goulot d'étranglement historique causé par le thread-bloating de `headless_chrome` a été résolu par la migration totale du workspace MCP vers `chromiumoxide`. Le pont TCP/CDP de R2D2-Vampire est désormais souverainement Async Tokio, garantissant des milliers de sous-routines sans crash VRAM ou OS Stack-Overflow.
   * **[TERMINÉ] Isolation Modulaire "Zero-Warning" (Cargo Features)** : `r2d2-vampire` est découplable de Chromium à 100%. L'exécutable MCP impose formellement la feature (Fail-Fast) pour garantir la sûreté sans code Mock "spaghetti". Compilation en 3ms en backend pur.
+  * **[TERMINÉ] Supervision Erlang/OTP (Actor-Model)** : L'auto-heal paresseux a été remplacé par le `VampireSupervisor`, un Acteur Asynchrone Tokio dédié qui gère l'état et le `JoinSet` des workers Chromium. Le `RwLock` global a été annihilé, supprimant tout risque de contention CPU (Line-Bouncing) ou d'empoisonnement mémoire (Zero-Crash). Le recyclage d'onglets `about:blank` a été optimisé, offrant une empreinte VRAM chirurgicale et stable.
 * **🚧 À Améliorer (Roadmap)** :
-  * Supervision hiérarchique OTP avancée pour la rédemption des zombies (Auto-heal des instances de l'Agent Chrome) dans les registres `SovereignBrowser` sans polluer le code métier.
+  * Orchestration des "Tâches Zombies" (Timeouts défensifs sur le pont CDP pour sécuriser l'Arc partagé).
 
 ### 🎛️ 6. L'Interface d'Interaction Humaine (R2D2-UI)
 * **État d'achèvement** : **80%**
