@@ -39,23 +39,18 @@ impl McpTool for SurfWebTool {
 
         info!("SurfWeb: Navigation vers {}", url);
 
-        let result: String = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let browser = r2d2_browser::SovereignBrowser::connect("surfer-profile")?;
-            let tab = browser.new_tab()?;
-            tab.navigate_to(&url)?;
-            tab.wait_until_navigated()?;
+        let browser = r2d2_browser::SovereignBrowser::connect("surfer-profile").await?;
+        let tab = browser.new_page(&url).await?;
+        tab.wait_for_navigation().await?;
 
-            let js = "document.body.innerText || document.body.textContent";
-            let eval = tab.evaluate(js, false)?;
+        let js = "document.body.innerText || document.body.textContent";
+        let eval = tab.evaluate(js).await?;
 
-            let _ = tab.close_target();
-
-            if let serde_json::Value::String(s) = eval.value.unwrap_or(Value::Null) {
-                return Ok(s);
-            }
-            Ok("Aucun texte trouvé".to_string())
-        })
-        .await??;
+        let result = if let Some(serde_json::Value::String(s)) = eval.value() {
+            s.clone()
+        } else {
+            "Aucun texte trouvé".to_string()
+        };
 
         // Isolation Sémantique (JSONAI V3.0) pour stopper le Prompt Injection
         Ok(json!({

@@ -1,20 +1,20 @@
-use headless_chrome::Tab;
+use chromiumoxide::Page;
 use std::sync::Arc;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 pub struct NotebookApi {
-    pub tab: Arc<Tab>,
+    pub tab: Arc<Page>,
 }
 
 impl NotebookApi {
-    pub fn new(tab: Arc<Tab>) -> Self {
+    pub async fn new(tab: Arc<Page>) -> Self {
         let api = Self { tab };
-        api.inject_hud();
+        api.inject_hud().await;
         api
     }
 
     /// Injecte un indicateur visuel discret signalant le contrôle autonome
-    fn inject_hud(&self) {
+    async fn inject_hud(&self) {
         let hud_js = r#"
             (function() {
                 try {
@@ -42,12 +42,11 @@ impl NotebookApi {
                 } catch(e) {}
             })();
         "#;
-        let _ = self.tab.evaluate(hud_js, false);
+        let _ = self.tab.evaluate(hud_js).await;
     }
 
-    /// Exécute une requête RPC "batchexecute" directement dans le contexte de la page
-    /// Extraction du reverse-engineering 'notebooklm-py' pour une souveraineté locale totale
-    pub fn execute_rpc(
+    /// Exécute une requête RPC "batchexecute" Asynchrone Promise-Based
+    pub async fn execute_rpc(
         &self,
         rpc_id: &str,
         path: &str,
@@ -84,16 +83,11 @@ impl NotebookApi {
                     if (!resp.ok) return JSON.stringify({{ error: "HTTP " + resp.status }});
                     let text = await resp.text();
                     
-                    // Nettoyage Anti-XSSI
                     let cleaned = text.startsWith(")]}}'") ? text.substring(text.indexOf("\n") + 1) : text;
-                    
-                    // Parsing du format Chunked Google
                     let chunks = cleaned.split("\n");
                     for (let i = 0; i < chunks.length; i++) {{
                         try {{
                             let chunk = JSON.parse(chunks[i]);
-                            // Look for `wrb.fr` payload. In python format is [ ["wrb.fr", "CCqFvf", "[null, null, ..."] ]
-                            // Google nests it sometimes inside arrays. We just crawl.
                             let found = null;
                             const crawl = (arr) => {{
                                 if (!Array.isArray(arr)) return;
@@ -121,15 +115,12 @@ impl NotebookApi {
             rpc_id, params_str, path
         );
 
-        let remote_obj = self.tab.evaluate(&js, true)?;
-
-        if let Some(val) = remote_obj.value {
+        let remote_obj = self.tab.evaluate(js.as_str()).await?;
+        if let Some(val) = remote_obj.value() {
             if let Some(json_str) = val.as_str() {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_str) {
                     if let Some(err) = parsed.get("error") {
                         if err.as_str() == Some("RPC Result Not Found in parsing") {
-                            // Mutation RPC (comme LBwxtb) peut ne rien retourner de standard.
-                            // On considère que c'est un succès si pas d'autre erreur.
                             return Ok(serde_json::json!({ "status": "success_no_payload" }));
                         }
                         error!("RPC Error ({}): {}", rpc_id, err);
@@ -141,7 +132,7 @@ impl NotebookApi {
                     return Ok(parsed);
                 }
             }
-            return Ok(val);
+            return Ok(val.clone());
         }
 
         Err(anyhow::anyhow!(
@@ -150,38 +141,25 @@ impl NotebookApi {
         ))
     }
 
-    /// PURE RPC: Ask a question directly via batchexecute GenerateFreeFormStreamed instead of DOM injection
-    pub fn chat_ask(&self, notebook_uuid: &str, prompt: &str) -> anyhow::Result<String> {
-        info!("💬 Envoi RPC de la question vers NotebookLM (Attente Stream Muted Tarpit-Cut)...");
+    /// PURE RPC: Async Promise-based evaluation with native 120s Tokio Timeout.
+    /// Éradication complète du Polling de Scraping DOM de l'ancienne version.
+    pub async fn chat_ask(&self, notebook_uuid: &str, prompt: &str) -> anyhow::Result<String> {
+        info!("💬 Envoi RPC de la question vers NotebookLM (Mode Promise Async natif CDP)...");
         let js = format!(
             r#"
-            window.__r2d2_chat_result = null;
-            window.__r2d2_chat_error = null;
             (async function() {{
                 try {{
                     let csrfToken = window.WIZ_global_data?.SNlM0e || (document.body.innerHTML.match(/"SNlM0e":"([^"]+)"/) || [])[1];
                     let sessionId = window.WIZ_global_data?.FdrFJe || (document.body.innerHTML.match(/"FdrFJe":"([^"]+)"/) || [])[1];
-                    if (!csrfToken) {{
-                        window.__r2d2_chat_error = JSON.stringify({{ error: "Missing CSRF Token (SNlM0e)" }});
-                        return;
-                    }}
+                    if (!csrfToken) return JSON.stringify({{ error: "Missing CSRF Token (SNlM0e)" }});
                     
                     let question = {:?};
                     let notebookId = {:?};
                     let conversationId = (crypto && crypto.randomUUID) ? crypto.randomUUID() : ""; 
                     
                     let params = [
-                        [], 
-                        question,
-                        null,
-                        [2, null, [1], [1]],
-                        conversationId,
-                        null,
-                        null,
-                        notebookId,
-                        1
+                        [], question, null, [2, null, [1], [1]], conversationId, null, null, notebookId, 1
                     ];
-                    
                     let paramsJson = JSON.stringify(params);
                     let freq = JSON.stringify([null, paramsJson]);
                     
@@ -198,30 +176,24 @@ impl NotebookApi {
                         body: formData.toString()
                     }});
                     
-                    if (!resp.ok) {{
-                        window.__r2d2_chat_error = JSON.stringify({{ error: "HTTP " + resp.status }});
-                        return;
-                    }}
+                    if (!resp.ok) return JSON.stringify({{ error: "HTTP " + resp.status }});
                     
                     let reader = resp.body.getReader();
                     let decoder = new TextDecoder("utf-8");
                     let accumulated = "";
+                    let final_buffer = null;
                     
                     while (true) {{
                         let {{done, value}} = await reader.read();
-                        if (value) {{
-                            accumulated += decoder.decode(value, {{stream: !done}});
-                        }}
+                        if (value) accumulated += decoder.decode(value, {{stream: !done}});
                         
-                        // Parse manually the latest good block
                         let chunks = accumulated.split('\n');
-                        let last_line = chunks.pop() || ""; // usually incomplete
+                        let last_line = chunks.pop() || "";
                         
                         for (let line of chunks) {{
                             line = line.trim();
                             if (!line) continue;
                             if (line.startsWith(")]}}'")) line = line.substring(4);
-                            
                             try {{
                                 let data = JSON.parse(line);
                                 if (!Array.isArray(data)) continue;
@@ -229,107 +201,67 @@ impl NotebookApi {
                                     if(Array.isArray(item) && item.length >= 3 && item[0] === "wrb.fr") {{
                                         let inner = JSON.parse(item[2]);
                                         if (Array.isArray(inner) && Array.isArray(inner[0]) && typeof inner[0][0] === "string") {{
-                                            // on bufferise le texte fur à mesure
-                                            let ans_text = inner[0][0];
-                                            window.__r2d2_chat_buffer = ans_text;
-                                            // on désactive l'early return au flag 1 car Google semble l'envoyer par segment/paragraphe désormais !
+                                            final_buffer = inner[0][0];
                                         }}
                                     }}
                                 }}
-                            }} catch(e) {{
-                                // IGNORER silent fail
-                            }}
+                            }} catch(e) {{ }}
                         }}
                         accumulated = last_line;
                         
                         if (done) {{
-                            if (window.__r2d2_chat_buffer) {{
-                                window.__r2d2_chat_result = JSON.stringify({{ data: window.__r2d2_chat_buffer }});
-                            }} else {{
-                                window.__r2d2_chat_error = JSON.stringify({{ error: "Stream closed without data" }});
-                            }}
-                            break;
+                            if (final_buffer) return JSON.stringify({{ data: final_buffer }});
+                            return JSON.stringify({{ error: "Stream closed without data" }});
                         }}
                     }}
                 }} catch (e) {{
-                    window.__r2d2_chat_error = JSON.stringify({{ error: e.toString() }});
+                    return JSON.stringify({{ error: e.toString() }});
                 }}
             }})();
             "#,
             prompt, notebook_uuid
         );
 
-        // Appel CDP "Fire and Forget" (false). On ne sera pas piégé par la guillotine des 30s de headless_chrome.
-        let _ = self.tab.evaluate(&js, false)?;
+        // Appel CDP Natif avec garantie Tokio (Attente réelle sur le bloc JS `await reader.read()`)
+        let timeout_future = tokio::time::timeout(
+            std::time::Duration::from_secs(120),
+            self.tab.evaluate(js.as_str()),
+        );
 
-        // Boucle de Polling Saine de 120s max.
-        // Puisque nous sommes dans l'acteur MPSC (un thread séparé `spawn_blocking`), le `thread::sleep` ne ruine pas l'Executor Tokio
-        // et son OS Thread est à 0% d'utilisation CPU entre chaque tick.
-        for _ in 0..240 {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-
-            // Check Erreur fatale
-            if let Ok(res) = self.tab.evaluate("window.__r2d2_chat_error", false) {
-                if let Some(val) = res.value.as_ref().and_then(|v| v.as_str()) {
-                    let _ = self.tab.evaluate("window.__r2d2_chat_error = null", false);
-                    if let Ok(json_err) = serde_json::from_str::<serde_json::Value>(val) {
-                        return Err(anyhow::anyhow!(
-                            "RPC Chat Error: {}",
-                            json_err.get("error").unwrap_or(&serde_json::Value::Null)
-                        ));
-                    } else {
-                        return Err(anyhow::anyhow!("RPC Chat Error: {}", val));
-                    }
-                }
-            }
-
-            // Check Résultat glorieux
-            if let Ok(res) = self.tab.evaluate("window.__r2d2_chat_result", false) {
-                if let Some(val) = res.value.as_ref().and_then(|v| v.as_str()) {
-                    let _ = self.tab.evaluate("window.__r2d2_chat_result = null", false);
-                    match serde_json::from_str::<serde_json::Value>(val) {
-                        Ok(parsed) => {
-                            if let Some(data) = parsed.get("data").and_then(|d| d.as_str()) {
-                                return Ok(data.to_string());
-                            } else {
-                                return Err(anyhow::anyhow!(
-                                    "RPC Chat JSON sans attribut 'data': {}",
-                                    val
-                                ));
-                            }
+        match timeout_future.await {
+            Ok(Ok(remote_obj)) => {
+                if let Some(val) = remote_obj.value().and_then(|v| v.as_str()) {
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(val) {
+                        if let Some(err) = parsed.get("error") {
+                            return Err(anyhow::anyhow!("RPC Chat Error: {}", err));
                         }
-                        Err(e) => {
-                            return Err(anyhow::anyhow!(
-                                "Erreur parse JSON final stream payload: {} | Payload: {}",
-                                e,
-                                val
-                            ));
+                        if let Some(data) = parsed.get("data").and_then(|d| d.as_str()) {
+                            return Ok(data.to_string());
                         }
                     }
+                    return Err(anyhow::anyhow!("Erreur parse JSON: {}", val));
                 }
+                Err(anyhow::anyhow!("Réponse inattendue de l'évaluateur JS"))
             }
+            Ok(Err(e)) => Err(anyhow::anyhow!("CDP Evaluation Crash: {}", e)),
+            Err(_) => Err(anyhow::anyhow!(
+                "Timeout critique (120s) sur la Promise de Chat."
+            )),
         }
-
-        Err(anyhow::anyhow!(
-            "Aucune réponse de NotebookLM. Timeout (120s) imposé par le Polling de l'Architecte."
-        ))
     }
 
-    /// Extract the Markdown formatted answer from the chunked JSON stream returned by GenerateFreeFormStreamed
-    /// Extrait le rapport d'une réponse de POLL_RESEARCH
+    /// Extract the Markdown formatted answer from the chunked JSON stream
     fn extract_poll_report(
         res: &serde_json::Value,
         target_task_id: &str,
     ) -> Option<(String, String)> {
         if let Some(arr) = res.as_array() {
-            // Task has format: ["u... task ID", [... task info]]
             if arr.len() >= 2 {
                 if let Some(id) = arr[0].as_str() {
                     if id == target_task_id {
                         if let Some(t_info) = arr[1].as_array() {
                             let status = t_info.get(4).and_then(|v| v.as_u64()).unwrap_or(0);
                             if status == 2 || status == 6 {
-                                // terminée! extraction:
                                 let mut title = "Web Source".to_string();
                                 let mut report = "".to_string();
 
@@ -364,13 +296,12 @@ impl NotebookApi {
                                 }
                                 return Some((title, report));
                             } else {
-                                return None; // en cours
+                                return None;
                             }
                         }
                     }
                 }
             }
-            // Recherche récursive
             for val in arr {
                 if let Some(found) = Self::extract_poll_report(val, target_task_id) {
                     return Some(found);
@@ -380,16 +311,13 @@ impl NotebookApi {
         None
     }
 
-    /// Extrait TOUTES les tâches Deep Search de la réponse de polling (e3bVqc)
     fn extract_all_poll_tasks(
         res: &serde_json::Value,
         tasks: &mut Vec<(String, u64, String, String)>,
     ) {
         if let Some(arr) = res.as_array() {
-            // Task has format: ["u... task ID", [... task info]]
             if arr.len() >= 2 {
                 if let Some(id) = arr[0].as_str() {
-                    // It looks like a UUID-based task ID
                     if id.len() > 20 && id.contains("-") {
                         if let Some(t_info) = arr[1].as_array() {
                             let status = t_info.get(4).and_then(|v| v.as_u64()).unwrap_or(0);
@@ -405,61 +333,45 @@ impl NotebookApi {
                                 {
                                     for src_val in sources {
                                         if let Some(src) = src_val.as_array() {
-                                            if let Some(titles_arr) =
-                                                src.get(1).and_then(|v| v.as_array())
-                                            {
-                                                if titles_arr.len() >= 2 {
-                                                    title = titles_arr[0]
+                                            if let Some(t) = src.get(1).and_then(|v| v.as_array()) {
+                                                if t.len() >= 2 {
+                                                    title = t[0]
                                                         .as_str()
                                                         .unwrap_or("Source")
                                                         .to_string();
-                                                    report = titles_arr[1]
-                                                        .as_str()
-                                                        .unwrap_or("")
-                                                        .to_string();
+                                                    report =
+                                                        t[1].as_str().unwrap_or("").to_string();
                                                 }
-                                            } else if let Some(t) =
-                                                src.get(1).and_then(|v| v.as_str())
-                                            {
-                                                title = t.to_string();
                                             }
                                         }
                                     }
                                 }
                             }
-                            // Store everything, even if status is not 2, to track running tasks
                             tasks.push((id.to_string(), status, title, report));
                         }
                     }
                 }
             }
-            // Recherche récursive
             for val in arr {
                 Self::extract_all_poll_tasks(val, tasks);
             }
         }
     }
 
-    /// Verifie si le Notebook Actuel est authorisé en écriture via la balise [R2D2]
     pub fn verify_r2d2_access(&self) -> anyhow::Result<()> {
-        // Le check [R2D2] est désactivé pour permettre la consultation (lecture)
-        // d'experts non marqués comme souverains (ex: RustyMaster).
         Ok(())
     }
 
-    /// Crée un nouveau Notebook Vierge en RPC
-    pub fn create_notebook(&self, name: &str) -> anyhow::Result<String> {
+    pub async fn create_notebook(&self, name: &str) -> anyhow::Result<String> {
         let r2d2_name = format!("[R2D2] {}", name);
         info!("Fabrication RPC du Carnet Expert: {}", r2d2_name);
 
-        self.tab.navigate_to("https://notebooklm.google.com/")?;
-        self.tab.wait_until_navigated()?;
+        self.tab.goto("https://notebooklm.google.com/").await?;
+        self.tab.wait_for_navigation().await?;
 
-        // Params = [title, null, null, [2], [1]]
         let params = serde_json::json!([r2d2_name, null, null, [2], [1]]);
-        let response = self.execute_rpc("CCqFvf", "/", params)?;
+        let response = self.execute_rpc("CCqFvf", "/", params).await?;
 
-        // Le UUID est typiquement à l'index 2 (ex: [titre, null, "UUID", ...])
         let mut uuid = String::new();
         if let Some(arr) = response.as_array() {
             if arr.len() > 2 {
@@ -467,7 +379,6 @@ impl NotebookApi {
                     uuid = u.to_string();
                 }
             } else if !arr.is_empty() {
-                // Fallback (des fois il parse différemment)
                 if let Some(item_arr) = arr[0].as_array() {
                     if item_arr.len() > 2 {
                         if let Some(u) = item_arr[2].as_str() {
@@ -479,30 +390,23 @@ impl NotebookApi {
         }
 
         if uuid.is_empty() {
-            return Err(anyhow::anyhow!(
-                "Format de réponse inattendu lors de la création CCqFvf: {:?}",
-                response
-            ));
+            return Err(anyhow::anyhow!("Format RPC CCqFvf inattendu"));
         }
 
-        info!("✅ Expert '{}' forgé ! UUID: {}", r2d2_name, uuid);
-
-        // On navigue sur ce carnet. NotebookApi s'occupe de garder le focus.
         let url = format!("https://notebooklm.google.com/notebook/{}", uuid);
-        self.tab.navigate_to(&url)?;
-        self.tab.wait_until_navigated()?;
-
+        self.tab.goto(&url).await?;
+        self.tab.wait_for_navigation().await?;
         Ok(url)
     }
 
-    /// Ouvre la modale RPC "Deep Research" asynchrone et importe sa trouvaille
-    pub fn add_deep_search_source(&self, notebook_uuid: &str, query: &str) -> anyhow::Result<()> {
+    pub async fn add_deep_search_source(
+        &self,
+        notebook_uuid: &str,
+        query: &str,
+    ) -> anyhow::Result<()> {
         let path = format!("/notebook/{}", notebook_uuid);
-
-        // 1. Démarrer Deep Research
-        info!("🔎 Injection Deep Search RPC : {}", query);
         let start_params = serde_json::json!([null, [1], [query, 1], 5, notebook_uuid]);
-        let start_res = self.execute_rpc("QA9ei", &path, start_params)?;
+        let start_res = self.execute_rpc("QA9ei", &path, start_params).await?;
 
         let mut task_id = "";
         if let Some(arr) = start_res.as_array() {
@@ -518,9 +422,7 @@ impl NotebookApi {
                 "Impossible d'extraire la TaskID de Deep Search RPC"
             ));
         }
-        info!("⏳ Deep Research Task ID: {}. Polling engagé...", task_id);
 
-        // 2. Polling (e3bVqc)
         let poll_params = serde_json::json!([null, null, notebook_uuid]);
         let final_title;
         let final_report;
@@ -528,31 +430,18 @@ impl NotebookApi {
         let start_time = std::time::Instant::now();
         loop {
             if start_time.elapsed().as_secs() > 180 {
-                return Err(anyhow::anyhow!(
-                    "Timeout: la recherche Deep Research dépasse les 3 minutes."
-                ));
+                return Err(anyhow::anyhow!("Timeout Deep Research (3 min)."));
             }
-
-            std::thread::sleep(std::time::Duration::from_secs(5));
-            let poll_res = self.execute_rpc("e3bVqc", &path, poll_params.clone());
-
-            if let Ok(res) = poll_res {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            if let Ok(res) = self.execute_rpc("e3bVqc", &path, poll_params.clone()).await {
                 if let Some((title, report)) = Self::extract_poll_report(&res, task_id) {
                     final_title = title;
                     final_report = report;
                     break;
-                } else {
-                    info!("... travail en cours par l'agent de recherche...");
                 }
             }
         }
 
-        if final_report.is_empty() {
-            warn!("⚠️ Le rapport Deep Search est vide. L'import peut échouer.");
-        }
-
-        // 3. Importation du Rapport Source (LBwxtb)
-        // Construction de l'entrée Source spéciale pour Web/Report
         let source_entry = serde_json::json!([
             null,
             [final_title, final_report],
@@ -566,57 +455,40 @@ impl NotebookApi {
             null,
             3
         ]);
-
-        info!("📥 Importation de la ressource finalisée vers le Carnet...");
         let import_params = serde_json::json!([null, [1], task_id, notebook_uuid, [source_entry]]);
-        let _ = self.execute_rpc("LBwxtb", &path, import_params)?;
-
-        info!("✅ Auto-Validation. Source assimilée purement RPC.");
+        self.execute_rpc("LBwxtb", &path, import_params).await?;
         Ok(())
     }
 
-    /// Daemon Watcher : Importe automatiquement les recherches Deep Search en attente/en cours
-    pub fn auto_import_pending_searches(&self, notebook_uuid: &str) -> anyhow::Result<()> {
+    pub async fn auto_import_pending_searches(&self, notebook_uuid: &str) -> anyhow::Result<()> {
         let path = format!("/notebook/{}", notebook_uuid);
         let poll_params = serde_json::json!([null, null, notebook_uuid]);
         let mut processed = std::collections::HashSet::new();
 
-        info!(
-            "👁️ Démarrage du Watcher Deep Search pour le carnet {}...",
-            notebook_uuid
-        );
-
         let start_time = std::time::Instant::now();
         loop {
             if start_time.elapsed().as_secs() > 3600 {
-                return Err(anyhow::anyhow!("Timeout global: arrêt du watcher (1h)"));
+                return Ok(());
             }
-
-            let poll_res = self.execute_rpc("e3bVqc", &path, poll_params.clone())?;
+            let poll_res = self
+                .execute_rpc("e3bVqc", &path, poll_params.clone())
+                .await?;
             let mut tasks = Vec::new();
             Self::extract_all_poll_tasks(&poll_res, &mut tasks);
 
             let mut running = 0;
             for (id, status, title, report) in tasks {
                 if processed.contains(&id) {
-                    continue; // Déjà traité dans cette boucle
+                    continue;
                 }
-
-                // 1 ou 5 = Running
                 if status == 1 || status == 5 {
                     running += 1;
                     continue;
                 }
-
-                // De base, on ne veut pas importer des requêtes historiques de l'usager qu'il a déjà importées avant.
-                // Donc on ne déclenchera l'import QUE si la tâche PASSE de l'état (running) à l'état (done) pendant qu'on regarde,
-                // ou bien si elle vient d'être terminée récemment (pour palier aux requêtes manuelles, on maintiendra un fichier /tmp).
-                // Simplification : le script trace les "running" vus, et import ce qu'il a vu !
                 if status == 2 || status == 6 {
                     let cache_file = "/tmp/r2d2_imported_tasks.txt";
                     let history = std::fs::read_to_string(cache_file).unwrap_or_default();
                     if !history.contains(&id) {
-                        info!("📥 Importation de la tâche terminée id: {}", id);
                         let source_entry = serde_json::json!([
                             null,
                             [title, report],
@@ -632,11 +504,11 @@ impl NotebookApi {
                         ]);
                         let import_params =
                             serde_json::json!([null, [1], &id, notebook_uuid, [source_entry]]);
-                        if let Err(e) = self.execute_rpc("LBwxtb", &path, import_params) {
-                            warn!("⚠️ Erreur lors de l'importation de {}: {}", id, e);
-                        } else {
-                            info!("✅ Importation réussie : {}", title);
-                            // Enregistrer dans le cache
+                        if self
+                            .execute_rpc("LBwxtb", &path, import_params)
+                            .await
+                            .is_ok()
+                        {
                             use std::io::Write;
                             if let Ok(mut f) = std::fs::OpenOptions::new()
                                 .create(true)
@@ -650,35 +522,25 @@ impl NotebookApi {
                     processed.insert(id);
                 }
             }
-
             if running == 0 {
-                info!("🏁 Plus aucune recherche en cours. Fermeture du Watcher.");
                 break;
-            } else {
-                info!("⏳ {} recherche(s) en cours, attente 5s...", running);
-                std::thread::sleep(std::time::Duration::from_secs(5));
             }
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
         }
-
         Ok(())
     }
 
-    /// Liste tous les carnets via RPC
-    pub fn list_notebooks(&self) -> anyhow::Result<Vec<(String, String)>> {
-        // payload: [null, 1, null, [2]]
+    pub async fn list_notebooks(&self) -> anyhow::Result<Vec<(String, String)>> {
         let params = serde_json::json!([null, 1, null, [2]]);
-        let response = self.execute_rpc("wXbhsf", "/", params)?;
+        let response = self.execute_rpc("wXbhsf", "/", params).await?;
 
         let mut notebooks = Vec::new();
-        // Let's recursively search for arrays that look like [Title_str, ..., UUID_str]
         fn extract_nbs(val: &serde_json::Value, list: &mut Vec<(String, String)>) {
             if let Some(arr) = val.as_array() {
                 if arr.len() > 2 {
                     if let (Some(title), Some(id)) = (arr[0].as_str(), arr[2].as_str()) {
-                        // Check if id looks like a valid UUID (not wrb.fr etc)
                         if id != "wrb.fr" && id.len() > 10 && id.contains("-") {
                             let mut t = title.to_string();
-                            // Fix Google UI convention where empty title implies "Untitled notebook"
                             if t.is_empty() {
                                 t = "Untitled notebook".to_string();
                             }
@@ -691,54 +553,34 @@ impl NotebookApi {
                 }
             }
         }
-
         extract_nbs(&response, &mut notebooks);
         Ok(notebooks)
     }
 
-    /// Supprime un carnet via RPC
-    pub fn delete_notebook(&self, notebook_uuid: &str) -> anyhow::Result<()> {
-        info!("🗑️ Suppression RPC du carnet : {}", notebook_uuid);
+    pub async fn delete_notebook(&self, notebook_uuid: &str) -> anyhow::Result<()> {
         let params = serde_json::json!([[notebook_uuid], [2]]);
-        let _ = self.execute_rpc("WWINqb", "/", params)?;
+        self.execute_rpc("WWINqb", "/", params).await?;
         Ok(())
     }
 
-    /// Purge tous les carnets "Untitled notebook"
-    pub fn purge_untitled_notebooks(&self) -> anyhow::Result<usize> {
-        info!("🧹 Lancement du protocole de nettoyage...");
-        self.tab.navigate_to("https://notebooklm.google.com/")?;
-        self.tab.wait_until_navigated()?;
-
-        let nbs = self.list_notebooks()?;
+    pub async fn purge_untitled_notebooks(&self) -> anyhow::Result<usize> {
+        self.tab.goto("https://notebooklm.google.com/").await?;
+        self.tab.wait_for_navigation().await?;
+        let nbs = self.list_notebooks().await?;
         let mut deleted_count = 0;
-
         for (id, title) in nbs {
             let t = title.to_lowercase();
-            if t.contains("untitled notebook")
-                || t.contains("carnet sans titre")
-                || t.contains("notebook sans titre")
-                || t.contains("carnet sans nom")
+            if (t.contains("untitled") || t.contains("sans titre") || t.contains("sans nom"))
+                && self.delete_notebook(&id).await.is_ok()
             {
-                if let Err(e) = self.delete_notebook(&id) {
-                    error!("Erreur suppression {}: {}", id, e);
-                } else {
-                    info!("✅ Carnet '{}' ({}) incinéré !", title, id);
-                    deleted_count += 1;
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
+                deleted_count += 1;
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             }
         }
-
-        info!(
-            "🧹 Cycle de nettoyage terminé. {} scories effacées.",
-            deleted_count
-        );
         Ok(deleted_count)
     }
 
-    /// Rescue UI method : Clic automatique sur "+ Importer" pour valider un Deep Search
-    pub fn click_import_button(&self) -> anyhow::Result<()> {
+    pub async fn click_import_button(&self) -> anyhow::Result<()> {
         let js = r#"
             (function() {
                 let btns = Array.from(document.querySelectorAll('button, [role="button"]'));
@@ -755,13 +597,12 @@ impl NotebookApi {
         "#;
 
         for _ in 0..10 {
-            if let Ok(eval) = self.tab.evaluate(js, false) {
-                if let Some(serde_json::Value::Bool(true)) = eval.value {
-                    info!("✅ Bouton d'importation graphique activé !");
+            if let Ok(eval) = self.tab.evaluate(js).await {
+                if let Some(serde_json::Value::Bool(true)) = eval.value() {
                     return Ok(());
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(500));
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
         Err(anyhow::anyhow!(
             "Impossible de trouver le bouton '+ Importer'"

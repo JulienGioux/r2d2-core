@@ -21,13 +21,12 @@ Dès qu'une fonctionnalité (Feature), une correction de bug (Fix) ou une phase 
    - Exécuter `git add .`
    - Formater une description atomique. Ex : `git commit -m "feat(module): description claire"`
 
-4. **Authentification GitHub Silencieuse (Vault)**
-   - Extraire le token "GITHUB_PERSONAL_ACCESS_TOKEN" depuis le coffre-fort des secrets : `/home/jgx/source/R2D2/data/.secrets.json`.
-   - Exporter ce token silencieusement dans le terminal via la variable `GH_TOKEN`.
+4. **Authentification Globale GitHub (`gh` CLI)**
+   - L'authentification repose sur l'outil officiel. Si vous n'êtes pas connecté, l'agent ou l'utilisateur doit exécuter `gh auth login`. (Vérifiable via `gh auth status`).
 
 5. **Génération de la Pull Request**
    - Propulser la branche : `git push -u origin nom-de-la-branche`
-   - Forger et publier la PR avec l'outil GitHub CLI : `GH_TOKEN=<token> gh pr create --title "..." --body "..."`
+   - Forger et publier la PR avec l'outil GitHub CLI : `gh pr create --title "..." --body "..."`
    - Le "Body" de la PR doit être formaté de façon professionnelle, listant les `Modifications Architectures` et certifiant le succès du `local_ci.sh`.
 
 6. **Passation de pouvoir**

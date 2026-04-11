@@ -59,25 +59,20 @@ impl McpTool for ForgeExpertTool {
         info!("🦇 Déclenchement de la Forge Rust Souveraine : {}", topic);
 
         let topic_clone = topic.to_string();
-        let result_url = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            // Pont automatisé RUST (SovereignBrowser prend en charge le WSL transparent)
-            let browser = SovereignBrowser::connect("Chrome_GOOGLE")?;
-            let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm")?;
-            let api = NotebookApi::new(tab.clone());
 
-            let url = api.create_notebook(&topic_clone)?;
-            let uuid = url.split("/notebook/").last().unwrap_or("");
-            for q in queries.iter() {
-                if let Err(e) = api.add_deep_search_source(uuid, q) {
-                    error!("Avertissement: Échec Deep Search pour '{}': {}", q, e);
-                }
-                std::thread::sleep(std::time::Duration::from_secs(2));
+        let browser = SovereignBrowser::connect("Chrome_GOOGLE").await?;
+        let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm").await?;
+        let api = NotebookApi::new(tab).await;
+
+        let result_url = api.create_notebook(&topic_clone).await?;
+        let uuid = result_url.split("/notebook/").last().unwrap_or("");
+
+        for q in queries.iter() {
+            if let Err(e) = api.add_deep_search_source(uuid, q).await {
+                error!("Avertissement: Échec Deep Search pour '{}': {}", q, e);
             }
-
-            let _ = tab.close_target();
-            Ok(url)
-        })
-        .await??;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
 
         // Auto-Indexation
         {
