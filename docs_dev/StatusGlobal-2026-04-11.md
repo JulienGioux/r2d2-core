@@ -96,11 +96,12 @@ Le système vital interdisant à l'IA de propager un mensonge industriel.
 * **🚧 À Améliorer (Roadmap)** :
   * Plugins d'Ontologie Strictes (Permettre aux banques de brancher des règles algorithmiques financières dures dans l'évaluation).
 
-### 📚 4. La Mémoire d'Entreprise Sécurisée (R2D2-JSONAI & R2D2-CHUNKER & R2D2-TOKENIZER)
-* **État d'achèvement** : **95%**
+### 📚 4. La Mémoire d'Entreprise Sécurisée (R2D2-JSONAI & R2D2-CHUNKER & R2D2-BLACKBOARD)
+* **État d'achèvement** : **98%**
 * **✅ Fonctionnalités Actives (Ce qui marche)** :
   * L'Automate de lexing (`AhoCorasick` LeftmostLongest) ne provoque aucun chevauchement. 
   * Le Chunker s'appuie désormais sur les index (`word_ids`) réels envoyés par le processeur BPE Rust sécurisé, assurant le Zero-Crash UTF-8.
+  * **[TERMINÉ] R2D2-Blackboard Actor-Model** : Refonte intégrale sur un modèle pur Acteur-Model séquentiel. Suppression totale de la "Task Starvation" grâce à un multiplexage `mpsc::channel` strict avec Backpressure. L'ordre causal des insertions (Causalité I/O) est 100% garanti. Isolation totale des "Silent Failures" JSON remplacée par une trace structurelle Uuid.
 * **🚧 À Améliorer (Roadmap)** :
   * Garbage Collection Cognitif : Désindexation automatique des mémoires d'entreprise périmées.
 
@@ -140,6 +141,7 @@ Le système vital interdisant à l'IA de propager un mensonge industriel.
 | **R2D2-Vampire/MCP** | Connectivité logicielle (API/Outils) | 🟢 SCELÉ | **100%** |
 | **R2D2-Paradox** | Cybersécurité et Validation Logique | 🟡 ÉVOLUTIF | **85%** |
 | **R2D2-UI** | Console Administrateur Clients | 🟠 BACKLOG | **80%** |
+| **R2D2-Blackboard**| Typestate et Base Vectorielle Actor-Model | 🟢 SCELÉ | **100%** |
 | **Système Complet** | Intégration Continue (PIPELINE CI/CD)| 🟢 AU VERT | **95%** |
 
 *Note: La compilation complète du projet (Code Cuda, Rust Strict LLVM-COV) garantit actuellement "0 Warnings / 0 Errors" selon l'audit local CI.*
