@@ -122,37 +122,9 @@ async fn main() -> anyhow::Result<()> {
             let validated =
                 ValidatedDataset::<StateContrastive>::new(data_path, dataset_manifest.clone());
 
-            use r2d2_adapter_candle::embedder::CandleEmbedder;
-            use r2d2_registry::{fetcher::ModelFetcher, ModelRegistry};
+            println!("🔥 Initialisation du Tenseur Cible Cuda (JSONAI).... (Embeddings pré-calculés depuis data.jsonl)");
 
-            let registry = ModelRegistry::new("data/store/manifests/");
-            let (_, embedder_config) = registry
-                .find_by_name(&r2d2_registry::types::ModelId("minilm_l6_v2".to_string()))
-                .await
-                .expect("Manifeste minilm introuvable");
-            let local_manifest = ModelFetcher::ensure_downloaded(
-                &embedder_config,
-                "sentence-transformers/all-MiniLM-L6-v2",
-                "main",
-                "model.safetensors",
-            )
-            .await
-            .expect("Failed HF Download");
-
-            println!("🔥 Initialisation du Tenseur Cible Cuda (JSONAI)....");
-            let embedder: std::sync::Arc<dyn r2d2_kernel::ports::TextEmbedder> =
-                std::sync::Arc::new(
-                    tokio::task::spawn_blocking(move || {
-                        CandleEmbedder::new(&local_manifest)
-                            .expect("Erreur instanciation CandleEmbedder")
-                    })
-                    .await?,
-                );
-
-            run_contrastive_training(
-                &validated, &model, params, &device, epochs, &embedder, &varmap,
-            )
-            .await?
+            run_contrastive_training(&validated, &model, params, &device, epochs, &varmap).await?
         }
     };
 
@@ -280,7 +252,6 @@ async fn run_contrastive_training(
     params: ParamsAdamW,
     device: &Device,
     epochs: usize,
-    embedder: &std::sync::Arc<dyn r2d2_kernel::ports::TextEmbedder>,
     varmap: &VarMap,
 ) -> anyhow::Result<f32> {
     use candle_nn::Module;
@@ -288,24 +259,31 @@ async fn run_contrastive_training(
     let file = File::open(&dataset.filepath)?;
     let reader = BufReader::new(file);
 
-    let mut paired_sequences: Vec<(Vec<u32>, String)> = Vec::new();
+    let mut paired_sequences: Vec<(Vec<u32>, Vec<f32>)> = Vec::new();
     for line in reader.lines() {
         let line = line?;
         if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&line) {
-            if let Some(text) = json_val.get("text").and_then(|t| t.as_str()) {
-                if let Some(idx) = text.find(" [/INST] ") {
-                    let mut p_seq: Vec<u32> = text[..idx].bytes().map(|b| b as u32).collect();
-                    p_seq.push(0);
-                    // On garde le concept jsonai en clair pour le passer au MiniLM
-                    let jsonai_str = text[idx + 9..].to_string();
-                    paired_sequences.push((p_seq, jsonai_str));
+            // Le fichier data.jsonl DOIT contenir obligatoirement 'text' (prompt causal) et 'embedding' (cible dense pre-calculée).
+            let text_opt = json_val.get("text").and_then(|t| t.as_str());
+            let emb_opt = json_val.get("embedding").and_then(|v| v.as_array());
+
+            if let (Some(text), Some(emb_array)) = (text_opt, emb_opt) {
+                let mut p_seq: Vec<u32> = text.bytes().map(|b| b as u32).collect();
+                p_seq.push(0);
+
+                let mut emb_vec = Vec::with_capacity(emb_array.len());
+                for val in emb_array {
+                    if let Some(f) = val.as_f64() {
+                        emb_vec.push(f as f32);
+                    }
                 }
+                paired_sequences.push((p_seq, emb_vec));
             }
         }
     }
 
     println!(
-        "   -> {} paires (Prompt/JSONAI) prêtes pour l'InfoNCE Batching.",
+        "   -> {} paires (Prompt / Dense Target) pré-calculées prêtes pour l'InfoNCE Batching. Zéro-VRAM Leak.",
         paired_sequences.len()
     );
 
@@ -340,15 +318,14 @@ async fn run_contrastive_training(
             let mut anchor_tensors = Vec::new();
             let mut pos_tensors = Vec::new();
 
-            for (p_seq, jsonai_str) in chunk {
+            for (p_seq, pos_vec) in chunk {
                 if p_seq.is_empty() {
                     continue;
                 }
 
                 let p_data = Tensor::new(p_seq.as_slice(), device)?;
-                // Génération On-Device O(1) de la cible dense "JSONAI"
-                let pos_vec = embedder.embed_text(jsonai_str).await.map(|v| v.data)?;
-                let pos_data = Tensor::from_vec(pos_vec, (1, 384), device)?;
+                // Utilisation du tenseur pré-calculé
+                let pos_data = Tensor::from_vec(pos_vec.clone(), (1, 384), device)?;
 
                 // Traverse Chimera
                 let (p_hidden, _) = model.forward_hidden(&p_data, None)?;

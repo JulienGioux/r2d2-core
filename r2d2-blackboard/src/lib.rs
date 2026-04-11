@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use pgvector::Vector;
 use r2d2_jsonai::{ConsensusLevel, JsonAiV3};
-use r2d2_kernel::Validated;
+use r2d2_kernel::Persistent;
 use r2d2_secure_mem::SecureMemGuard;
 use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
 use thiserror::Error;
@@ -51,7 +51,7 @@ pub trait GlobalBlackboard {
     /// Dès que l'écriture est certifiée sur disque, le Guard est détruit en RAM (Zeroize).
     async fn anchor_fragment(
         &self,
-        guard: SecureMemGuard<Validated>,
+        guard: SecureMemGuard<Persistent>,
     ) -> Result<String, BlackboardError>;
 }
 
@@ -94,22 +94,21 @@ impl GlobalBlackboard for PostgresBlackboard {
     #[instrument(skip(self, guard))]
     async fn anchor_fragment(
         &self,
-        guard: SecureMemGuard<Validated>,
+        guard: SecureMemGuard<Persistent>,
     ) -> Result<String, BlackboardError> {
-        // 1. Ouvrir le coffre sécurisé pour exposer le payload Validé
-        let validated = guard.expose_payload();
+        // 1. Ouvrir le coffre sécurisé pour exposer le payload Persistant
+        let persistent = guard.expose_payload();
 
         // 2. Parser le payload JSONAI strict
-        let jsonai: JsonAiV3 = serde_json::from_str(&validated.payload)?;
+        let jsonai: JsonAiV3 = serde_json::from_str(&persistent.payload)?;
 
         info!(
             "Ancrage du fragment [{}] dans le Blackboard PostgreSQL (Consensus: {:?})",
             jsonai.id, jsonai.consensus
         );
 
-        // 3. TODO: Générer un vecteur dynamique si ce fragment n'en a pas
-        // Pour ce MVP, on injecte un vecteur nul (1024 dims) si non défini.
-        let default_embedding = Vector::from(vec![0.0; 1024]);
+        // 3. Extraction vectorielle forte via l'Axiome MLOps (Éradication du Vec 0.0)
+        let persistent_embedding = Vector::from(persistent.embedding.clone());
 
         let payload_value = serde_json::to_value(&jsonai)?;
 
@@ -135,8 +134,8 @@ impl GlobalBlackboard for PostgresBlackboard {
             .bind(format!("{:?}", jsonai.belief_state))
             .bind(format!("{:?}", jsonai.consensus))
             .bind(&payload_value)
-            .bind(default_embedding.clone())
-            .bind(&validated.proof_of_inference)
+            .bind(persistent_embedding.clone())
+            .bind(&persistent.proof_of_inference)
             .execute(&self.pool)
             .await;
 

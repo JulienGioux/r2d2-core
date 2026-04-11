@@ -11,7 +11,12 @@ L'environnement cible est un environnement matériel fortement contraint :
 - RAM Système : 16 Go de RAM (dont 12 Go partagés et exploitables pour le offloading).
 - VRAM GPU Critiquement Limitée : Carte Nvidia RTX 3060 (Laptop) offrant un maximum de 3.5 Go de VRAM utile contiguë après overhead de l'OS.
 
-Cette contrainte de 3.5 Go de VRAM dicte l'ensemble des choix d'ingénierie tensorielle, bannissant les architectures monolithiques naïves au profit d'une frugalité chirurgicale.
+La contrainte de 3.5 Go de VRAM dicte l'ensemble des choix d'ingénierie tensorielle, bannissant les architectures monolithiques naïves au profit d'une frugalité chirurgicale.
+
+**NOTE STRATÉGIQUE (PHASE 4 - Validation de Sécurité et Métal) :**
+- **Sandboxing Natif :** Le projet R2D2 tout entier s'exécute dans un conteneur Podman (Fedora). Toute commande shell (`run_command`) lancée par les agents est par définition "sandboxée" sans risque pour le système hôte.
+- **Éradication des Mocks :** La fonction `ChimeraModel::new_mocked` a été physiquement bannie. L'architecture est passée en pleine production (Vrai Tenseur/Poids imposés).
+- **FFI Sécurisé :** Les pointeurs C bruts (`*const u8` ou `*mut f32`) sont obsolètes et interdits. 100% de l'interface CUDA se fait via des `CudaSlice<T>` (cudarc) gérés par le Borrow Checker Rust.
 
 ## 2. Axiome I : Architecture Hexagonale Stricte (DDD)
 

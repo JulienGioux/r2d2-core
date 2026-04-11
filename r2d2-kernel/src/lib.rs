@@ -58,6 +58,24 @@ impl Zeroize for Validated {
     }
 }
 
+/// Fragment structuré, validé et doté de son identité vectorielle dense (Embedding).
+/// C'est le seul état autorisé à s'ancrer dans le Blackboard.
+#[derive(Debug, Clone)]
+pub struct Persistent {
+    pub payload: String,
+    pub proof_of_inference: String,
+    pub embedding: Vec<f32>,
+}
+
+impl Zeroize for Persistent {
+    fn zeroize(&mut self) {
+        self.payload.zeroize();
+        self.proof_of_inference.zeroize();
+        // Zeroize on primitive Vec requires zeroize feature or explicit iter
+        self.embedding.iter_mut().for_each(|f| *f = 0.0);
+    }
+}
+
 /// Conteneur immuable hébergeant la donnée avec la garantie du compilateur.
 pub struct Fragment<State> {
     state: State,
@@ -122,9 +140,27 @@ impl Fragment<Unverified> {
 }
 
 impl Fragment<Validated> {
-    /// Ancre la donnée validée dans le Blackboard de la Ruche.
+    /// Permet de lire le contenu validé de manière sûre au sein du tunnel de typestate.
+    pub fn expose_payload(&self) -> &Validated {
+        &self.state
+    }
+
+    /// Enrichit le fragment validé avec son empreinte dense vectorielle.
+    pub fn embed(self, embedding: Vec<f32>) -> Fragment<Persistent> {
+        Fragment {
+            state: Persistent {
+                payload: self.state.payload,
+                proof_of_inference: self.state.proof_of_inference,
+                embedding,
+            },
+        }
+    }
+}
+
+impl Fragment<Persistent> {
+    /// Ancre la donnée validée et vectorisée dans le Blackboard de la Ruche.
     /// Renvoie un `SecureMemGuard` qui s'assurera de la Zeroization de la RAM en sortie de bloc.
-    pub fn finalize(self) -> SecureMemGuard<Validated> {
+    pub fn finalize(self) -> SecureMemGuard<Persistent> {
         SecureMemGuard::new(zeroize::Zeroizing::new(self.state))
     }
 }
@@ -156,10 +192,12 @@ mod tests {
 
         // Impossible de compiler: let err = unverified.finalize();
 
-        let secure_mem = validated.finalize();
+        let persistent = validated.embed(vec![0.1; 384]);
+        let secure_mem = persistent.finalize();
         assert_eq!(
             secure_mem.expose_payload().proof_of_inference,
             "poi_0xABCDEF_R2D2"
         );
+        assert_eq!(secure_mem.expose_payload().embedding.len(), 384);
     }
 }

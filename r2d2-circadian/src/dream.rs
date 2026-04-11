@@ -83,7 +83,16 @@ impl DreamSimulator {
         match unverified.verify(self.solver.as_ref()).await {
             Ok(validated) => {
                 info!("🧠 [Dream Results] Consensus MCTS validé par le ParadoxEngine !");
-                let guard = validated.finalize();
+
+                let vec_json = self
+                    .cortex
+                    .interact_with("Multilingual-E5-Small", &validated.expose_payload().payload)
+                    .await
+                    .unwrap_or_else(|_| "[]".to_string());
+                let embed_vec: Vec<f32> = serde_json::from_str(&vec_json).unwrap_or_default();
+
+                let persistent = validated.embed(embed_vec);
+                let guard = persistent.finalize();
                 let saved_id = self.blackboard.anchor_fragment(guard).await?;
                 info!("👉 Nouvelle intuition gravée: {}", saved_id);
 

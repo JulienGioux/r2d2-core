@@ -51,3 +51,8 @@ Le `r2d2-bitnet` n'autorisera aucune régression de convolution sur le Host. Tou
 Pour respecter la doctrine de non-duplication RAM :
 - Le module s'enclavera sous la dépendance `candle_core`.
 - Tous les modules d'optimisations mathématiques bas-niveau (Hadamard FWHT) devront attaquer l'opérateur "inplace" du tenseur Candle, émulant une architecture C/SIMD native sans sortie du graphe computationnel Rust.
+
+## 4. LOI FFI : SÉCURITÉ MÉMOIRE ABSOLUE (`CudaSlice<T>`) ET DESTRUCTION DES "MOCKS"
+Afin de garantir une stabilité logicielle inébranlable (Zéro Segfault/Access Violation), la doctrine de l'écosystème R2D2 proscrit formellement deux éléments majeurs :
+- **Les Pointeurs C Bruts** : Plus aucune allocation ou interface Rust-CUDA n'utilise de pointeurs instables (`*const u8` ou `*mut f32`). L'intégralité du passage par FFI (Foreign Function Interface) s'effectue exclusivement via les primitives sécurisées de la crate `cudarc` (ex: `driver::CudaSlice<T>`). La gestion de la mémoire vidéo (VRAM) est ainsi 100% déléguée au Borrow Checker Rust (protection RAII).
+- **Les Fallbacks Imaginaires (new_mocked)** : La phase de prototypage (Mocks logiciels) est officiellement close. Le système interdit le démarrage de l'inférence via un faux modèle (ex. `ChimeraModel::new_mocked`). Le code Rust manipule les poids canoniques quantifiés concrets dès le *cold-start*. Le "Zéro-Trust" s'applique aussi à l'inférence factice.
