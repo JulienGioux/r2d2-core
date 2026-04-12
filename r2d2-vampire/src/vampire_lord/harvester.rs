@@ -2,7 +2,6 @@ use super::notebook_api::NotebookApi;
 use r2d2_blackboard::{FlashcardTaskRow, PostgresBlackboard, TaskState};
 use std::sync::Arc;
 use tokio::fs;
-use std::path::Path;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout, Duration};
 use tracing::{error, info, instrument, warn};
@@ -129,13 +128,22 @@ impl Harvester {
                 let google_task_id = match &task.google_task_id {
                     Some(id) => id,
                     None => {
-                        error!("Tâche {} bloque en Generating sans google_task_id !", task.id);
-                        let _ = self.blackboard.update_flashcard_task_status(&task.id, TaskState::Failed, None, None).await;
+                        error!(
+                            "Tâche {} bloque en Generating sans google_task_id !",
+                            task.id
+                        );
+                        let _ = self
+                            .blackboard
+                            .update_flashcard_task_status(&task.id, TaskState::Failed, None, None)
+                            .await;
                         return;
                     }
                 };
 
-                info!("🔍 Vérification de l'artéfact {} pour la tâche {}", google_task_id, task.id);
+                info!(
+                    "🔍 Vérification de l'artéfact {} pour la tâche {}",
+                    google_task_id, task.id
+                );
                 // Le filtre réseau n'a besoin que d'un &str, on évite le clone!
                 let expert_id_ref: &str = &task.expert_id;
                 let poll_future = api.list_artifacts(expert_id_ref);
@@ -146,18 +154,32 @@ impl Harvester {
                         if let Some(artifact) = artifact_opt {
                             match artifact.status {
                                 crate::vampire_lord::types::ArtifactStatus::Completed => {
-                                    info!("✅ Artefact {} terminé ! Téléchargement en cours...", google_task_id);
-                                    match api.fetch_artifact_data(expert_id_ref, google_task_id).await {
+                                    info!(
+                                        "✅ Artefact {} terminé ! Téléchargement en cours...",
+                                        google_task_id
+                                    );
+                                    match api
+                                        .fetch_artifact_data(expert_id_ref, google_task_id)
+                                        .await
+                                    {
                                         Ok(data) => {
                                             // Option A: Sauvegarde en pur fichier .json et traçabilité en DB
-                                            let dir_path = format!("data/artifacts/{}", expert_id_ref);
+                                            let dir_path =
+                                                format!("data/artifacts/{}", expert_id_ref);
                                             if let Err(e) = fs::create_dir_all(&dir_path).await {
                                                 error!("Impossible de créer le dossier de stockage: {}", e);
                                                 return;
                                             }
-                                            
-                                            let file_path = format!("{}/{}.json", dir_path, google_task_id);
-                                            match fs::write(&file_path, serde_json::to_string_pretty(&data).unwrap_or_default()).await {
+
+                                            let file_path =
+                                                format!("{}/{}.json", dir_path, google_task_id);
+                                            match fs::write(
+                                                &file_path,
+                                                serde_json::to_string_pretty(&data)
+                                                    .unwrap_or_default(),
+                                            )
+                                            .await
+                                            {
                                                 Ok(_) => {
                                                     info!("💾 Artefact sauvegardé avec succès dans: {}", file_path);
                                                     // On garde le path dans le JSON du payload de la DB
@@ -165,11 +187,22 @@ impl Harvester {
                                                         "storage_path": file_path,
                                                         "type": "google_flashcard"
                                                     });
-                                                    let _ = self.blackboard.update_flashcard_task_status(&task.id, TaskState::Completed, task.google_task_id.clone(), Some(db_result)).await;
+                                                    let _ = self
+                                                        .blackboard
+                                                        .update_flashcard_task_status(
+                                                            &task.id,
+                                                            TaskState::Completed,
+                                                            task.google_task_id.clone(),
+                                                            Some(db_result),
+                                                        )
+                                                        .await;
                                                     // NB: On devrait aussi attacher db_result à la tâche. (Actuellement update_flashcard_task_status ne prend que task_id, state, google_id)
                                                     // Idéalement on ajoute une méthode `complete_task_with_result`.
                                                 }
-                                                Err(e) => error!("❌ Erreur d'écriture de l'artefact: {}", e),
+                                                Err(e) => error!(
+                                                    "❌ Erreur d'écriture de l'artefact: {}",
+                                                    e
+                                                ),
                                             }
                                         }
                                         Err(e) => {
@@ -178,15 +211,29 @@ impl Harvester {
                                     }
                                 }
                                 crate::vampire_lord::types::ArtifactStatus::Failed => {
-                                    error!("❌ NotebookLM annonce un échec (status: Failed) sur {}", google_task_id);
-                                    let _ = self.blackboard.update_flashcard_task_status(&task.id, TaskState::Failed, None, None).await;
+                                    error!(
+                                        "❌ NotebookLM annonce un échec (status: Failed) sur {}",
+                                        google_task_id
+                                    );
+                                    let _ = self
+                                        .blackboard
+                                        .update_flashcard_task_status(
+                                            &task.id,
+                                            TaskState::Failed,
+                                            None,
+                                            None,
+                                        )
+                                        .await;
                                 }
                                 _ => {
                                     // Generating ou autre : on continue d'attendre au prochain cycle.
                                 }
                             }
                         } else {
-                            warn!("🤔 L'artefact {} n'est pas encore visible dans la liste.", google_task_id);
+                            warn!(
+                                "🤔 L'artefact {} n'est pas encore visible dans la liste.",
+                                google_task_id
+                            );
                         }
                     }
                     Ok(Err(e)) => {
