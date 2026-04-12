@@ -37,6 +37,55 @@ pub struct McpToolDbRow {
     pub is_enabled: bool,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum TaskState {
+    Queued,
+    Generating,
+    Completed,
+    Failed,
+    Expired,
+}
+
+impl std::str::FromStr for TaskState {
+    type Err = String;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "QUEUED" => Ok(TaskState::Queued),
+            "GENERATING" => Ok(TaskState::Generating),
+            "COMPLETED" => Ok(TaskState::Completed),
+            "FAILED" => Ok(TaskState::Failed),
+            "EXPIRED" => Ok(TaskState::Expired),
+            _ => Err(format!("Statut de tâche inconnu: {}", s)),
+        }
+    }
+}
+
+impl std::fmt::Display for TaskState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            TaskState::Queued => "QUEUED",
+            TaskState::Generating => "GENERATING",
+            TaskState::Completed => "COMPLETED",
+            TaskState::Failed => "FAILED",
+            TaskState::Expired => "EXPIRED",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FlashcardTaskRow {
+    pub id: String, // UUID
+    pub expert_id: String,
+    pub prompt: Option<String>,
+    pub difficulty: Option<i32>,
+    pub quantity: Option<i32>,
+    pub status: TaskState,
+    pub google_task_id: Option<String>,
+    pub created_at: sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>,
+    pub expires_at: Option<sqlx::types::chrono::DateTime<sqlx::types::chrono::Utc>>,
+}
+
 #[derive(Debug, Error)]
 pub enum BlackboardError {
     #[error("Erreur de connexion à la base de données: {0}")]
@@ -309,6 +358,65 @@ impl PostgresBlackboard {
                 id: id.to_string(),
                 reply_to,
             })
+            .await
+            .map_err(|_| BlackboardError::ActorDead)?;
+
+        rx.await.map_err(|_| BlackboardError::ActorDead)?
+    }
+
+    #[instrument(skip(self))]
+    pub async fn enqueue_flashcard_task(
+        &self,
+        expert_id: &str,
+        prompt: Option<String>,
+        difficulty: Option<i32>,
+        quantity: Option<i32>,
+    ) -> Result<String, BlackboardError> {
+        let (reply_to, rx) = oneshot::channel();
+        self.sender
+            .send(BlackboardCommand::EnqueueFlashcardTask {
+                expert_id: expert_id.to_string(),
+                prompt,
+                difficulty,
+                quantity,
+                reply_to,
+            })
+            .await
+            .map_err(|_| BlackboardError::ActorDead)?;
+
+        rx.await.map_err(|_| BlackboardError::ActorDead)?
+    }
+
+    #[instrument(skip(self))]
+    pub async fn update_flashcard_task_status(
+        &self,
+        id: &str,
+        new_status: TaskState,
+        google_task_id: Option<String>,
+        result: Option<serde_json::Value>,
+    ) -> Result<(), BlackboardError> {
+        let (reply_to, rx) = oneshot::channel();
+        self.sender
+            .send(BlackboardCommand::UpdateFlashcardTaskStatus {
+                id: id.to_string(),
+                new_status: new_status.to_string(),
+                google_task_id,
+                result,
+                reply_to,
+            })
+            .await
+            .map_err(|_| BlackboardError::ActorDead)?;
+
+        rx.await.map_err(|_| BlackboardError::ActorDead)?
+    }
+
+    #[instrument(skip(self))]
+    pub async fn get_pending_flashcard_tasks(
+        &self,
+    ) -> Result<Vec<FlashcardTaskRow>, BlackboardError> {
+        let (reply_to, rx) = oneshot::channel();
+        self.sender
+            .send(BlackboardCommand::GetPendingFlashcardTasks { reply_to })
             .await
             .map_err(|_| BlackboardError::ActorDead)?;
 

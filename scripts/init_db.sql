@@ -40,3 +40,15 @@ CREATE TABLE IF NOT EXISTS fragment_lineage (
     relation_type VARCHAR(100) NOT NULL, -- ex: "Requires", "Entails"
     PRIMARY KEY (parent_id, child_id)
 );
+-- 6. Table de File d'Attente pour les Tâches Batch NotebookLM (Worker/Scheduler)
+CREATE TABLE IF NOT EXISTS flashcard_tasks (
+    id UUID PRIMARY KEY,
+    expert_id VARCHAR(255) NOT NULL,
+    prompt TEXT,
+    difficulty INT,
+    quantity INT,
+    status VARCHAR(50) NOT NULL, -- "QUEUED", "GENERATING", "COMPLETED", "FAILED", "EXPIRED"
+    google_task_id VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ
+);

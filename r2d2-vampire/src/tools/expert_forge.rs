@@ -62,7 +62,7 @@ impl McpTool for ForgeExpertTool {
 
         let browser = SovereignBrowser::connect("Chrome_GOOGLE").await?;
         let tab = r2d2_browser::SovereignBrowser::get_or_new_tab(&browser, "notebooklm").await?;
-        let api = NotebookApi::new(tab).await;
+        let api = NotebookApi::new(tab, None).await;
 
         let result_url = api.create_notebook(&topic_clone).await?;
         let uuid = result_url.split("/notebook/").last().unwrap_or("");
