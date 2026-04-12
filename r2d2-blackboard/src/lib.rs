@@ -393,6 +393,7 @@ impl PostgresBlackboard {
         id: &str,
         new_status: TaskState,
         google_task_id: Option<String>,
+        result: Option<serde_json::Value>,
     ) -> Result<(), BlackboardError> {
         let (reply_to, rx) = oneshot::channel();
         self.sender
@@ -400,6 +401,7 @@ impl PostgresBlackboard {
                 id: id.to_string(),
                 new_status: new_status.to_string(),
                 google_task_id,
+                result,
                 reply_to,
             })
             .await

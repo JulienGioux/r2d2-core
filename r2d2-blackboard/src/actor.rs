@@ -93,6 +93,7 @@ pub enum BlackboardCommand {
         id: String,
         new_status: String,
         google_task_id: Option<String>,
+        result: Option<serde_json::Value>,
         reply_to: oneshot::Sender<Result<(), BlackboardError>>,
     },
     GetPendingFlashcardTasks {
@@ -216,10 +217,11 @@ impl BlackboardActor {
                     id,
                     new_status,
                     google_task_id,
+                    result,
                     reply_to,
                 } => {
                     let res = self
-                        .handle_update_flashcard_status(id, new_status, google_task_id)
+                        .handle_update_flashcard_status(id, new_status, google_task_id, result)
                         .await;
                     let _ = reply_to.send(res);
                 }
@@ -623,12 +625,14 @@ impl BlackboardActor {
         id: String,
         new_status: String,
         google_task_id: Option<String>,
+        result: Option<serde_json::Value>,
     ) -> Result<(), BlackboardError> {
         sqlx::query(
-            "UPDATE flashcard_tasks SET status = $1, google_task_id = COALESCE($2, google_task_id) WHERE id = $3",
+            "UPDATE flashcard_tasks SET status = $1, google_task_id = COALESCE($2, google_task_id), result = COALESCE($3, result) WHERE id = $4",
         )
         .bind(new_status)
         .bind(google_task_id)
+        .bind(result)
         .bind(uuid::Uuid::parse_str(&id).unwrap())
         .execute(&self.pool)
         .await?;
