@@ -711,6 +711,8 @@ impl NotebookApi {
             )
             .await?;
 
+        tracing::info!("DEBUG root_res = {:?}", root_res);
+
         // Parse, don't validate: Extract artifact_id at [0][0]
         let artifact_id = root_res
             .as_array()
@@ -792,11 +794,7 @@ impl NotebookApi {
             "Téléchargement et Extraction Data pour l'artifact {}",
             artifact_id
         );
-        let params = serde_json::json!([
-            format!("[\"{}\"]", artifact_id),
-            serde_json::Value::Null,
-            "generic"
-        ]);
+        let params = serde_json::json!([artifact_id]);
 
         let res = self
             .execute_rpc(
